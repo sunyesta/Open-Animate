@@ -1151,6 +1151,7 @@ static void controller_spots_panel_body(Context &C, Layer &armature, const Bone 
       under_d = d;
     }
   }
+  bone_fix_lines_draw(dl, bone_fix_knob_lines(doc, armature, knob_in), to_screen);
   /* Where the knob is. */
   const ImVec2 k = to_screen(knob_at);
   const ImU32 knob_col = IM_COL32(0xf0, 0xf0, 0xf0, 230);
@@ -1753,6 +1754,23 @@ static void bone_fixes_panel(Context &C, Layer &armature)
                 : "Where its bones are on the last frame they are keyed on: click to open it there");
       ImGui::PopID();
     }
+    /* How it fades as its bones leave its line. */
+    label("Fade");
+    ImGui::SetNextItemWidth(-1.0f);
+    const bool smooth = fix->fade == BoneFixFade::Smooth;
+    if (ImGui::BeginCombo("##fade", smooth ? "Smooth" : "Linear")) {
+      if (ImGui::Selectable("Linear", !smooth)) {
+        operator_call(C, "armature.bone_fix_set", {{"name", name}, {"fade", "LINEAR"}});
+      }
+      tip("As its bones leave its line it fades in proportion: halfway back to rest, half of it plays");
+      if (ImGui::Selectable("Smooth", smooth)) {
+        operator_call(C, "armature.bone_fix_set", {{"name", name}, {"fade", "SMOOTH"}});
+      }
+      tip("It eases in and out: less of it near rest, more near its line, the same halfway. Overlapping fixes blend "
+          "more softly");
+      ImGui::EndCombo();
+    }
+    tip("How it fades as its bones leave its line");
     ImGui::EndTable();
   }
   ImGui::PopID();

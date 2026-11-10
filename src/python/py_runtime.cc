@@ -3259,6 +3259,21 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         d["knob"] = py::make_tuple(knob.x, knob.y);
         d["knob_shown"] = py::make_tuple(shown.x, shown.y);
         d["knob_playing"] = py::make_tuple(playing.x, playing.y);
+        py::list fix_lines;
+        for (const BoneFixKnobLine &line : bone_fix_knob_lines(*current_context().document, layer, b)) {
+          py::dict l;
+          py::list points;
+          for (const float2 &p : line.points) {
+            points.append(py::make_tuple(p.x, p.y));
+          }
+          l["name"] = line.name;
+          l["points"] = points;
+          l["now"] = py::make_tuple(line.now.x, line.now.y);
+          l["strength"] = line.strength;
+          l["edited"] = line.edited;
+          fix_lines.append(l);
+        }
+        d["fix_lines"] = fix_lines;
         py::list spots;
         for (const ControllerSpot &spot : b.controller_spots) {
           spots.append(py::make_tuple(spot.name, py::make_tuple(spot.at.x, spot.at.y)));
@@ -5147,6 +5162,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["frame"] = play.frame;
       d["strength"] = play.strength;
       d["auto_name"] = f.auto_name;
+      d["fade"] = f.fade == BoneFixFade::Smooth ? "SMOOTH" : "LINEAR";
       out.append(d);
     }
     return out;

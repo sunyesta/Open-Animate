@@ -90,6 +90,16 @@ rig.bone_set("tilt", angle=1.0)
 go(10)
 assert ops.anim.action_set(name="") == {'FINISHED'}
 go(0)
+# The fix: following dial and nod, from rest to both turned, the Knob Parent 10 frames past where the dial has it.
+assert ops.armature.bone_fix_new(bones="dial,nod") == {'FINISHED'}
+doc.frame_current = 10
+rig.bone_set("dial", angle=1.0)
+rig.bone_set("nod", angle=1.0)
+go(10)  # the dial's action under it moves the Knob Parent 10 first
+rig.bone_set("center", position=(20 * size, 0.0))
+go(10)
+assert ops.anim.action_set(name="") == {'FINISHED'}
+go(0)
 
 
 def shape():
@@ -120,5 +130,10 @@ rig.bone_set("dial", angle=1.0)
 go(30)
 shown = matches_shown(30, "a head turn plays before the knob picks its frames")
 assert close(shown, (10, 0), 1e-2), ("the head turn moved the knob 10 frames", shown)
+doc.frame_current = 30
+rig.bone_set("nod", angle=1.0)
+go(30)
+shown = matches_shown(30, "the fix on the head turn plays before the knob picks its frames")
+assert close(shown, (20, 0), 1e-2), ("the fix moved the knob 10 frames more", shown)
 
 print("Knob order tests passed")

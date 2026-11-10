@@ -377,10 +377,12 @@ class _Layer:
     def bone_fixes(self):
         """A bone layer's fix actions that follow bones (the Bone tab's Fix Actions): [{"name", "follows" (bone
         names), "start" (1), "end" (the last frame its bones are keyed on in it), "frame" (the frame of it playing
-        now), "strength" (how much plays now, 0-1), "auto_name" (named after the actions playing where it ends)}].
+        now), "strength" (how much plays now, 0-1), "auto_name" (named after the actions playing where it ends),
+        "fade" ("LINEAR" or "SMOOTH": how it fades as its bones leave its line)}].
         Its keys on the bones it follows (an angle, a knob's place) are its line from frame 1 to its end; its other
         keys the fix along it. Make one with oanim.ops.armature.bone_fix_new(bones="a,b") (else the selected bones),
-        change what it follows with bone_fix_follow(name=, bones=, follow=0|1)."""
+        change what it follows with bone_fix_follow(name=, bones=, follow=0|1) and its fade with
+        bone_fix_set(name=, fade=)."""
         return [dict(f) for f in _oanim.layer_bone_fixes(self._id)]
 
     def field_state(self, path):
@@ -405,8 +407,9 @@ class _Layer:
         layer's space), type ("REGULAR" or "CONTROLLER_2D"), and controller and held for a bone linked to a controller. A
         controller also has controller_actions (by side, "RIGHT", "LEFT", "UP", "DOWN"), controller_frame_size,
         controller_box (its lowest and highest corners, in frames from the rest point), knob (in frames), knob_shown
-        (inside its own actions), knob_playing (where its actions really are) and controller_spots ([(name, (x, y))],
-        its named places, in frames; armature.controller_spot_add, _remove, _rename, _order, _go(name=, hold=), _move
+        (inside its own actions), knob_playing (where its actions really are), fix_lines (the fixes following it, as
+        drawn in its box: [{"name", "points" (its line in frames), "now" (where it plays), "strength", "edited"}]) and
+        controller_spots ([(name, (x, y))], its named places, in frames; armature.controller_spot_add, _remove, _rename, _order, _go(name=, hold=), _move
         and controller_spots_corners). Convert with
         oanim.ops.armature.bone_convert, fill the sides with controller_side, controller_action_new and
         controller_mirror. A regular or pin bone has turn_actions (its action bone actions counterclockwise and clockwise,

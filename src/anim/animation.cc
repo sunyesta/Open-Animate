@@ -19,6 +19,7 @@
 #include <typeinfo>
 #include <unordered_set>
 
+#include "anim/action_mirror.hh"
 #include "anim/controller.hh"
 #include "anim/deform.hh"
 #include "core/log.hh"
@@ -2612,9 +2613,42 @@ std::vector<std::pair<std::string, float>> action_bone_actions_playing(const Lay
 }
 
 /* Whether action bone action `by` turns the bone of action bone action `name`. Actions key every bone, most held
- * still. */
+ * still. A fix that follows bones is one too: it waits for what moves its bones, and what it moves waits for it. */
 static bool action_bone_action_turns(const Layer &owner, const std::string &by, const std::string &name)
 {
+  /* A fix's keys on the bones it follows are its line: they never move them. */
+  const BoneFix *by_fix = bone_fix_find(owner, by);
+  const auto traced = [&](const Bone &b) {
+    return by_fix && std::find(by_fix->follows.begin(), by_fix->follows.end(), b.id) != by_fix->follows.end();
+  };
+  if (const BoneFix *fix = bone_fix_find(owner, name)) {
+    if (by == name) {
+      return false;
+    }
+    for (const uint64_t id : fix->follows) {
+      const Bone *b = bone_find(owner, id);
+      if (!b || traced(*b)) {
+        continue;
+      }
+      /* What moves a knob, or turns a bone, moves the bone's actions: asked of them. */
+      for (const std::string &action : owner.actions) {
+        if (action != by && action_bone_of(owner, action) == b && !bone_fix_find(owner, action) &&
+            action_bone_action_turns(owner, by, action))
+        {
+          return true;
+        }
+      }
+      if (!bone_is_controller(*b)) {
+        const auto it = b->angle_keys.actions.find(by);
+        if (it != b->angle_keys.actions.end() &&
+            std::any_of(it->second.begin(), it->second.end(), [](const Key<float> &k) { return std::abs(k.value) > 1e-6f; }))
+        {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
   /* An action played at its own Frame: `by` keys that Frame (one action playing another). */
   if (by != name && action_frame_by(owner, name) == ActionFrameBy::Own) {
     const ActionPlay *a = action_play_find(owner, name);
@@ -2631,7 +2665,7 @@ static bool action_bone_action_turns(const Layer &owner, const std::string &by, 
   }
   const auto moves_knob = [&](const Bone &knob) {
     const auto it = knob.position_keys.actions.find(by);
-    return it != knob.position_keys.actions.end() &&
+    return !traced(knob) && it != knob.position_keys.actions.end() &&
            std::any_of(it->second.begin(), it->second.end(), [](const Key<float2> &k) {
              return std::abs(k.value.x) > 1e-6f || std::abs(k.value.y) > 1e-6f;
            });
@@ -2647,7 +2681,7 @@ static bool action_bone_action_turns(const Layer &owner, const std::string &by, 
      * hangs from) moves it there, so it plays first (a head turn before the eyes riding it). */
     std::vector<const std::string *> movers = {&by};
     const auto moves = [&](const Bone &b) {
-      return std::any_of(movers.begin(), movers.end(), [&](const std::string *action) {
+      return !traced(b) && std::any_of(movers.begin(), movers.end(), [&](const std::string *action) {
         const auto pos = b.position_keys.actions.find(*action);
         const auto ang = b.angle_keys.actions.find(*action);
         return (pos != b.position_keys.actions.end() &&
@@ -2691,9 +2725,8 @@ static bool action_bone_action_turns(const Layer &owner, const std::string &by, 
     return true;
   }
   const auto it = bone->angle_keys.actions.find(by);
-  return it != bone->angle_keys.actions.end() && std::any_of(it->second.begin(), it->second.end(), [](const Key<float> &k) {
-           return std::abs(k.value) > 1e-6f;
-         });
+  return !traced(*bone) && it != bone->angle_keys.actions.end() &&
+         std::any_of(it->second.begin(), it->second.end(), [](const Key<float> &k) { return std::abs(k.value) > 1e-6f; });
 }
 
 /* Plays the action bone actions `frames_now` says are playing, an action bone action that turns another's bone (a dial
@@ -3087,6 +3120,16 @@ template<typename T> struct BoneFixSampler {
 };
 
 static constexpr float BONE_FIX_STEP = 0.25f;
+/* How far off its line a fix whose bones go more than one way along it reaches: it fades to nothing half its length
+ * away (each way measured against how far it goes along the line). */
+static constexpr float BONE_FIX_REACH = 0.5f;
+
+/* A share (0 to 1) of a fix as `fade` shapes it. */
+static float bone_fix_faded(float share, BoneFixFade fade)
+{
+  share = std::clamp(share, 0.0f, 1.0f);
+  return fade == BoneFixFade::Smooth ? share * share * (3.0f - 2.0f * share) : share;
+}
 
 /* `now(i, axis)`: where bone `i` of `owner` is (its turn from its setup; a knob's frames on that axis). */
 template<typename NowFn>
@@ -3161,7 +3204,7 @@ static BoneFixPlay bone_fix_play_with(const Layer &owner, const BoneFix &fix, bo
       moving.push_back({&w, *hi - *lo});
     }
     else if (std::abs(w.line.front()) > w.eps) {
-      play.strength *= std::clamp(w.now / w.line.front(), 0.0f, 1.0f);
+      play.strength *= bone_fix_faded(w.now / w.line.front(), fix.fade);
     }
   }
   if (moving.empty()) {
@@ -3189,6 +3232,11 @@ static BoneFixPlay bone_fix_play_with(const Layer &owner, const BoneFix &fix, bo
       best = off;
       play.frame = t_of(s) + (t_of(n) - t_of(s)) * u;
     }
+  }
+  /* Going more than one way along it, the bones can leave the line: it fades as they go (a diagonal across a knob's box
+   * would otherwise play all of it anywhere in the box). */
+  if (moving.size() >= 2) {
+    play.strength *= bone_fix_faded(1.0f - std::sqrt(best) / BONE_FIX_REACH, fix.fade);
   }
   return play;
 }
@@ -3329,6 +3377,33 @@ static float2 bone_fix_at(const Bone &b, const BoneFix &fix, bool edited, float 
   return {BoneFixSampler<float>(bone_fix_keys(b.angle_keys, fix.name, edited), setup).at(frame) - setup, 0.0f};
 }
 
+std::vector<BoneFixKnobLine> bone_fix_knob_lines(const Document &doc, const Layer &owner, const Bone &knob)
+{
+  std::vector<BoneFixKnobLine> out;
+  if (!bone_is_controller(knob)) {
+    return out;
+  }
+  for (const BoneFix &fix : owner.bone_fixes) {
+    if (std::find(fix.follows.begin(), fix.follows.end(), knob.id) == fix.follows.end()) {
+      continue;
+    }
+    BoneFixKnobLine line;
+    line.name = fix.name;
+    line.edited = owner.id == doc.action_layer && doc.action == fix.name;
+    const BoneFixPlay play = bone_fix_play(owner, fix, line.edited);
+    for (float t = play.start;; t = std::min(t + BONE_FIX_STEP, play.end)) {
+      line.points.push_back(bone_fix_at(knob, fix, line.edited, t));
+      if (t >= play.end) {
+        break;
+      }
+    }
+    line.now = bone_fix_at(knob, fix, line.edited, play.frame);
+    line.strength = action_muted(owner, fix.name) ? 0.0f : play.strength;
+    out.push_back(std::move(line));
+  }
+  return out;
+}
+
 std::string bone_fix_pose_label(const Layer &owner, const BoneFix &fix, bool edited, float frame)
 {
   std::string out;
@@ -3448,6 +3523,75 @@ std::string document_bone_fix_new(Document &doc, uint64_t owner_id, const std::v
   return name;
 }
 
+std::string document_bone_fix_mirror(Document &doc, uint64_t owner_id, const std::string &name, bool *r_replaced)
+{
+  if (r_replaced) {
+    *r_replaced = false;
+  }
+  Layer *owner = layer_find(doc, owner_id);
+  const BoneFix *found = owner ? bone_fix_find(*owner, name) : nullptr;
+  if (!found) {
+    return {};
+  }
+  const BoneFix fix = *found;
+  BoneFix mirrored = fix;
+  bool sided = false;
+  for (uint64_t &id : mirrored.follows) {
+    const uint64_t other = bone_mirror_id(*owner, id);
+    sided = sided || other != id;
+    id = other;
+  }
+  if (!sided) {
+    return {};
+  }
+  const auto as_set = [](std::vector<uint64_t> ids) {
+    std::sort(ids.begin(), ids.end());
+    return ids;
+  };
+  std::string was;
+  for (const BoneFix &f : owner->bone_fixes) {
+    if (f.name != fix.name && as_set(f.follows) == as_set(mirrored.follows)) {
+      was = f.name;
+    }
+  }
+  if (!was.empty()) {
+    document_action_delete(doc, owner_id, was);
+    if (r_replaced) {
+      *r_replaced = true;
+    }
+  }
+  const std::string made = bone_fix_unique(*layer_find(doc, owner_id), " mirrored fix");
+  document_action_mirror(doc, owner_id, fix.name, made);
+  owner = layer_find(doc, owner_id);
+  /* A knob's line in frames: its Left and Right swap, as its spots do (the mirror through its bone would turn it over). */
+  for (size_t k = 0; k < fix.follows.size(); k++) {
+    const Bone *from = bone_find(*owner, fix.follows[k]);
+    Bone *to = bone_find(*owner, mirrored.follows[k]);
+    if (!from || !to || !bone_is_controller(*from) || !bone_is_controller(*to)) {
+      continue;
+    }
+    if (const auto it = from->position_keys.actions.find(fix.name); it != from->position_keys.actions.end()) {
+      std::vector<Key<float2>> keys = it->second;
+      for (Key<float2> &key : keys) {
+        key.value.x = -key.value.x;
+      }
+      to->position_keys.actions[made] = std::move(keys);
+    }
+  }
+  mirrored.name = made;
+  owner->bone_fixes.push_back(mirrored);
+  std::string named = bone_fix_name(*owner, owner->bone_fixes.back());
+  if (!fix.auto_name) {
+    const Bone *first = bone_find(*owner, fix.follows.front());
+    named = action_mirror_name(fix.name, first ? first->name : std::string());
+    named = named == fix.name ? fix.name + " Mirrored" : named;
+  }
+  named = bone_fix_unique(*owner, named, made);
+  document_action_rename(doc, owner_id, made, named);
+  animation_evaluate(doc, doc.frame_current);
+  return named;
+}
+
 bool document_bone_fix_follow(Document &doc, uint64_t owner_id, const std::string &name, uint64_t bone, bool follow)
 {
   Layer *owner = layer_find(doc, owner_id);
@@ -3516,39 +3660,15 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
     return now;
   };
   const auto setup_of = [](const auto &ch, const auto &value) { return channel_setup(ch, value); };
-  const std::vector<std::pair<std::string, float>> frames =
-      action_bone_actions_in_order(owner, playing_now, [&](const std::string &name, float t) {
-    const Bone *by = action_bone_of(owner, name);
-    const Channel<float> *driver = by ? &by->angle_keys : nullptr;
-    for (size_t j = 0; j < bones.size(); j++) {
-      const Bone &src = owner.bones[j];
-      Bone &b = bones[j];
-      if (const auto it = src.position_keys.actions.find(name); it != src.position_keys.actions.end()) {
-        const float2 setup = setup_of(src.position_keys, src.transform);
-        b.position += rotate(action_bone_sample(it->second, setup, t) - setup, src.setup_angle);
-      }
-      if (&src.angle_keys != driver) {
-        if (const auto it = src.angle_keys.actions.find(name); it != src.angle_keys.actions.end()) {
-          const float setup = setup_of(src.angle_keys, src.turn);
-          b.angle += action_bone_sample(it->second, setup, t) - setup;
-        }
-      }
-      if (const auto it = src.scale_keys.actions.find(name); it != src.scale_keys.actions.end()) {
-        const float2 setup = setup_of(src.scale_keys, src.scale);
-        b.scale += action_bone_sample(it->second, setup, t) - setup;
-      }
-    }
-  });
+  /* The action bones' own angles: they pick the frames, so nothing else moves them. */
   std::set<const void *> driving;
-  for (const auto &[name, t] : frames) {
-    if (const Bone *by = action_bone_of(owner, name)) {
-      driving.insert(&by->angle_keys);
+  for (const std::string &name : owner.actions) {
+    if (const Bone *b = action_bone_of(owner, name)) {
+      driving.insert(&b->angle_keys);
     }
   }
-  for (const BoneFix &fix : owner.bone_fixes) {
-    if (action_muted(owner, fix.name)) {
-      continue;
-    }
+  /* A fix that follows bones, from where they are on that frame by then. */
+  const auto play_fix = [&](const BoneFix &fix) {
     const BoneFixPlay at = bone_fix_play_with(owner, fix, false, [&](size_t i, int axis) {
       if (bone_is_controller(owner.bones[i])) {
         const float2 k = bone_transform_from_position(owner.bones[i], bones[i].position);
@@ -3557,7 +3677,7 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
       return bones[i].angle - owner.bones[i].setup_angle;
     });
     if (at.strength <= 0.0f) {
-      continue;
+      return;
     }
     for (size_t j = 0; j < bones.size(); j++) {
       const Bone &src = owner.bones[j];
@@ -3585,7 +3705,42 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
         }
       }
     }
-  }
+  };
+  const auto playing_and_fixes = [&] {
+    std::vector<std::pair<std::string, float>> now = playing_now();
+    for (const BoneFix &fix : owner.bone_fixes) {
+      if (!action_muted(owner, fix.name)) {
+        now.push_back({fix.name, 0.0f});
+      }
+    }
+    return now;
+  };
+  action_bone_actions_in_order(owner, playing_and_fixes, [&](const std::string &name, float t) {
+    if (const BoneFix *fix = bone_fix_find(owner, name)) {
+      play_fix(*fix);
+      return;
+    }
+    const Bone *by = action_bone_of(owner, name);
+    const Channel<float> *driver = by ? &by->angle_keys : nullptr;
+    for (size_t j = 0; j < bones.size(); j++) {
+      const Bone &src = owner.bones[j];
+      Bone &b = bones[j];
+      if (const auto it = src.position_keys.actions.find(name); it != src.position_keys.actions.end()) {
+        const float2 setup = setup_of(src.position_keys, src.transform);
+        b.position += rotate(action_bone_sample(it->second, setup, t) - setup, src.setup_angle);
+      }
+      if (&src.angle_keys != driver) {
+        if (const auto it = src.angle_keys.actions.find(name); it != src.angle_keys.actions.end()) {
+          const float setup = setup_of(src.angle_keys, src.turn);
+          b.angle += action_bone_sample(it->second, setup, t) - setup;
+        }
+      }
+      if (const auto it = src.scale_keys.actions.find(name); it != src.scale_keys.actions.end()) {
+        const float2 setup = setup_of(src.scale_keys, src.scale);
+        b.scale += action_bone_sample(it->second, setup, t) - setup;
+      }
+    }
+  });
 }
 
 static bool has_action_bone_actions(const Document &doc)
@@ -3820,33 +3975,13 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
         }
       }
     }
-    /* An action bone action never moves its own bone (the bone picks its frame). */
-    frames = action_bone_actions_in_order(owner, playing_now, [&](const std::string &name, float t) {
-      const Bone *by = action_bone_of(owner, name);
-      play(name, t, by ? static_cast<const void *>(&by->angle_keys) : nullptr, false);
-      for (auto &[knob, dial, was] : given) {
-        const float now = controller_dial_turn(owner, *knob, *dial, controller_knob_played(owner, *knob));
-        if (now != was) {
-          Channel<float> &ch = dial->angle_keys;
-          ch.last += now - was;
-          ch.from_action_bones += now - was;
-          ch.has_last = true;
-          dial->turn += now - was;
-          dial->angle += now - was;
-          was = now;
-          doc.action_bones_applied = true;
-        }
-      }
-    });
-    /* Last the fixes that follow bones, from where everything before has put them (a bone another bone's action moves
-     * too). Not the one edited (its keys are the timeline). */
-    for (const BoneFix &fix : owner.bone_fixes) {
-      if ((fix.name == doc.action && owner.id == doc.action_layer) || action_muted(owner, fix.name)) {
-        continue;
-      }
+    /* The fixes that follow bones, each from where what plays before it has put its bones (a bone another bone's action
+     * moves too), and before what they move picks its frames (an independent knob riding a head a fix turns). Not the
+     * one edited (its keys are the timeline). */
+    const auto play_fix = [&](const BoneFix &fix) {
       const BoneFixPlay at = bone_fix_play(owner, fix);
       if (at.strength <= 0.0f) {
-        continue;
+        return;
       }
       owner_for_each_channel_with(owner, fix.name, [&](auto &ch, auto &value) {
         const void *key = static_cast<const void *>(&ch);
@@ -3868,7 +4003,39 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
         ch.action_bone_live = ch.action_bone_live || !(delta == setup - setup);
         doc.action_bones_applied = true;
       });
-    }
+    };
+    const auto playing_and_fixes = [&] {
+      std::vector<std::pair<std::string, float>> now = playing_now();
+      for (const BoneFix &fix : owner.bone_fixes) {
+        if (!(fix.name == doc.action && owner.id == doc.action_layer) && !action_muted(owner, fix.name)) {
+          now.push_back({fix.name, 0.0f});
+        }
+      }
+      return now;
+    };
+    /* An action bone action never moves its own bone (the bone picks its frame). */
+    frames = action_bone_actions_in_order(owner, playing_and_fixes, [&](const std::string &name, float t) {
+      const Bone *by = action_bone_of(owner, name);
+      if (const BoneFix *fix = bone_fix_find(owner, name)) {
+        play_fix(*fix);
+      }
+      else {
+        play(name, t, by ? static_cast<const void *>(&by->angle_keys) : nullptr, false);
+      }
+      for (auto &[knob, dial, was] : given) {
+        const float now = controller_dial_turn(owner, *knob, *dial, controller_knob_played(owner, *knob));
+        if (now != was) {
+          Channel<float> &ch = dial->angle_keys;
+          ch.last += now - was;
+          ch.from_action_bones += now - was;
+          ch.has_last = true;
+          dial->turn += now - was;
+          dial->angle += now - was;
+          was = now;
+          doc.action_bones_applied = true;
+        }
+      }
+    });
   }
 }
 

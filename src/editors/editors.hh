@@ -7,6 +7,7 @@
  * docking: drag an area's tab onto another area. */
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +24,7 @@ namespace oanim {
 
 struct Context;
 struct Document;
+struct BoneFixKnobLine;
 
 enum class EditorType { Viewport, Properties, Layers, Timeline, TextEditor, Console, Info, AssetShelf, PathTiming };
 
@@ -154,6 +156,10 @@ void path_shelf_draw(Context &C, Area &area, ImVec2 min, ImVec2 size);
 /* A path brush's picture (the shelf's tiles). */
 void path_brush_icon(ImDrawList *dl, PathBrush brush, ImVec2 center, float size, unsigned int col);
 void ink_line_draw(ImDrawList *dl, const std::vector<float2> &points, const std::vector<float> &half_widths, Color color);
+/* Fixes' lines in a knob's box (the viewport's and the Spots panel's), `at` taking frames to the screen: each fainter as
+ * less of it plays, the edited one brighter, a dot where it plays. */
+void bone_fix_lines_draw(ImDrawList *dl, const std::vector<BoneFixKnobLine> &lines,
+                         const std::function<ImVec2(float2)> &at);
 /* A sculpt brush's picture: a line before and after it (the shelf's tiles, the tool bar). */
 void sculpt_brush_icon(ImDrawList *dl, SculptBrush brush, ImVec2 center, float size, unsigned int col,
                        unsigned int before);

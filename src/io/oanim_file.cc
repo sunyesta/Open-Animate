@@ -1068,7 +1068,11 @@ static json layer_to_json(const Layer &layer)
     if (!layer.bone_fixes.empty()) {
       json fixes = json::array();
       for (const BoneFix &f : layer.bone_fixes) {
-        fixes.push_back({{"name", f.name}, {"follows", f.follows}, {"auto_name", f.auto_name}});
+        json fj = {{"name", f.name}, {"follows", f.follows}, {"auto_name", f.auto_name}};
+        if (f.fade == BoneFixFade::Smooth) {
+          fj["fade"] = "SMOOTH";
+        }
+        fixes.push_back(std::move(fj));
       }
       j["bone_fixes"] = std::move(fixes);
     }
@@ -2623,6 +2627,7 @@ static Layer layer_from_json(const json &j, int depth)
       }
     }
     f.auto_name = get_bool(fj, "auto_name", true);
+    f.fade = get_string(fj, "fade") == "SMOOTH" ? BoneFixFade::Smooth : BoneFixFade::Linear;
     layer.bone_fixes.push_back(std::move(f));
   }
   for (const json &pj : get_array(j, "action_plays")) {

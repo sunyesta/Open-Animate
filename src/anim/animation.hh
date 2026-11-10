@@ -165,11 +165,27 @@ std::string bone_fix_name(const Layer &owner, const BoneFix &fix, bool edited = 
 /* "Up 24 · Right 0": where `fix`'s bones are on `frame` of it (a knob in frames each way, a bone's turn in degrees),
  * each named when it follows more than one. */
 std::string bone_fix_pose_label(const Layer &owner, const BoneFix &fix, bool edited, float frame);
+/* A fix's line in a knob's box: where the knob is along it (frames each way, from frame 1 to its end), where it plays
+ * now (`now`) and how much (`strength`, 0 muted). `edited`: the fix is the action edited. */
+struct BoneFixKnobLine {
+  std::string name;
+  std::vector<float2> points;
+  float2 now;
+  float strength = 0.0f;
+  bool edited = false;
+};
+/* The lines of the fixes that follow knob `knob` of `owner`. */
+std::vector<BoneFixKnobLine> bone_fix_knob_lines(const Document &doc, const Layer &owner, const Bone &knob);
 /* "Up · Right": the ways bone `bone` has gone where `fix` ends (a knob's sides, a bone's turn), "" for none. */
 std::string bone_fix_bone_ways(const Layer &owner, const BoneFix &fix, uint64_t bone, bool edited);
 /* A new fix following `follows` (bone ids), keyed on frame 1 where they are now, named for that, and opened on
  * frame 1. Returns its name, or "" (none of them in `owner`). */
 std::string document_bone_fix_new(Document &doc, uint64_t owner, const std::vector<uint64_t> &follows);
+/* Fix `name`'s mirror image (bone Symmetrize's Mirror Action Bone Actions): a fix following the other side's bones, its
+ * keys mirrored as an action's are (a knob's line Left and Right swapped, as its spots are), its fade the same. One
+ * there already following those bones is replaced (`r_replaced`). Named for where it ends if `name` is, else as the
+ * other side's action. Returns its name, or "" (none of its bones has another side). */
+std::string document_bone_fix_mirror(Document &doc, uint64_t owner, const std::string &name, bool *r_replaced = nullptr);
 /* Bone `bone` added to or taken from what fix `name` follows. Taken, its keys in the fix go with it (they would play as
  * the fix). */
 bool document_bone_fix_follow(Document &doc, uint64_t owner, const std::string &name, uint64_t bone, bool follow);

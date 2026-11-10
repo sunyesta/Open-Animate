@@ -1088,12 +1088,15 @@ struct CustomChannel {
  * where they are on the last frame they are keyed on; its other keys are the fix along that line. On the mainline it
  * plays by itself: the frame whose pose the bones are nearest along what changes on the line, as much as what stays
  * put on it is there (anim/animation.hh, bone_fix_play). */
+/* How a fix fades out as its bones leave its line: in proportion, or easing in and out (smoothstep). */
+enum class BoneFixFade : uint8_t { Linear, Smooth };
 struct BoneFix {
   std::string name;
   /* The bones it follows, by id. */
   std::vector<uint64_t> follows;
   /* Named after the actions playing where it ends, renamed as that changes until renamed by hand. */
   bool auto_name = true;
+  BoneFixFade fade = BoneFixFade::Linear;
   bool operator==(const BoneFix &) const = default;
 };
 

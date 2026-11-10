@@ -9806,12 +9806,35 @@ static ImVec2 controller_knob_screen(const Document &doc, const Layer &armature,
   return sb.head + view.to_screen(to_document.apply(pose.knob.apply({0, 0}))) - view.to_screen(to_document.apply(pose.head));
 }
 
+void bone_fix_lines_draw(ImDrawList *dl, const std::vector<BoneFixKnobLine> &lines,
+                         const std::function<ImVec2(float2)> &at)
+{
+  for (const BoneFixKnobLine &line : lines) {
+    const float shown = line.edited ? 1.0f : 0.35f + 0.5f * line.strength;
+    const ImU32 col = (UI_FIX_COLOR & 0x00FFFFFFu) | (ImU32(std::lround(255.0f * shown)) << 24);
+    std::vector<ImVec2> points;
+    for (const float2 &p : line.points) {
+      points.push_back(at(p));
+    }
+    if (points.size() >= 2) {
+      dl->AddPolyline(points.data(), int(points.size()), col, ImDrawFlags_None, line.edited ? 2.0f : 1.5f);
+    }
+    /* Where it ends, and where it plays now. */
+    if (!points.empty()) {
+      dl->AddCircle(points.back(), 3.0f, col, 0, 1.2f);
+    }
+    if (line.strength > 0.0f) {
+      dl->AddCircleFilled(at(line.now), 3.5f, col);
+    }
+  }
+}
+
 static constexpr float CONTROLLER_KNOB_RADIUS = 7.0f;
 /* Half a spot's square, and how near the mouse picks one. */
 static constexpr float CONTROLLER_SPOT_HALF = 3.5f, CONTROLLER_SPOT_PICK = 6.0f;
 
 /* A 2 Axis Controller: its box (the frames of its actions either way from the rest point), a tick on the edge for each
- * of their keys, a dot at each pose a fix made, a square at each spot (named under the mouse), a ring where its
+ * of their keys, the line of each fix that follows it (a dot where it plays), a square at each spot (named under the mouse), a ring where its
  * actions really are if not at the knob, and the knob. */
 static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &armature, const Bone &bone,
                             const BonePose &pose, const ScreenBone &sb, const ViewMapping &view, bool picked, bool active,
@@ -9848,6 +9871,7 @@ static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &ar
       }
     }
   }
+  bone_fix_lines_draw(dl, bone_fix_knob_lines(doc, armature, bone), at);
   const ImVec2 mouse = ImGui::GetIO().MousePos;
   for (const ControllerSpot &spot : bone.controller_spots) {
     const ImVec2 s = at(spot.at);

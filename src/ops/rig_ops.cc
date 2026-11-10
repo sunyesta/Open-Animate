@@ -71,11 +71,12 @@ static bool on_setup_frame(Context &C)
 }
 
 /* Bone Symmetrize's Mirror Action Bone Actions: the action bone actions of the bones it made the other side of go
- * there too, each as
- * the action of its bone's partner, replacing what that had. With both sides picked and both actions there, `left_to_right`
- * says which is the source. */
+ * there too, each as the action of its bone's partner, replacing what that had, then `sides_later` (knobs' sides whose
+ * actions are only now there: knob, side, action), then their fixes. With both sides picked and both actions there,
+ * `left_to_right` says which is the source. */
 static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std::vector<uint64_t> &picked,
-                                       bool left_to_right)
+                                       bool left_to_right,
+                                       const std::vector<std::tuple<std::string, int, std::string>> &sides_later)
 {
   Document &doc = *C.document;
   const std::string was_action = doc.action;
@@ -92,7 +93,7 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
   std::vector<std::pair<std::string, std::string>> jobs;
   std::vector<std::string> centred;
   for (const std::string &name : owner.actions) {
-    if (!action_bone_of(owner, name)) {
+    if (!action_bone_of(owner, name) || bone_fix_find(owner, name)) {
       continue;
     }
     const Bone *bone = action_bone_of(owner, name);
@@ -108,6 +109,35 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
       jobs.push_back({name, other});
     }
   }
+  /* The fixes following these bones: the other side's follow the other side's bones. With both sides' there and picked,
+   * `left_to_right` says which is the source, as for actions. */
+  const auto is_picked = [&](uint64_t id) { return std::find(picked.begin(), picked.end(), id) != picked.end(); };
+  std::vector<std::string> fixes;
+  for (const BoneFix &fix : owner.bone_fixes) {
+    if (std::none_of(fix.follows.begin(), fix.follows.end(), is_picked)) {
+      continue;
+    }
+    std::vector<uint64_t> other = fix.follows;
+    const Bone *sided = nullptr;
+    for (uint64_t &id : other) {
+      const uint64_t m = bone_mirror_id(owner, id);
+      sided = sided ? sided : (m != id ? bone_find(owner, id) : nullptr);
+      id = m;
+    }
+    if (!sided) {
+      centred.push_back(fix.name);
+      continue;
+    }
+    std::sort(other.begin(), other.end());
+    const bool both = std::any_of(owner.bone_fixes.begin(), owner.bone_fixes.end(), [&](const BoneFix &f) {
+      std::vector<uint64_t> mine = f.follows;
+      std::sort(mine.begin(), mine.end());
+      return mine == other && std::all_of(mine.begin(), mine.end(), is_picked);
+    });
+    if (!(both && (sided->name < bone_mirror_name(sided->name)) != left_to_right)) {
+      fixes.push_back(fix.name);
+    }
+  }
   std::string text;
   for (const auto &[from, to] : jobs) {
     const bool replaced = has(to);
@@ -117,6 +147,24 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
       text += "; " + note;
     }
   }
+  /* The other side's knobs take the sides just made, then the fixes (named for the actions where they end). */
+  for (const auto &[bone_name, side, action] : sides_later) {
+    const Layer *rig = layer_find(doc, owner_id);
+    const Bone *knob = rig ? bone_find_by_name(*rig, bone_name) : nullptr;
+    std::string why, note;
+    if (knob && bone_is_controller(*knob) && knob->controller_actions[side].empty() &&
+        std::find(rig->actions.begin(), rig->actions.end(), action) != rig->actions.end())
+    {
+      controller_side_set(doc, owner_id, knob->id, side, action, "", &why, &note);
+    }
+  }
+  for (const std::string &name : fixes) {
+    bool replaced = false;
+    const std::string to = document_bone_fix_mirror(doc, owner_id, name, &replaced);
+    if (!to.empty()) {
+      text += (text.empty() ? "" : "; ") + ("Mirrored " + name + " into " + to) + (replaced ? " (replaced the other side's)" : "");
+    }
+  }
   for (const std::string &name : centred) {
     text += (text.empty() ? "" : "; ") + (name + " has no side, so it has no other action to mirror into");
   }
@@ -124,7 +172,7 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
     document_set_action(doc, was_owner, was_action);
   }
   if (text.empty()) {
-    report(ReportType::Warning, "No action bone actions of these bones to mirror");
+    report(ReportType::Warning, "No action bone actions or fix actions of these bones to mirror");
   }
   else {
     report(ReportType::Info, text);
@@ -2500,6 +2548,32 @@ void rig_operators_register()
                  return name.empty() ? OpStatus::Cancelled : OpStatus::Finished;
                });
 
+  rig_operator("armature.bone_fix_set", "Fix Action Settings",
+               "Set how fix action name= of the active bone layer plays: fade=LINEAR (as its bones leave its line it fades "
+               "in proportion) or SMOOTH (it eases in and out: slower near rest and near the line, the same half way)",
+               bone_layer_active, [](Context &C) {
+                 Layer &owner = *active_armature(C);
+                 BoneFix *fix = const_cast<BoneFix *>(bone_fix_find(owner, op_arg(C, "name")));
+                 if (!fix) {
+                   report(ReportType::Warning, "No fix action named " + op_arg(C, "name"));
+                   return OpStatus::Cancelled;
+                 }
+                 if (op_has_arg(C, "fade")) {
+                   const std::string fade = op_arg(C, "fade");
+                   if (fade != "LINEAR" && fade != "SMOOTH") {
+                     report(ReportType::Warning, "Fade is LINEAR or SMOOTH");
+                     return OpStatus::Cancelled;
+                   }
+                   const BoneFixFade to = fade == "SMOOTH" ? BoneFixFade::Smooth : BoneFixFade::Linear;
+                   if (fix->fade == to) {
+                     return OpStatus::Cancelled;
+                   }
+                   fix->fade = to;
+                 }
+                 animation_evaluate(*C.document, C.document->frame_current);
+                 return OpStatus::Finished;
+               });
+
   rig_operator("armature.bone_fix_follow", "Follow Bones",
                "Fix action `name` of the active bone layer follows the selected bones too (bones=\"a,b\": these); "
                "follow=0: no longer (their keys in it go with them)",
@@ -4029,7 +4103,8 @@ void rig_operators_register()
                  const std::vector<uint64_t> picked = sources;
                  const auto reflect = [](float2 p) { return float2(-p.x, p.y); };
                  int made = 0;
-                 /* Controller sides whose other side's action isn't there yet: Mirror Action Bone Actions makes it. */
+                 /* Controller sides whose other side's action Mirror Action Bone Actions makes (or makes anew, which
+                  * takes it off the side): set once it is there. */
                  std::vector<std::tuple<std::string, int, std::string>> sides_later;
                  /* Parents before children, so a mirrored child finds its mirrored parent. */
                  for (size_t pass = 0; pass < armature.bones.size() && !sources.empty(); pass++) {
@@ -4064,7 +4139,7 @@ void rig_operators_register()
                        const bool own = std::find(src->controller_actions.begin(), src->controller_actions.end(), name) !=
                                         src->controller_actions.end();
                        copy.controller_actions[side] = name != from && there && !own ? name : "";
-                       if (name != from && !there) {
+                       if (name != from && !own) {
                          sides_later.emplace_back(other, side, name);
                        }
                      }
@@ -4106,18 +4181,8 @@ void rig_operators_register()
                  }
                  if (made > 0 && op_arg_bool(C, "action_bone_actions")) {
                    const uint64_t armature_id = armature.id;
-                   mirror_action_bone_actions(C, armature_id, picked, op_arg(C, "direction", "L_TO_R") != "R_TO_L");
-                   Document &doc = *C.document;
-                   for (const auto &[bone_name, side, action] : sides_later) {
-                     const Layer *rig = layer_find(doc, armature_id);
-                     const Bone *knob = rig ? bone_find_by_name(*rig, bone_name) : nullptr;
-                     std::string why, note;
-                     if (knob && bone_is_controller(*knob) && knob->controller_actions[side].empty() &&
-                         std::find(rig->actions.begin(), rig->actions.end(), action) != rig->actions.end())
-                     {
-                       controller_side_set(doc, armature_id, knob->id, side, action, "", &why, &note);
-                     }
-                   }
+                   mirror_action_bone_actions(C, armature_id, picked, op_arg(C, "direction", "L_TO_R") != "R_TO_L",
+                                              sides_later);
                  }
                  return made > 0 ? OpStatus::Finished : OpStatus::Cancelled;
                },
