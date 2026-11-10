@@ -1377,6 +1377,8 @@ std::pair<int, int> key_together_release(Document &doc, Layer &group)
                                [&](bool to_changes) { together_changes(doc, group, to_changes); });
 }
 
+template<typename F> static void owner_for_each_channel(Layer &owner, F &&f);
+
 void animation_record(Document &doc)
 {
   OANIM_PROFILE("animation_record");
@@ -1616,7 +1618,28 @@ void animation_record(Document &doc)
   layer_for_each_channel(doc.simulation, [&](auto &ch, auto &value) { record(ch, value, frame, auto_key, replace); });
   layer_for_each_channel(document_camera(doc),
                          [&](auto &ch, auto &value) { record(ch, value, frame, auto_key, replace); });
-  if (together_went || std::any_of(keys_went.begin(), keys_went.end(), [](char w) { return w != 0; })) {
+  const bool keys_put = std::any_of(keyed_here.begin(), keyed_here.end(), [](char w) { return w != 0; });
+  const bool keys_gone = std::any_of(keys_went.begin(), keys_went.end(), [](char w) { return w != 0; });
+  /* In a fix that follows bones, which starts on frame 1: a channel first keyed later starts from its setup there, a
+   * key of it, so what shows while it is edited is what plays. */
+  bool starts = false;
+  if (keys_put && frame > 1 && !doc.action.empty()) {
+    if (Layer *owner = layer_find(doc, doc.action_layer); owner && bone_fix_find(*owner, doc.action)) {
+      owner_for_each_channel(*owner, [&](auto &ch, auto & /*value*/) {
+        if (!ch.animated() || ch.key_at(1)) {
+          return;
+        }
+        const auto first = std::find_if(ch.keys.begin(), ch.keys.end(), [](const auto &k) { return k.frame >= 1; });
+        if (first == ch.keys.end()) {
+          return;
+        }
+        const auto setup = ch.evaluate(0);
+        ch.set_key(1, setup);
+        starts = true;
+      });
+    }
+  }
+  if (together_went || keys_gone || starts) {
     animation_evaluate(doc, frame);
   }
 }
@@ -3123,6 +3146,8 @@ static constexpr float BONE_FIX_STEP = 0.25f;
 /* How far off its line a fix whose bones go more than one way along it reaches: it fades to nothing half its length
  * away (each way measured against how far it goes along the line). */
 static constexpr float BONE_FIX_REACH = 0.5f;
+/* What share of how far out a way is it can change along the line and still count as staying put. */
+static constexpr float BONE_FIX_STILL = 0.05f;
 
 /* A share (0 to 1) of a fix as `fade` shapes it. */
 static float bone_fix_faded(float share, BoneFixFade fade)
@@ -3200,7 +3225,10 @@ static BoneFixPlay bone_fix_play_with(const Layer &owner, const BoneFix &fix, bo
   std::vector<std::pair<const Way *, float>> moving;
   for (const Way &w : ways) {
     const auto [lo, hi] = std::minmax_element(w.line.begin(), w.line.end());
-    if (*hi - *lo > w.eps) {
+    /* A way barely changing next to how far it is out (Up held at 20, drifting to 20.3) stays put: measured as a move,
+     * against its own small span, the least step off it would take the fix away. */
+    const float out = std::max(std::abs(*lo), std::abs(*hi));
+    if (*hi - *lo > std::max(w.eps, BONE_FIX_STILL * out)) {
       moving.push_back({&w, *hi - *lo});
     }
     else if (std::abs(w.line.front()) > w.eps) {
@@ -4435,7 +4463,10 @@ static void controllers_rest(Document &doc)
 
 float2 controller_knob_shown(const Document &doc, const Layer &owner, const Bone &knob)
 {
-  if (doc.action.empty() || doc.action_layer != owner.id) {
+  /* In another action (an ordinary one, a fix) it is wherever that has it, as on the mainline. */
+  const bool own_side = std::find(knob.controller_actions.begin(), knob.controller_actions.end(), doc.action) !=
+                        knob.controller_actions.end();
+  if (doc.action.empty() || doc.action_layer != owner.id || !own_side) {
     /* Staying in place, where it sits in the box as that has moved. */
     return doc.frame_current != 0 ? controller_knob_played(owner, knob) : controller_knob(knob);
   }

@@ -781,7 +781,7 @@ void anim_operators_register()
     ot.idname = "anim.action_set";
     ot.name = "Edit Action";
     ot.description = "Edit action `name` in the timeline (\"\" for the mainline); layer=id: that bone layer's; frame=N: "
-                     "on that frame. A fix opens on its pose nearest the pose now";
+                     "on that frame";
     ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
     ot.poll = [](Context &C) { return C.document != nullptr; };
     ot.exec = [](Context &C) {

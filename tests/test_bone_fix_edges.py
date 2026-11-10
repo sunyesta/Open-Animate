@@ -1,5 +1,6 @@
 """Fix actions that follow bones, and what they touch, at their edges (from a bug sweep): converting a followed
-knob, Symmetrize with other knobs moved, an independent knob, switches, a bone named twice. Each section starts
+knob, Symmetrize with other knobs moved, an independent knob, switches, a bone named twice, late keys, spots, a way
+barely changing. Each section starts
 from a new file.
 
 Run with:  OpenAnimate --background --python tests/test_bone_fix_edges.py
@@ -225,5 +226,214 @@ rig = lambda: next(l for l in layers.all() if l.id == rig_id)
 assert ops.armature.bone_fix_new(bones="arm") == {'CANCELLED'}
 r = ops.armature.bone_fix_new(bones="arm,arm")
 assert r == {'CANCELLED'}, f"bone_fix_new(bones='arm,arm') returned {r}, making {rig().bone_fixes} (1 way, as bones='arm' which is refused)"
+
+# --- A channel first keyed after frame 1 in a fix plays as it shows ------------------------------------------------------
+# A fix plays differently on the mainline than it shows while edited, for a channel first keyed after frame 1.
+#
+# A knob fix, its line straight from rest (frame 1) to (24, 24) (frame 30); in it a point keyed only on frame 5 (y 0 -> 0.6).
+# Edited on frame 3 the fix shows the point at 0.6 * 3/5 = 0.36 (eased from the setup on frame 0). On the mainline, the knob
+# put exactly where the fix has it on frame 3, the fix plays frame 3 at full strength but the point is at 0.6 * 2/4 = 0.30
+# (bone_fix_delta starts the channel from its setup on frame 1). The spec: "it plays exactly as keyed on its line".
+#
+#     OpenAnimate.exe --background --python repro_fix_first_key_start.py     (exits 1 while the bug is there)
+oanim.ops.wm.read_homefile()
+
+ops, doc, layers = oanim.ops, oanim.data.document, oanim.data.layers
+doc.auto_key = True
+
+ops.layer.new_bone()
+rig = layers.active
+ops.armature.bone_add(name="Bone", head_x="3.0", head_y="3.0", tail_x="3.5", tail_y="3.0")
+ops.layer.new()
+face = layers.active
+face.add_curve([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)])
+ops.layer.move_to_group(group=str(rig.id))
+layers.active = rig
+
+
+def fresh():
+    return next(l for l in layers.all() if l.id == rig.id)
+
+
+def face_now():
+    return next(l for l in layers.all() if l.id == face.id)
+
+
+def settle():
+    doc.frame_current = doc.frame_current + 1
+    doc.frame_current = doc.frame_current - 1
+
+
+# A knob with two sides (ordinary actions moving points 0 and 1), as in tests/test_bone_fixes.py.
+for name, i, moved in (("Bone Right", 0, (2.0, 0.0)), ("Bone Up", 1, (1.0, 1.0))):
+    assert ops.anim.action_new(name=name) == {'FINISHED'}
+    doc.frame_current = 24
+    face_now().set_point(i, moved)
+    doc.frame_current = 25
+    ops.anim.action_set(name="")
+    doc.frame_current = 0
+layers.active = fresh()
+fresh().select_bone("Bone")
+assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
+assert ops.armature.controller_side(side="RIGHT", action="Bone Right") == {'FINISHED'}
+assert ops.armature.controller_side(side="UP", action="Bone Up") == {'FINISHED'}
+
+doc.frame_current = 5
+assert ops.armature.bone_fix_new(bones="Bone") == {'FINISHED'}
+doc.frame_current = 30
+fresh().bone_set("Bone", knob=(24.0, 24.0))
+settle()
+for f in (1, 30):
+    fresh().keyframe_set('bones["Bone"].position', f, interp="LINEAR")
+doc.frame_current = 5
+face_now().set_point(3, (3.0, 0.6))     # the fix: point 3 up, keyed on frame 5 only
+settle()
+print("point keys in the fix", [(k["frame"], k["value"]) for k in face_now().keyframes("points[3].pos")])
+doc.frame_current = 3
+knob = tuple(next(b for b in fresh().bones if b["name"] == "Bone")["knob"])
+edited = face_now().shown()[0][3][1]
+assert ops.anim.action_set(name="") == {'FINISHED'}
+
+doc.frame_current = 40
+fresh().bone_set("Bone", knob=knob)
+settle()
+f = fresh().bone_fixes[0]
+played = face_now().shown()[0][3][1]
+print("fix", f, "knob", knob, "edited", edited, "played", played)
+assert abs(f["frame"] - 3.0) < 0.05 and abs(f["strength"] - 1.0) < 1e-3, f
+assert abs(played - edited) < 1e-3, (f"the fix edited on frame 3 shows point 3 at y {edited:.4f}; on the mainline with the knob "
+                                     f"where the fix has it on frame 3 ({knob[0]:.2f}, {knob[1]:.2f}) it plays frame "
+                                     f"{f['frame']:.2f} at strength {f['strength']:.2f} and shows y {played:.4f}")
+
+# --- Move Here inside a fix puts the spot where the knob is --------------------------------------------------------------
+# Inside a fix following a knob, the knob sits where the fix's keys put it (knob, knob_playing, the viewport), but
+# controller_knob_shown says rest (0, 0) in any action that isn't one of the knob's sides: the Spots panel's "Move Here"
+# (armature.controller_spot_move) then stores the spot at rest, and the panel's cross / "spot the knob is on" use rest too.
+#
+#     OpenAnimate.exe --background --python repro_fix_spot_move_here.py     (exits 1 while the bug is there)
+oanim.ops.wm.read_homefile()
+
+ops, doc, layers = oanim.ops, oanim.data.document, oanim.data.layers
+doc.auto_key = True
+
+ops.layer.new_bone()
+rig = layers.active
+ops.armature.bone_add(name="Bone", head_x="3.0", head_y="3.0", tail_x="3.5", tail_y="3.0")
+ops.layer.new()
+face = layers.active
+face.add_curve([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)])
+ops.layer.move_to_group(group=str(rig.id))
+layers.active = rig
+
+
+def fresh():
+    return next(l for l in layers.all() if l.id == rig.id)
+
+
+def knob():
+    return next(b for b in fresh().bones if b["name"] == "Bone")
+
+
+for name, i, moved in (("Bone Right", 0, (2.0, 0.0)), ("Bone Up", 1, (1.0, 1.0))):
+    assert ops.anim.action_new(name=name) == {'FINISHED'}
+    doc.frame_current = 24
+    next(l for l in layers.all() if l.id == face.id).set_point(i, moved)
+    doc.frame_current = 25
+    ops.anim.action_set(name="")
+    doc.frame_current = 0
+layers.active = fresh()
+fresh().select_bone("Bone")
+assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
+assert ops.armature.controller_side(side="RIGHT", action="Bone Right") == {'FINISHED'}
+assert ops.armature.controller_side(side="UP", action="Bone Up") == {'FINISHED'}
+assert ops.armature.controller_spot_add(name="Look", x="0", y="0", bone="Bone") == {'FINISHED'}
+
+doc.frame_current = 5
+assert ops.armature.bone_fix_new(bones="Bone") == {'FINISHED'}
+doc.frame_current = 30
+fresh().bone_set("Bone", knob=(20.0, 12.0))
+doc.frame_current = 31
+doc.frame_current = 30
+k = knob()
+print("in fix", doc.action, "knob", k["knob"], "knob_playing", k["knob_playing"], "knob_shown", k["knob_shown"])
+assert ops.armature.controller_spot_move(name="Look", bone="Bone") == {'FINISHED'}
+spot = dict(knob()["controller_spots"])["Look"]
+print("spot", spot)
+assert abs(spot[0] - 20.0) < 1e-3 and abs(spot[1] - 12.0) < 1e-3, (
+    f"inside fix {doc.action!r} on frame 30 the knob is at {k['knob']} (playing {k['knob_playing']}), but Move Here put "
+    f"spot 'Look' at {spot} (knob_shown {k['knob_shown']})")
+
+# --- A way barely changing along the line stays put ----------------------------------------------------------------------
+# A knob fix whose Up is held all along the line (Right 0 -> 24): held exactly at 20 it plays whole with the knob at
+# (12, 20); held at 20 -> 20.3 (a third of a frame's wobble, as a hand-placed end key gives) the same knob plays nothing,
+# because Up now counts as changing and is measured against how far it goes (0.3).
+#
+#     OpenAnimate.exe --background --python repro_fix_wobble.py     (exits 1 while it behaves so)
+oanim.ops.wm.read_homefile()
+
+ops, doc, layers = oanim.ops, oanim.data.document, oanim.data.layers
+doc.auto_key = True
+
+ops.layer.new_bone()
+rig = layers.active
+ops.armature.bone_add(name="Bone", head_x="3.0", head_y="3.0", tail_x="3.5", tail_y="3.0")
+ops.layer.new()
+face = layers.active
+face.add_curve([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)])
+ops.layer.move_to_group(group=str(rig.id))
+layers.active = rig
+
+
+def fresh():
+    return next(l for l in layers.all() if l.id == rig.id)
+
+
+def face_now():
+    return next(l for l in layers.all() if l.id == face.id)
+
+
+def settle():
+    doc.frame_current = doc.frame_current + 1
+    doc.frame_current = doc.frame_current - 1
+
+
+for name, i, moved in (("Bone Right", 0, (2.0, 0.0)), ("Bone Up", 1, (1.0, 1.0))):
+    assert ops.anim.action_new(name=name) == {'FINISHED'}
+    doc.frame_current = 24
+    face_now().set_point(i, moved)
+    doc.frame_current = 25
+    ops.anim.action_set(name="")
+    doc.frame_current = 0
+layers.active = fresh()
+fresh().select_bone("Bone")
+assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
+assert ops.armature.controller_side(side="RIGHT", action="Bone Right") == {'FINISHED'}
+assert ops.armature.controller_side(side="UP", action="Bone Up") == {'FINISHED'}
+
+got = {}
+for wob in (0.0, 0.3):
+    doc.frame_current = 5 + int(wob * 10)
+    fresh().bone_set("Bone", knob=(0.0, 20.0))
+    settle()
+    assert ops.armature.bone_fix_new(bones="Bone") == {'FINISHED'}
+    name = doc.action
+    doc.frame_current = 30
+    fresh().bone_set("Bone", knob=(24.0, 20.0 + wob))
+    face_now().set_point(3, (3.0, 0.5))
+    settle()
+    ops.anim.action_set(name="")
+    name = fresh().bone_fixes[-1]["name"]
+    doc.frame_current = 40 + int(wob * 10)
+    fresh().bone_set("Bone", knob=(12.0, 20.0))
+    settle()
+    f = next(x for x in fresh().bone_fixes if x["name"] == name)
+    got[wob] = (round(f["strength"], 3), round(f["frame"], 2))
+    print("wobble", wob, f)
+    assert ops.anim.action_delete(name=name) == {'FINISHED'}
+    ops.anim.action_set(name="")
+print(got)
+assert abs(got[0.3][0] - got[0.0][0]) < 0.1, (f"knob at (12, 20): a fix with Up held at 20 along its line plays "
+                                              f"strength {got[0.0][0]} (frame {got[0.0][1]}); with Up going 20 -> 20.3 "
+                                              f"it plays strength {got[0.3][0]} (frame {got[0.3][1]})")
 
 print("test_bone_fix_edges: ok")
