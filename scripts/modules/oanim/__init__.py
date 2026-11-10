@@ -412,7 +412,7 @@ class _Layer:
         oanim.ops.armature.bone_convert, fill the sides with controller_side, controller_action_new and
         controller_mirror. A regular or pin bone has turn_actions (its action bone actions counterclockwise and clockwise,
         "" for none) and full_turn (its Turns is Full Turn: the one action in the first); set them with
-        armature.bone_turn_action, bone_turn_action_new, bone_turn_mirror, bone_turn_reach and bone_turns."""
+        armature.bone_turn_action, bone_turn_action_new, bone_turn_mirror and bone_turns."""
         return _oanim.layer_bones(self._id, False)
 
     @property

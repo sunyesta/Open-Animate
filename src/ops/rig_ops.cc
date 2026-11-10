@@ -2407,33 +2407,6 @@ void rig_operators_register()
                  return OpStatus::Finished;
                });
 
-  rig_operator("armature.bone_turn_reach", "Turn Action Reach",
-               "How far the active bone turns (angle=, degrees) by the end of its action direction=CCW or CW: its "
-               "turn keys there scaled to end at it",
-               bone_layer_active, [active_turner, turn_slot, turn_keys_edit, turn_reach_set](Context &C) {
-                 Bone *bone = active_turner(C);
-                 if (!bone) {
-                   return OpStatus::Cancelled;
-                 }
-                 Document &doc = *C.document;
-                 Layer &owner = *active_armature(C);
-                 const BoneTurnSlots slots = bone_turn_slots(doc, owner, *bone);
-                 const int slot = turn_slot(C);
-                 const std::string name = slots.action[size_t(slot)];
-                 const float degrees = std::strtof(op_arg(C, "angle", "90").c_str(), nullptr);
-                 if (slots.full_turn || name.empty() || !(degrees > 0.0f)) {
-                   report(ReportType::Warning, slots.full_turn ? "A full turn reaches 360 degrees"
-                                               : name.empty()   ? "No action that way"
-                                                                : "Reach is more than 0 degrees");
-                   return OpStatus::Cancelled;
-                 }
-                 std::vector<Key<float>> &keys = turn_keys_edit(doc, owner, *bone, name);
-                 turn_reach_set(keys, 10, degrees * PI / 180.0f * (slot == 0 ? 1.0f : -1.0f),
-                                doc.action == name && doc.action_layer == owner.id);
-                 animation_evaluate(doc, doc.frame_current);
-                 return OpStatus::Finished;
-               });
-
   rig_operator("armature.bone_turns", "Turns",
                "How the active bone's actions turn it: mode=BOTH (an action each way) or FULL (one action, a whole "
                "turn played round and round). Its action's turn keys are scaled to end at 90 or 360 degrees",

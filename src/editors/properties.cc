@@ -2078,7 +2078,7 @@ static void bone_turn_row(Context &C, Layer &armature, const Bone &bone, const B
 }
 
 /* The active bone's actions: a 2 Axis Controller's four sides; a regular or pin bone's Turns and an action each way
- * (or one whole turn), each with how far the bone turns by its end. */
+ * (or one whole turn). How far one turns the bone is posed in it: its last key. */
 static void bone_actions_panel(Context &C, Layer &armature)
 {
   const Bone *active = bone_find(armature, armature.active_bone);
@@ -2122,37 +2122,9 @@ static void bone_actions_panel(Context &C, Layer &armature)
     }
     ImGui::EndCombo();
   }
-  /* How far each way turns by its end, while dragged (applied on letting go: one undo step). */
-  static float dragging[2] = {0.0f, 0.0f};
-  static int dragged = -1;
   for (int slot = 0; slot < (slots.full_turn ? 1 : 2); slot++) {
     label(slots.full_turn ? "Full Turn" : slot == 0 ? "Counterclockwise" : "Clockwise");
     bone_turn_row(C, armature, *active, slots, slot);
-    const std::string &name = slots.action[size_t(slot)];
-    if (slots.full_turn || name.empty()) {
-      continue;
-    }
-    const std::vector<Key<float>> *keys = bone_turn_keys(doc, armature, *active, name);
-    const float reach = keys && !keys->empty() ? std::fabs(keys->back().value) * 180.0f / PI : 0.0f;
-    label("Reach");
-    ImGui::PushID(slot);
-    float shown = dragged == slot ? dragging[slot] : reach;
-    if (ui_drag_float("##reach", &shown, 0.5f, 0.1f, 3600.0f, "%.1f\xC2\xB0")) {
-      dragging[slot] = shown;
-      dragged = slot;
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("How far the bone turns this way by the action's end: its turn keys there scale to end at it");
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit() && dragged == slot) {
-      operator_call(C, "armature.bone_turn_reach",
-                    {{"direction", slot == 0 ? "CCW" : "CW"}, {"angle", std::to_string(dragging[slot])}});
-      dragged = -1;
-    }
-    else if (!ImGui::IsItemActive() && dragged == slot) {
-      dragged = -1;
-    }
-    ImGui::PopID();
   }
   ui_panel_end();
 }

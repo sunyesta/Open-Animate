@@ -1,7 +1,7 @@
 """A regular or pin bone's action bone actions in the Bone tab's Actions: a slot each way it turns (counterclockwise,
 clockwise), each filled by a new action (keyed 90 degrees that way on frame 10), an action picked (named after the
-bone), or a mirror of the other way; None lets go of one (renamed, its keys kept). Reach scales the bone's turn keys to
-end where asked. Turns: Full Turn plays one action, a whole turn (keyed to 360 degrees), saved with the file.
+bone), or a mirror of the other way; None lets go of one (renamed, its keys kept). How far one turns the bone is posed in
+it. Turns: Full Turn plays one action, a whole turn (its turn keys scaled to 360 degrees), saved with the file.
 
 Run with:  OpenAnimate --background --python tests/test_bone_turn_actions.py
 """
@@ -86,10 +86,6 @@ assert bone("dial")["turn_actions"] == ("dial", "dial 2")
 assert close(keys("dial", "dial 2")[-1][1], -math.pi / 2)
 assert ops.armature.bone_turn_action_new(direction="CW") == {'CANCELLED'}, "that way is taken"
 
-# --- Reach: the keys scaled to end there -------------------------------------------------------------------------------
-assert ops.armature.bone_turn_reach(direction="CW", angle="45") == {'FINISHED'}
-assert close(keys("dial", "dial 2")[-1][1], -math.pi / 4)
-
 # --- None lets go (renamed, keys kept); picking it back names it after the bone again ---------------------------------
 assert ops.armature.bone_turn_action(direction="CW", action="") == {'FINISHED'}
 assert bone("dial")["turn_actions"] == ("dial", "")
@@ -97,7 +93,7 @@ assert "dial 2 (unlinked)" in actions(), actions()
 assert ops.armature.bone_turn_action(direction="CCW", action="dial 2 (unlinked)") == {'CANCELLED'}, "it turns clockwise"
 assert ops.armature.bone_turn_action(direction="CW", action="dial 2 (unlinked)") == {'FINISHED'}
 assert bone("dial")["turn_actions"] == ("dial", "dial 2"), bone("dial")["turn_actions"]
-assert close(keys("dial", "dial 2")[-1][1], -math.pi / 4), "its keys came along"
+assert close(keys("dial", "dial 2")[-1][1], -math.pi / 2), "its keys came along"
 
 # An action not turning the bone yet: named after it, keyed 90 degrees that way on its last frame.
 assert ops.armature.bone_turn_action(direction="CW", action="") == {'FINISHED'}
