@@ -52,6 +52,10 @@ const Bone *controller_of_action(const Layer &owner, const std::string &action, 
 
 const Bone *controller_dial_of_action(const Layer &owner, const std::string &action)
 {
+  /* A fix that follows bones is never a bone's own action, whatever its name. */
+  if (std::any_of(owner.bone_fixes.begin(), owner.bone_fixes.end(), [&](const BoneFix &f) { return f.name == action; })) {
+    return nullptr;
+  }
   const Bone *bone = bone_find_by_name(owner, action);
   if (!bone && action.size() > 2 && action.compare(action.size() - 2, 2, " 2") == 0) {
     bone = bone_find_by_name(owner, action.substr(0, action.size() - 2));

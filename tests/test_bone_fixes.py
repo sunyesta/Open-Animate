@@ -9,6 +9,7 @@ Run with:  OpenAnimate --background --python tests/test_bone_fixes.py
 
 import os
 import tempfile
+import zipfile
 
 import oanim
 
@@ -304,6 +305,33 @@ mainline()
 assert [f["name"] for f in fixes()] == ["up and turn"], fixes()
 knob(20.0, 20.0)
 assert close(point(0), (2.0, 0.0)) and close(point(2), (2.0, 0.5)), ("it plays on the mainline", point(2))
+
+# --- Never taken for a bone's turn action: "turn 2" would be turn's other one -------------------------------------------
+knob(0.0, 0.0)
+fresh().select_bone("Knob")
+assert ops.armature.bone_fix_new() == {'FINISHED'}
+doc.frame_current = 30
+fresh().bone_set("Knob", knob=(20.0, 0.0))
+settle()
+mainline()
+named = [f["name"] for f in fixes() if f["name"] != "up and turn"]
+assert len(named) == 1 and named[0] not in ("turn", "turn 2"), ("named for turn, never as turn's own", named)
+# A file from before, with a fix named so: it opens as a fix all the same.
+old = os.path.join(tempfile.mkdtemp(), "turn_named.oanim")
+assert ops.wm.save_as_mainfile(filepath=old) == {'FINISHED'}
+with zipfile.ZipFile(old) as z:
+    members = {n: z.read(n) for n in z.namelist()}
+with zipfile.ZipFile(old, "w") as z:
+    for n, data in members.items():
+        z.writestr(n, data.replace(('"' + named[0] + '"').encode(), b'"turn 2"') if n.endswith(".json") else data)
+assert ops.wm.open_mainfile(filepath=old) == {'FINISHED'}
+rig = next(l for l in layers.all() if l.name == "Head")
+assert [a["kind"] for a in fresh().actions if a["name"] == "turn 2"] == ["FIX"], fresh().actions
+assert "turn 2" not in next(b for b in fresh().bones if b["name"] == "turn")["turn_actions"], "not turn's own"
+knob(20.0, 0.0)
+assert close(next(f for f in fixes() if f["name"] == "turn 2")["strength"], 1.0), fixes()
+assert ops.anim.action_delete(name="turn 2") == {'FINISHED'}
+mainline()
 
 # --- Symmetrize mirrors the fixes of its bones: the other side's follow the other side's bones ---------------------------
 mainline()

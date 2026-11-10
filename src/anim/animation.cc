@@ -3459,8 +3459,13 @@ std::string bone_fix_bone_ways(const Layer &owner, const BoneFix &fix, uint64_t 
 /* `base`, or with " 2", " 3", ... where taken by another action of `owner` (not `self`). */
 static std::string bone_fix_unique(const Layer &owner, const std::string &base, const std::string &self)
 {
+  /* Nor a bone's name, or its name and " 2": those name the bone's own actions (its turns). */
+  const auto turn_name = [&](const std::string &n) {
+    return bone_find_by_name(owner, n) ||
+           (n.size() > 2 && n.compare(n.size() - 2, 2, " 2") == 0 && bone_find_by_name(owner, n.substr(0, n.size() - 2)));
+  };
   const auto taken = [&](const std::string &n) {
-    return n != self && std::find(owner.actions.begin(), owner.actions.end(), n) != owner.actions.end();
+    return turn_name(n) || (n != self && std::find(owner.actions.begin(), owner.actions.end(), n) != owner.actions.end());
   };
   std::string name = base;
   for (int i = 2; taken(name); i++) {
