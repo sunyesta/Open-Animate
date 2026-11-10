@@ -352,10 +352,10 @@ class _Layer:
         """A bone layer's actions, in order (the Armature tab's Actions panel): [{"name", "kind": "ACTION", "ACTION_BONE"
         or "FIX", "full_turn": a 360 action bone action (its bone keyed exactly a whole turn, so it goes round and
         round), "frame_by": what says its frame ("OWN": its own keyable Frame, channel 'actions["name"].frame';
-        "BONE" or "KNOB": that bone's turn or knob; "FIX": its drivers), "holder" (that bone's name, or ""), "frame"
+        "BONE" or "KNOB": that bone's turn or knob; "FIX": the bones it follows), "holder" (that bone's name, or ""), "frame"
         (the frame it is at, 0 not playing; a fix: how much of it plays, 0-1), "mute", "loop" ("AUTO", "ON" or "OFF"),
-        "loops" (what Auto comes to), "length" (its last frame)}]. Make them with oanim.ops.anim.action_new /
-        fix_action_new, edit one with action_set, rename with action_rename, set how one plays with
+        "loops" (what Auto comes to), "length" (its last frame)}]. Make them with oanim.ops.anim.action_new or
+        armature.bone_fix_new, edit one with action_set, rename with action_rename, set how one plays with
         action_play_set(name=, frame=, mute=, loop=), reorder with action_move."""
         return [dict(a) for a in _oanim.layer_actions(self._id)]
 
@@ -372,17 +372,6 @@ class _Layer:
 
     # The name from before smart bones became action bones: old scripts keep working.
     smart_actions_playing = action_bone_actions_playing
-
-    @property
-    def fix_actions(self):
-        """A bone layer's fix actions (correctives): [{"name", "drivers" (action bone action names), "poses" (the
-        poses it fixes: [{"frame" (its frame in the fix, keyed with the correction), "at" (each driver's frame
-        in its action bone action), "shares" (the same as shares of their lengths, 0-1), "label" (as it is kept: "turn_r 45 · look_up 20")}]), "strength" (how
-        much of it plays now, 0-1), "nearest_pose" (index of the pose nearest now, -1), "broken" (why it can't
-        play, or "")}]. Fix a pose with oanim.ops.anim.fix_action_new (it adds a pose, or opens the one here),
-        fix_pose_add(name=, shares="0.5,0.3") and fix_pose_remove(name=, pose=N); fix_pose_snap(name=, pose=N) puts its
-        action bones at a pose."""
-        return [dict(f) for f in _oanim.layer_fix_actions(self._id)]
 
     @property
     def bone_fixes(self):
@@ -416,9 +405,9 @@ class _Layer:
         layer's space), type ("REGULAR" or "CONTROLLER_2D"), and controller and held for a bone linked to a controller. A
         controller also has controller_actions (by side, "RIGHT", "LEFT", "UP", "DOWN"), controller_frame_size,
         controller_box (its lowest and highest corners, in frames from the rest point), knob (in frames), knob_shown
-        (inside its own actions), knob_playing (where its actions really are), controller_fix_poses and controller_spots ([(name, (x, y))],
-        its named places, in frames; armature.controller_spot_add, _remove, _rename, _order, _go(name=, hold=), _move,
-        _fix and controller_spots_corners). Convert with
+        (inside its own actions), knob_playing (where its actions really are) and controller_spots ([(name, (x, y))],
+        its named places, in frames; armature.controller_spot_add, _remove, _rename, _order, _go(name=, hold=), _move
+        and controller_spots_corners). Convert with
         oanim.ops.armature.bone_convert, fill the sides with controller_side, controller_action_new and
         controller_mirror. A regular or pin bone has turn_actions (its action bone actions counterclockwise and clockwise,
         "" for none) and full_turn (its Turns is Full Turn: the one action in the first); set them with

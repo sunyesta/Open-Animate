@@ -9848,9 +9848,6 @@ static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &ar
       }
     }
   }
-  for (const float2 &p : controller_fix_poses(armature, bone)) {
-    dl->AddCircleFilled(at(p), 3.0f, UI_FIX_COLOR);
-  }
   const ImVec2 mouse = ImGui::GetIO().MousePos;
   for (const ControllerSpot &spot : bone.controller_spots) {
     const ImVec2 s = at(spot.at);
@@ -10110,32 +10107,6 @@ static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armatur
         dl->AddCircleFilled(at[e], r, col);
         dl->AddCircle(at[e], r, COL_BONE_EDGE, 0, 1.0f);
       }
-    }
-  }
-  /* Editing a fix: its action bones are held where it was made (turning them changes nothing it plays), so
-   * they're outlined in the fix's violet and say so. */
-  if (const FixAction *fix = doc.action_layer == armature.id && !doc.action.empty() ? fix_action_find(armature, doc.action)
-                                                                                    : nullptr)
-  {
-    for (const std::string &driver : fix->drivers) {
-      const Bone *held = action_bone_of(armature, driver);
-      if (!held || !bone_shown(armature, *held)) {
-        continue;
-      }
-      const size_t i = size_t(held - armature.bones.data());
-      const ImVec2 head = sbs[i].head, tail = sbs[i].tail;
-      const ImVec2 d = tail - head;
-      const float len = std::sqrt(d.x * d.x + d.y * d.y);
-      const float w = std::clamp(len * 0.1f, 4.0f, 12.0f) + 3.0f;
-      const ImVec2 n = len > 0.0f ? ImVec2(-d.y / len, d.x / len) * w : ImVec2(0, 0);
-      const ImVec2 mid = head + d * 0.18f;
-      const ImVec2 back = len > 0.0f ? d * (-3.0f / len) : ImVec2(0, 0);
-      const ImVec2 quad[4] = {head + back, mid + n, tail - back, mid - n};
-      dl->AddPolyline(quad, 4, UI_FIX_COLOR, ImDrawFlags_Closed, 2.0f);
-      const char *text = "held";
-      const ImVec2 at = tail + ImVec2(6.0f, -ImGui::GetFontSize() * 0.5f);
-      dl->AddText(at + ImVec2(1, 1), IM_COL32(0, 0, 0, 200), text);
-      dl->AddText(at, UI_FIX_COLOR, text);
     }
   }
   /* A dial held at rest while a controller's knob is on the other side's. */
@@ -15057,7 +15028,7 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
       float best = CONTROLLER_SPOT_PICK + 1.0f;
       for (size_t i = 0; i < armature.bones.size() && i < poses.size() && i < sbs.size(); i++) {
         const Bone &knob = armature.bones[i];
-        if (!bone_is_controller(knob) || !bone_shown(armature, knob) || bone_held_by_fix(doc, armature, knob)) {
+        if (!bone_is_controller(knob) || !bone_shown(armature, knob)) {
           continue;
         }
         const ImVec2 k = controller_knob_screen(doc, armature, view, knob, poses[i], sbs[i],
@@ -15085,7 +15056,7 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
     if (!io.KeyShift) {
       const std::vector<FamilyHit> under = pick_family_parts(doc, armature, view, io.MousePos);
       const Bone *knob = !under.empty() && under.front().layer->id == armature.id ? bone_find(armature, under.front().hit.bone) : nullptr;
-      if (knob && bone_is_controller(*knob) && !bone_held_by_fix(doc, armature, *knob)) {
+      if (knob && bone_is_controller(*knob)) {
         if (!knob->selected) {
           family_deselect_all(doc, armature);
           bone_click_select(armature, under.front().hit, false);
@@ -18109,32 +18080,6 @@ static void viewport_draw_contents(Area &area, Context &C)
   ui_action_panel_draw(C, "Viewport", ACTION_PANEL_KEY, origin, size, bar_w + 4.0f);
   if (ov.show && ov.info) {
     dl->AddText(origin + ImVec2(bar_w + 10.0f, header_h + 8.0f), IM_COL32(0xe6, 0xe6, 0xe6, 255), info);
-  }
-  /* Editing a fix: say so where the work is, overlays or not (keys made now go in the fix, not the
-   * mainline), with how much of it this frame is. */
-  if (const Layer *fix_owner = doc.action.empty() || wm.media_view ? nullptr : layer_find(doc, doc.action_layer)) {
-    if (const FixAction *fix = fix_action_find(*fix_owner, doc.action)) {
-      /* On one of its poses, which; between them, that keys here don't play. */
-      const int pose = fix_pose_on_frame(*fix, doc.frame_current);
-      std::string label = "Editing fix: " + fix->name + "  |  ";
-      if (pose >= 0) {
-        label += "pose " + std::to_string(pose + 1) + " of " + std::to_string(fix->poses.size()) + ": " +
-                 fix_pose_label(*fix_owner, *fix, fix->poses[size_t(pose)]);
-      }
-      else {
-        std::string frames;
-        for (const FixPose &p : fix->poses) {
-          frames += (frames.empty() ? "" : ", ") + std::to_string(p.frame);
-        }
-        label += "frame " + std::to_string(doc.frame_current) + " isn't a pose: keys here don't play (poses on " +
-                 (fix->poses.size() == 1 ? "frame " : "frames ") + frames + ")";
-      }
-      const float line = ov.show && ov.info ? ImGui::GetTextLineHeightWithSpacing() + 4.0f : 0.0f;
-      const ImVec2 at = origin + ImVec2(bar_w + 10.0f, header_h + 8.0f + line);
-      dl->AddRectFilled(at - ImVec2(6, 3), at + ImGui::CalcTextSize(label.c_str()) + ImVec2(6, 3),
-                        pose >= 0 ? UI_FIX_ACTIVE_COLOR & 0xd8ffffff : IM_COL32(0x8a, 0x3a, 0x3a, 0xd8), 4.0f);
-      dl->AddText(at, IM_COL32(0xf2, 0xee, 0xff, 255), label.c_str());
-    }
   }
   /* Media View hides the overlays, the info line with them: a word says why, and how to leave it. */
   if (wm.media_view) {

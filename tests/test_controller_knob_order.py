@@ -1,6 +1,6 @@
 """An independent 2 Axis Controller knob riding its Knob Parent plays the frames it is shown at: actions that move the
-box or the Knob Parent (a head turn, and a fix of the head turn) play first, then the knob picks its frames where they
-put it, so what plays matches where the knob sits in its box.
+box or the Knob Parent (a head turn) play first, then the knob picks its frames where they put it, so what plays
+matches where the knob sits in its box.
 
 Run with:  OpenAnimate --background --python tests/test_controller_knob_order.py
 """
@@ -120,38 +120,5 @@ rig.bone_set("dial", angle=1.0)
 go(30)
 shown = matches_shown(30, "a head turn plays before the knob picks its frames")
 assert close(shown, (10, 0), 1e-2), ("the head turn moved the knob 10 frames", shown)
-
-# The fix of the head turn plays before the knob picks its frames too. The knob keyed 10 frames back, so the head turn
-# brings it to rest: the fix is the head's alone (dial and nod).
-doc.frame_current = 30
-rig.bone_set("eye", knob=(-10.0, 0.0))
-rig.bone_set("nod", angle=1.0)
-go(30)
-assert bone("eye")["knob_shown"][0] < 1e-3, bone("eye")["knob_shown"]
-assert ops.anim.fix_action_new() == {'FINISHED'}
-assert rig.fix_actions[0]["drivers"] == ["dial", "nod"], rig.fix_actions[0]["drivers"]
-rig.bone_set("center", position=(20 * size, 0.0))
-go(rig.fix_actions[0]["poses"][0]["frame"])
-assert ops.anim.action_set(name="") == {'FINISHED'}
-shown = matches_shown(30, "the head turn's fix plays before the knob picks its frames")
-assert close(shown, (10, 0), 1e-2), ("the head turn and its fix moved the knob 20 frames", shown)
-
-# A fix moving the Knob Parent when neither of its actions does (nod and tilt move nothing): it plays first too.
-doc.frame_current = 60
-rig.bone_set("dial", angle=0.0)
-rig.bone_set("eye", knob=(0.0, 0.0))
-rig.bone_set("tilt", angle=1.0)
-go(60)
-assert bone("eye")["knob_shown"][0] < 1e-3, bone("eye")["knob_shown"]
-assert ops.anim.fix_action_new() == {'FINISHED'}
-assert doc.action == "nod × tilt", doc.action
-rig.bone_set("center", position=(10 * size, 0.0))
-go(rig.fix_actions[1]["poses"][0]["frame"])
-assert ops.anim.action_set(name="") == {'FINISHED'}
-# The knob already playing its action (5 frames in), so it has to wait for the fix rather than start after it.
-doc.frame_current = 60
-rig.bone_set("eye", knob=(5.0, 0.0))
-shown = matches_shown(60, "a fix moving the Knob Parent plays before the knob picks its frames")
-assert close(shown, (15, 0), 1e-2), ("the fix moved the knob 10 frames", shown)
 
 print("Knob order tests passed")

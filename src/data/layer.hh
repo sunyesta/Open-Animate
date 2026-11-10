@@ -1083,25 +1083,6 @@ struct CustomChannel {
   bool operator==(const CustomChannel &) const = default;
 };
 
-/* One pose a fix action corrects: where each of its drivers is (that action bone action's frame), and the fix's
- * frame holding the correction for it (its keys there). */
-struct FixPose {
-  std::vector<float> at;
-  int frame = 10;
-  /* It has had keys: once they are all deleted, the pose goes (fix_actions_tidy). */
-  bool keyed = false;
-  bool operator==(const FixPose &) const = default;
-};
-/* A fix action (a corrective, Maya's combination shapes): an action of a bone layer that plays by itself
- * when the action bone actions it names (its drivers) play together. It corrects one or more poses of theirs, each
- * on a frame of its own (10, 20, ...): exactly at a pose its keys there play, between poses they blend by
- * how close the pose is to each, and it fades out toward rest as its drivers do (anim/animation.hh). */
-struct FixAction {
-  std::string name;
-  std::vector<std::string> drivers;
-  std::vector<FixPose> poses;
-  bool operator==(const FixAction &) const = default;
-};
 /* A fix action that follows bones (the Bone tab's Fix Actions): an action of a bone layer whose own keys on the bones
  * it follows (a bone's angle, a 2 Axis Controller's knob) trace a line of poses, from where they are on frame 1 to
  * where they are on the last frame they are keyed on; its other keys are the fix along that line. On the mainline it
@@ -1316,9 +1297,7 @@ struct Layer {
   /* Bone layers: the names of their actions, alternative timelines for the layer and everything
    * inside it (see anim/animation.hh). */
   std::vector<std::string> actions;
-  /* Bone layers: which of those actions are fix actions, and what drives them. */
-  std::vector<FixAction> fix_actions;
-  /* Bone layers: which are fix actions that follow bones (see BoneFix). */
+  /* Bone layers: which of those actions are fixes (see BoneFix). */
   std::vector<BoneFix> bone_fixes;
   /* Bone layers: how its actions play, those whose Frame, Mute or Loop has been set (see ActionPlay). */
   std::vector<ActionPlay> action_plays;

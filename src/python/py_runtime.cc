@@ -3259,11 +3259,6 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         d["knob"] = py::make_tuple(knob.x, knob.y);
         d["knob_shown"] = py::make_tuple(shown.x, shown.y);
         d["knob_playing"] = py::make_tuple(playing.x, playing.y);
-        py::list fix_poses;
-        for (const float2 &p : controller_fix_poses(layer, b)) {
-          fix_poses.append(py::make_tuple(p.x, p.y));
-        }
-        d["controller_fix_poses"] = fix_poses;
         py::list spots;
         for (const ControllerSpot &spot : b.controller_spots) {
           spots.append(py::make_tuple(spot.name, py::make_tuple(spot.at.x, spot.at.y)));
@@ -5094,7 +5089,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       py::dict d;
       d["name"] = name;
       d["kind"] = action_bone_of(layer, name)                                      ? "ACTION_BONE"
-                  : fix_action_find(layer, name) || bone_fix_find(layer, name) ? "FIX"
+                  : bone_fix_find(layer, name) ? "FIX"
                                                                                : "ACTION";
       d["full_turn"] = action_bone_action_full_turn(layer, name);
       const Bone *holder = nullptr;
@@ -5152,42 +5147,6 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["frame"] = play.frame;
       d["strength"] = play.strength;
       d["auto_name"] = f.auto_name;
-      out.append(d);
-    }
-    return out;
-  });
-  m.def("layer_fix_actions", [layer_or_raise](uint64_t id) {
-    Layer &layer = layer_or_raise(id);
-    const auto playing = action_bone_actions_playing(layer);
-    py::list out;
-    for (const FixAction &f : layer.fix_actions) {
-      py::dict d;
-      d["name"] = f.name;
-      py::list drivers, poses;
-      for (const std::string &n : f.drivers) {
-        drivers.append(n);
-      }
-      for (const FixPose &pose : f.poses) {
-        py::dict pd;
-        py::list at, shares;
-        for (const float v : pose.at) {
-          at.append(v);
-        }
-        for (const float v : fix_pose_shares(layer, f, pose)) {
-          shares.append(v);
-        }
-        pd["frame"] = pose.frame;
-        pd["at"] = at;
-        pd["shares"] = shares;
-        pd["label"] = fix_pose_label(layer, f, pose);
-        poses.append(pd);
-      }
-      const FixMix mix = fix_action_mix(layer, f, playing);
-      d["drivers"] = drivers;
-      d["poses"] = poses;
-      d["strength"] = mix.strength;
-      d["nearest_pose"] = mix.nearest;
-      d["broken"] = fix_action_broken(layer, f);
       out.append(d);
     }
     return out;

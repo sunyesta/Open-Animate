@@ -92,7 +92,7 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
   std::vector<std::pair<std::string, std::string>> jobs;
   std::vector<std::string> centred;
   for (const std::string &name : owner.actions) {
-    if (!action_bone_of(owner, name) || fix_action_find(owner, name)) {
+    if (!action_bone_of(owner, name)) {
       continue;
     }
     const Bone *bone = action_bone_of(owner, name);
@@ -2322,10 +2322,10 @@ void rig_operators_register()
                      report(ReportType::Warning, "No action named " + action);
                      return OpStatus::Cancelled;
                    }
-                   if (fix_action_find(owner, action) || controller_of_action(owner, action) ||
+                   if (bone_fix_find(owner, action) || controller_of_action(owner, action) ||
                        controller_dial_of_action(owner, action))
                    {
-                     report(ReportType::Warning, action + " is already played by a bone or fixes a pose");
+                     report(ReportType::Warning, action + " is already played by a bone or is a fix");
                      return OpStatus::Cancelled;
                    }
                    /* Keyed turning the bone the other way, it belongs in the other slot. */
@@ -2679,9 +2679,7 @@ void rig_operators_register()
                });
 
   rig_operator("armature.controller_spot_move", "Move Spot Here",
-               "Move spot name= of the active 2 Axis Controller (bone=: that one) to where the knob is. A fix pose on the "
-               "spot moves with it with fix=FOLLOW (where its actions still turn at least 5%), stays with fix=KEEP "
-               "(the default)",
+               "Move spot name= of the active 2 Axis Controller (bone=: that one) to where the knob is",
                bone_layer_active, [spot_controller, spot_named](Context &C) {
                  Bone *knob = spot_controller(C);
                  ControllerSpot *spot = knob ? spot_named(*knob, C) : nullptr;
@@ -2690,49 +2688,7 @@ void rig_operators_register()
                  }
                  Layer &armature = *active_armature(C);
                  /* Where the knob is seen (an independent or constrained knob's keys aren't its place). */
-                 const float2 from = spot->at, to = controller_knob_shown(*C.document, armature, *knob);
-                 if (op_arg(C, "fix", "KEEP") == "FOLLOW") {
-                   for (const auto &[fix, pose] : controller_fix_poses_at(armature, *knob, from)) {
-                     if (!controller_fix_pose_move(armature, *knob, fix, pose, to)) {
-                       report(ReportType::Warning, "The fix pose of " + armature.fix_actions[fix].name +
-                                                       " stays: here one of its actions isn't turned enough");
-                     }
-                   }
-                 }
-                 spot->at = to;
-                 return OpStatus::Finished;
-               });
-
-  rig_operator("armature.controller_spot_fix", "Fix This Pose Here",
-               "Move the active 2 Axis Controller's knob (bone=: that one) to spot name= and fix the pose there (Fix This "
-               "Pose for its actions turned there): the fix opens on that pose, to key the correction",
-               bone_layer_active, [spot_controller, spot_named, knob_can_move, knob_go](Context &C) {
-                 Bone *knob = spot_controller(C);
-                 ControllerSpot *spot = knob ? spot_named(*knob, C) : nullptr;
-                 Layer &armature = *active_armature(C);
-                 if (!spot || !knob_can_move(C, armature)) {
-                   return OpStatus::Cancelled;
-                 }
-                 Document &doc = *C.document;
-                 const float2 at = spot->at;
-                 const uint64_t owner = armature.id;
-                 std::vector<std::string> drivers;
-                 for (int side = 0; side < CONTROLLER_SIDES; side++) {
-                   const float along = (controller_side_axis(side) == 0 ? at.x : at.y) * controller_side_sign(side);
-                   if (along > 0.0f && !knob->controller_actions[side].empty()) {
-                     drivers.push_back(knob->controller_actions[side]);
-                   }
-                 }
-                 if (drivers.size() < 2) {
-                   report(ReportType::Warning, "The spot is on one side only: a fix is for two actions turned together");
-                   return OpStatus::Cancelled;
-                 }
-                 knob_go(doc, armature, *knob, at, false);
-                 const FixOpened opened = document_fix_pose_here(doc, owner, drivers);
-                 if (!opened.error.empty()) {
-                   report(ReportType::Warning, opened.error);
-                   return OpStatus::Cancelled;
-                 }
+                 spot->at = controller_knob_shown(*C.document, armature, *knob);
                  return OpStatus::Finished;
                });
 

@@ -144,23 +144,6 @@ rig.bone_set("dial", angle=dial_bone()["setup_angle"] + QUARTER / 2)
 go(7)
 assert close(joy_bone()["knob"], (10, 0), 0.05), ("the dial's frame 20 is 10 out", joy_bone()["knob"])
 
-# --- A fix pose moved with its spot holds the frame its place plays --------------------------------------------------
-r = Rig()
-r.time_right(20, 10.0)
-doc.frame_current = 5
-r.rig.bone_set("eye", knob=(10.0, -20.0))
-go(5)
-assert ops.anim.fix_action_new() == {'FINISHED'}
-assert ops.anim.action_set(name="") == {'FINISHED'}
-assert ops.armature.controller_spot_add(name="Here", x="10", y="-20") == {'FINISHED'}
-go(5)
-r.rig.bone_set("eye", knob=(5.0, -20.0))
-go(5)
-assert ops.armature.controller_spot_move(name="Here", fix="FOLLOW") == {'FINISHED'}
-fix = r.rig.fix_actions[0]
-at = dict(zip(fix["drivers"], fix["poses"][0]["at"]))
-assert close(at["eye_r"], 10, 0.05) and close(at["eye_d"], 20, 0.05), ("5 out on Right is its frame 10", at)
-
 # --- Back to Regular, its timing keys go ------------------------------------------------------------------------------
 r = Rig()
 r.time_right(20, 10.0)

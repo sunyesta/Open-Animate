@@ -32,9 +32,8 @@ namespace oanim {
 
 struct Bone;
 struct ActionPlay;
-struct FixAction;
 struct BoneFix;
-struct FixPose;
+
 struct Document;
 struct Layer;
 
@@ -112,19 +111,12 @@ const Bone *action_bone_of(const Layer &owner, const std::string &action);
 /* --- 2 Axis Controllers (anim/controller.hh) ------------------------------------------------------- */
 
 /* Where a controller's knob shows, in frames: where it is, or inside one of its own actions the frame shown on that
- * side, and inside a fix the pose held. */
+ * side. */
 float2 controller_knob_shown(const Document &doc, const Layer &owner, const Bone &knob);
 /* Where its actions are really playing, in frames: not the knob where something else turns its dials. */
 float2 controller_knob_playing(const Layer &owner, const Bone &knob);
-/* The poses of the fixes of its actions, in frames, as the box marks them. */
-std::vector<float2> controller_fix_poses(const Layer &owner, const Bone &knob);
-/* Ctrl on a knob: onto its nearest spot, fix pose, rest, or crossing of keys (controller_knob_snap). */
+/* Ctrl on a knob: onto its nearest spot, rest, or crossing of keys (controller_knob_snap). */
 void armature_knob_snap(const Layer &armature, Bone &knob);
-/* The poses of fixes on `at` of the knob (every driver of the fix one of its sides'): {fix, pose} indices. */
-std::vector<std::pair<size_t, size_t>> controller_fix_poses_at(const Layer &owner, const Bone &knob, float2 at);
-/* Moves pose `pose` of fix `fix` to the knob at `to` (its keys stay on the pose's frame). False, leaving it, where `to`
- * would have one of its drivers turned less than FIX_COUNTS_FROM. */
-bool controller_fix_pose_move(Layer &owner, const Bone &knob, size_t fix, size_t pose, float2 to);
 /* Whether a dial is held at rest because the knob is on the other side's. */
 bool controller_dial_held(const Layer &owner, const Bone &dial);
 /* What the sides' actions key, found again after keys change (Bone::controller_keys). */
@@ -151,18 +143,9 @@ void controller_release(Document &doc, uint64_t owner, uint64_t knob);
  * actions, and get the action bone actions' amounts added. For working out other frames than the one shown
  * (dynamics simulate every frame up to it). */
 void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone> &bones);
-/* --- Fix actions (correctives): see FixAction (data/layer.hh). A fix plays after the action bone actions, never
- * moving an action bone itself. Fixes add up: one for three action bone actions is keyed on top of those for two of
- * them (they play while it is edited), and fades out whenever any of its own is at rest. --------------- */
-
-/* Fix action `name` of `owner`, or null (an ordinary or action bone action). */
-const FixAction *fix_action_find(const Layer &owner, const std::string &name);
-/* Why it can't play (a driver deleted, or not an action bone action any more), or "" when it can. */
-std::string fix_action_broken(const Layer &owner, const FixAction &fix);
-
 /* --- Fix actions that follow bones (BoneFix, data/layer.hh: the Bone tab's Fix Actions). One is an ordinary action
  * while edited (its bones keyed and moved in it, the action bone actions playing under it from where they are); on the
- * mainline it plays after the action bone actions and the fixes above, never moving the bones it follows or an action
+ * mainline it plays after the action bone actions, never moving the bones it follows or an action
  * bone, at the frame the bones' pose picks. ----------------------------------------------------------------------- */
 
 const BoneFix *bone_fix_find(const Layer &owner, const std::string &name);
@@ -220,7 +203,7 @@ ActionPlay *action_play_find(Layer &owner, const std::string &name);
 /* Made the first time any of it is set. */
 ActionPlay &action_play_ensure(Layer &owner, const std::string &name);
 /* What says an action's frame: its own Frame, a bone's turn (an action bone action), a knob (a controller's side,
- * linked dials too: the knob holds the keys) or, for a fix, its drivers. `r_holder`: the bone or knob. */
+ * linked dials too: the knob holds the keys) or, for a fix, the bones it follows. `r_holder`: the bone or knob. */
 enum class ActionFrameBy { Own, Bone, Knob, Fix };
 ActionFrameBy action_frame_by(const Layer &owner, const std::string &name, const Bone **r_holder = nullptr);
 bool action_muted(const Layer &owner, const std::string &name);
@@ -235,66 +218,16 @@ float action_frame_shown(const Layer &owner, const std::string &name);
 /* Puts it at `frame` (0: not playing): its own Frame, or its bone turned or knob moved to there (keyed as edits are).
  * False for a fix, or a bone with no keys yet to say how far. */
 bool action_frame_set(Layer &owner, const std::string &name, float frame);
-/* Turned less than this share of its length, an action bone action doesn't count toward a fix being made or
- * offered (a bone nudged by accident); fixes still play from any amount. */
-inline constexpr float FIX_COUNTS_FROM = 0.05f;
-/* The action bone actions playing now that count for fixes (FIX_COUNTS_FROM of their length or more). */
-std::vector<std::pair<std::string, float>> action_bone_actions_counting(const Layer &owner);
-/* Where pose `pose` of a fix has each driver, as a share of that action bone action's length (0 to 1). */
-std::vector<float> fix_pose_shares(const Layer &owner, const FixAction &fix, const FixPose &pose);
 /* "12" or "12.5": an action frame as labels show it. */
 std::string action_frame_text(float frame);
-/* "head_turn 45 · HeadTurnUp 20": a pose of a fix, for labels, as it is kept (each action bone action's frame). */
-std::string fix_pose_label(const Layer &owner, const FixAction &fix, const FixPose &pose);
-/* How a fix plays with `playing` (action bone action frames, as action_bone_actions_playing gives): each pose with how
- * much of its correction is added (its keys on its frame, as offsets from the setup), `strength` how much
- * of the fix plays (0 to 1: 1 at or past one of its poses, 0 while any of its drivers rests), `nearest` the
- * pose it has the most say (-1 with none). Exact at each pose; in between, a grid of the drivers' shares blends
- * linearly from its corners (rest adds nothing), so one pose alone fades with its drivers' shares multiplied. */
-struct FixMix {
-  std::vector<std::pair<size_t, float>> poses;
-  float strength = 0.0f;
-  int nearest = -1;
-};
-FixMix fix_action_mix(const Layer &owner, const FixAction &fix, const std::vector<std::pair<std::string, float>> &playing);
-float fix_action_strength(const Layer &owner, const FixAction &fix, const std::vector<std::pair<std::string, float>> &playing);
-/* The pose of `fix` within FIX_COUNTS_FROM of `playing` on each of its drivers (the closest), or -1. */
-int fix_pose_near(const Layer &owner, const FixAction &fix, const std::vector<std::pair<std::string, float>> &playing);
-/* The pose a fix's frame `frame` holds its drivers at while it is edited: the last pose on or before it (the
- * first, before that); -1 with no poses. */
-int fix_pose_held(const FixAction &fix, int frame);
-/* The pose on frame `frame` exactly, or -1 (a frame between poses: keys there don't play). */
-int fix_pose_on_frame(const FixAction &fix, int frame);
-/* Whether action `name` adds onto the pose rather than being a timeline of its own (an action bone or fix action):
+/* Whether action `name` adds onto the pose rather than being a timeline of its own (an action bone action):
  * its keys are offsets that pose changes elsewhere leave as they are. */
 bool action_adds(const Layer &owner, const std::string &name);
-/* Opens the fix for this pose: for `drivers` (action bone action names; empty: every one counting now), the fix of
- * exactly those, made if there is none ("head_turn × head_up"), at its pose here (one within FIX_COUNTS_FROM
- * of each driver's share), added if there is none, keyed to start from what the fix played here before.
- * Edited at once on that pose's frame. */
-struct FixOpened {
-  std::string name;
-  int pose = -1;
-  bool new_fix = false, new_pose = false;
-  /* Why nothing opened, for the report. */
-  std::string error;
-};
-FixOpened document_fix_pose_here(Document &doc, uint64_t owner, const std::vector<std::string> &drivers = {});
-/* Adds a pose to fix `name` of `owner` with its drivers at `shares` (0 to 1 of each action bone action), keyed to
- * start from what the fix played there before, and opens it. Returns its index, or -1. */
-int document_fix_pose_add(Document &doc, uint64_t owner, const std::string &name, const std::vector<float> &shares);
-/* Removes pose `pose` of fix `name` (its keys on its frame with it); never the last one. */
-bool document_fix_pose_remove(Document &doc, uint64_t owner, const std::string &name, size_t pose);
-/* Whether `bone` of `armature` is held by the fix being edited (one of its action bones: they show the pose,
- * so they can't be picked or changed until it's left). */
-bool bone_held_by_fix(const Document &doc, const Layer &armature, const Bone &bone);
-/* After every change (each undo step): a fix's action bones picked while it is edited are let go (saying
- * why), and a pose whose keys have all been deleted goes, the fix with its last one. */
-void fix_actions_tidy(Document &doc);
-/* Renames action `from` of `owner`: its keys, the fixes it drives and, edited, the timeline's name. */
+/* After every change (each undo step): a fix that follows a bone deleted follows the rest. */
+void bone_fixes_tidy(Document &doc);
+/* Renames action `from` of `owner`: its keys, its fix or controller side and, edited, the timeline's name. */
 bool document_action_rename(Document &doc, uint64_t owner, const std::string &from, const std::string &to);
-/* Bone `from` of `owner` renamed `to`: its action bone actions take the new name, and the fixes they drive with
- * them. */
+/* Bone `from` of `owner` renamed `to`: its action bone actions take the new name. */
 void armature_bone_renamed(Document &doc, uint64_t owner, const std::string &from, const std::string &to);
 
 /* Takes what action bone actions add off every plain value, leaving the data (for saving). */

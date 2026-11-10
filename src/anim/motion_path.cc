@@ -260,12 +260,8 @@ static bool action_played_apart(const Layer &owner, const std::string &name, con
   };
   const Bone *holder = nullptr;
   switch (action_frame_by(owner, name, &holder)) {
-    case ActionFrameBy::Fix: {
-      const FixAction *fix = fix_action_find(owner, name);
-      return fix && std::all_of(fix->drivers.begin(), fix->drivers.end(), [&](const std::string &d) {
-               return d != name && action_played_apart(owner, d, bone, depth + 1);
-             });
-    }
+    case ActionFrameBy::Fix:
+      return false;
     case ActionFrameBy::Knob:
       if (!holder || holder->controller_knob_independent || controller_constrained(*holder) ||
           holder->controller_knob_parent != 0 || hangs_from_bone(holder))

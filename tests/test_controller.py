@@ -447,20 +447,6 @@ doc.frame_current = 50
 rig.bone_set("corner", knob=(20.0, 20.0))
 settle()
 assert close(where(), (0.0, 4.0)), where()
-assert ops.anim.fix_action_new() == {'FINISHED'}, "Fix This Pose works from a knob as from two bones"
-fix = doc.action
-assert fix and bone("corner")["controller_fix_poses"] == [(20.0, 20.0)], (fix, bone("corner"))
-assert close(bone("corner")["knob_shown"], (20.0, 20.0)), bone("corner")
-face.set_point(0, (0.5, 3.0))
-doc.frame_current = doc.frame_current + 1
-doc.frame_current = doc.frame_current - 1
-mainline()
-doc.frame_current = 50
-settle()
-assert close(where(), (0.5, 3.0)), ("the fix plays at the corner", where())
-rig.bone_set("corner", knob=(20.0, 0.0))
-settle()
-assert close(where(), (2.0, 2.0)), ("and not with one side alone", where())
 doc.frame_current = 0
 
 for k in list(rig.keyframes('bones["corner"].position')):

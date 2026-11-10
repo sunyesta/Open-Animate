@@ -146,6 +146,7 @@ assert close(point(2), (2.0, 0.0))
 assert ops.anim.action_play_set(name=name, mute="0") == {'FINISHED'}
 settle()
 assert close(point(2), (2.0, 0.5))
+assert ops.anim.action_play_set(name=name, frame="3") == {'CANCELLED'}, "its bones say its frame"
 
 # --- What it follows ---------------------------------------------------------------------------------------------------
 assert ops.armature.bone_fix_follow(name=name, bones="arm") == {'FINISHED'}

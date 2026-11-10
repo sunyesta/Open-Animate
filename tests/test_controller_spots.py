@@ -1,6 +1,6 @@
 """A 2 Axis Controller's spots (the Bone tab's Spots panel): named places for its knob. Going to one is a keyed move
-(Shift: held there), Ctrl lands the knob on the nearest spot, fix pose, rest or crossing of keys, a hover shows a pose
-without moving anything, and spots work with fixes, Add Corners, files and Symmetrize.
+(Shift: held there), Ctrl lands the knob on the nearest spot, rest or crossing of keys, a hover shows a pose without
+moving anything, and spots work with Add Corners, files and Symmetrize.
 
 Run with:  OpenAnimate --background --python tests/test_controller_spots.py
 """
@@ -80,10 +80,6 @@ class Rig:
     def where(self):
         return tuple(self.face.shown()[0][0])
 
-    def fix(self):
-        assert len(self.rig.fix_actions) == 1, self.rig.fix_actions
-        return self.rig.fix_actions[0]
-
 
 # --- Adding, naming, ordering and removing ----------------------------------------------------------------------------
 r = Rig()
@@ -141,13 +137,8 @@ ops.ed.undo()  # the refused ones made no step: this takes back the held key
 r.settle()
 assert 80 not in r.keys(), r.keys()
 
-# --- Ctrl lands on the nearest spot, fix pose, rest or crossing of keys --------------------------------------------------
+# --- Ctrl lands on the nearest spot, rest or crossing of keys --------------------------------------------------
 r.doc.frame_current = 90
-r.knob(30.0, 10.0)
-assert ops.anim.fix_action_new() == {'FINISHED'}, "a fix pose at (30, 10)"
-r.doc.action = ""
-r.doc.frame_current = 90
-assert close(r.knob(28.0, 11.0, snap=True), (30.0, 10.0)), "onto the fix pose"
 assert close(r.knob(6.0, 1.0, snap=True), (5.0, 0.0)), "onto the spot"
 assert close(r.knob(37.0, 2.0, snap=True), (40.0, 0.0)), "where keys cross: turn_r's end, look_up at rest"
 assert close(r.knob(2.0, 13.0, snap=True), (0.0, 15.0)), "the spot Up, nearer than look_up's end (0, 20)"
@@ -169,32 +160,11 @@ assert r.keys() == keys_before, "nor got keyed as the frame changes"
 _oanim.controller_preview(r.rig.id, "", 0.0, 0.0)
 assert _oanim.controller_preview_points(r.face.id) is None, "cleared"
 
-# --- Move Here: a fix pose on the spot goes with it only if asked --------------------------------------------------------
-assert ops.armature.controller_spot_add(name="Fixed", x="30", y="10") == {'FINISHED'}
+# --- Move Here ------------------------------------------------------------------------------------------------------------
 r.doc.frame_current = 90
 r.knob(25.0, 12.0)
-assert ops.armature.controller_spot_move(name="Fixed", fix="KEEP") == {'FINISHED'}
-assert dict(r.spots())["Fixed"] == (25.0, 12.0) and r.fix()["poses"][0]["at"] == [10.0, 30.0], "the fix pose stays"
-assert ops.armature.controller_spot_move(name="Smile", fix="FOLLOW") == {'FINISHED'}, "no fix pose on Smile: just moves"
-assert ops.armature.controller_spot_add(name="Fixed2", x="30", y="10") == {'FINISHED'}
-r.knob(25.0, 12.0)
-assert ops.armature.controller_spot_move(name="Fixed2", fix="FOLLOW") == {'FINISHED'}
-assert r.fix()["poses"][0]["at"] == [12.0, 25.0], ("the fix pose moves with it", r.fix())
-# Somewhere one of its actions rests, a fix pose can't be: it stays.
-r.knob(25.0, 0.0)
-assert ops.armature.controller_spot_move(name="Fixed2", fix="FOLLOW") == {'FINISHED'}
-assert dict(r.spots())["Fixed2"] == (25.0, 0.0) and r.fix()["poses"][0]["at"] == [12.0, 25.0], r.fix()
-
-# --- Fix This Pose Here --------------------------------------------------------------------------------------------------
-assert ops.armature.controller_spot_add(name="Corner", x="20", y="15") == {'FINISHED'}
-r.doc.frame_current = 100
-assert ops.armature.controller_spot_fix(name="Corner") == {'FINISHED'}
-assert r.doc.action == r.fix()["name"], "the fix opens on the pose"
-assert [p["at"] for p in r.fix()["poses"]] == [[12.0, 25.0], [15.0, 20.0]], r.fix()["poses"]
-r.doc.action = ""
-r.doc.frame_current = 100
-assert close(r.bone()["knob"], (20.0, 15.0)) and r.keys()[100][0] == (20.0, 15.0), ("and the knob is there", r.keys())
-assert ops.armature.controller_spot_fix(name="Up") == {'CANCELLED'}, "a spot on one side only: nothing to fix"
+assert ops.armature.controller_spot_move(name="Smile") == {'FINISHED'}
+assert dict(r.spots())["Smile"] == (25.0, 12.0), r.spots()
 
 # --- Add Corners -------------------------------------------------------------------------------------------------------
 r = Rig()

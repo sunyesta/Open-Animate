@@ -1065,21 +1065,6 @@ static json layer_to_json(const Layer &layer)
     if (!layer.actions.empty()) {
       j["actions"] = layer.actions;
     }
-    if (!layer.fix_actions.empty()) {
-      json fixes = json::array();
-      for (const FixAction &f : layer.fix_actions) {
-        json poses = json::array();
-        for (const FixPose &pose : f.poses) {
-          json at = json::array();
-          for (const float v : pose.at) {
-            at.push_back(num(v));
-          }
-          poses.push_back({{"frame", pose.frame}, {"at", at}, {"keyed", pose.keyed}});
-        }
-        fixes.push_back({{"name", f.name}, {"drivers", f.drivers}, {"poses", poses}});
-      }
-      j["fix_actions"] = std::move(fixes);
-    }
     if (!layer.bone_fixes.empty()) {
       json fixes = json::array();
       for (const BoneFix &f : layer.bone_fixes) {
@@ -2625,47 +2610,7 @@ static Layer layer_from_json(const json &j, int depth)
       layer.actions.push_back(a.get<std::string>());
     }
   }
-  for (const json &fj : get_array(j, "fix_actions")) {
-    if (!fj.is_object()) {
-      continue;
-    }
-    FixAction f;
-    f.name = get_string(fj, "name");
-    for (const json &d : get_array(fj, "drivers")) {
-      if (d.is_string()) {
-        f.drivers.push_back(d.get<std::string>());
-      }
-    }
-    const auto read_at = [&](const json &arr) {
-      std::vector<float> at;
-      for (const json &v : arr) {
-        if (v.is_number()) {
-          at.push_back(v.get<float>());
-        }
-      }
-      at.resize(f.drivers.size(), 0.0f);
-      return at;
-    };
-    for (const json &pj : get_array(fj, "poses")) {
-      if (pj.is_object()) {
-        FixPose pose;
-        pose.frame = std::max(1, get_int(pj, "frame", 10));
-        pose.keyed = get_bool(pj, "keyed", false);
-        pose.at = read_at(get_array(pj, "at"));
-        f.poses.push_back(std::move(pose));
-      }
-    }
-    /* Saved before fixes had poses: one, where it was made ("full"), on its last frame ("length"). */
-    if (!fj.contains("poses")) {
-      FixPose pose;
-      pose.frame = std::max(1, get_int(fj, "length", 24));
-      pose.at = read_at(get_array(fj, "full"));
-      f.poses.push_back(std::move(pose));
-    }
-    if (!f.name.empty() && std::find(layer.actions.begin(), layer.actions.end(), f.name) != layer.actions.end()) {
-      layer.fix_actions.push_back(std::move(f));
-    }
-  }
+  /* "fix_actions", the fixes of drivers, are no more: their actions open as ordinary ones. */
   for (const json &fj : get_array(j, "bone_fixes")) {
     BoneFix f;
     f.name = fj.is_object() ? get_string(fj, "name") : std::string();

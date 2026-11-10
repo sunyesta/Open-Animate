@@ -292,8 +292,6 @@ add_test(NAME action_panel
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_action_panel.py)
 add_test(NAME action_panel_edges
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_action_panel_edges.py)
-add_test(NAME controller_fixes
-  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_fixes.py)
 add_test(NAME controller_spots
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_spots.py)
 add_test(NAME group_deform
@@ -414,8 +412,6 @@ add_test(NAME sculpt_toggle
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sculpt_toggle.py)
 add_test(NAME bone_relations
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_relations.py)
-add_test(NAME fix_actions
-  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_fix_actions.py)
 add_test(NAME fla_import
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_fla_import.py)
 add_test(NAME xfl_import

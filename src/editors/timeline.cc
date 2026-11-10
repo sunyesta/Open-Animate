@@ -66,7 +66,6 @@ static constexpr ImU32 COL_WIDGET_SHADOW = IM_COL32(0x29, 0x29, 0x29, 255);
 static constexpr ImU32 COL_ACTION_ACTIVE = IM_COL32(0x8a, 0x5a, 0x1e, 255);
 static constexpr ImU32 COL_FIX_ACTIVE = UI_FIX_ACTIVE_COLOR;
 static constexpr ImU32 COL_FIX_TEXT = UI_FIX_COLOR;
-static constexpr ImU32 COL_BROKEN = UI_BROKEN_COLOR;
 static constexpr ImU32 COL_ACTION_TINT = IM_COL32(0xd0, 0x8a, 0x2e, 0x14);
 
 enum class Icon { Record, JumpStart, KeyPrev, PlayReverse, Play, Pause, KeyNext, JumpEnd, Stepped, Menu, Onion, Path, Chain, Pointer, Lock };
@@ -320,13 +319,13 @@ static void action_menu(Context &C, float width)
   if (in_action && !owner) {
     owner = action_owner(doc, doc.active_layer);
   }
-  const FixAction *editing_fix = in_action && owner ? fix_action_find(*owner, doc.action) : nullptr;
+  const BoneFix *editing_fix = in_action && owner ? bone_fix_find(*owner, doc.action) : nullptr;
   const std::string preview = !in_action ? "Mainline" : editing_fix ? "Fix: " + doc.action : doc.action;
 
   if (in_action) {
     ImGui::PushStyleColor(ImGuiCol_FrameBg, editing_fix ? COL_FIX_ACTIVE : COL_ACTION_ACTIVE);
   }
-  /* A fix's name is its drivers': wider, to read whole. */
+  /* A fix's name is the actions it ends on: wider, to read whole. */
   if (editing_fix) {
     const float h = ImGui::GetFrameHeight();
     width = std::max(width, std::min(ImGui::CalcTextSize(preview.c_str()).x + h * 2.5f, h * 14.0f));
@@ -339,18 +338,14 @@ static void action_menu(Context &C, float width)
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
     if (editing_fix) {
-      std::string drivers;
-      for (const std::string &d : editing_fix->drivers) {
-        drivers += (drivers.empty() ? "" : ", ") + d;
+      std::string bones;
+      for (const uint64_t id : editing_fix->follows) {
+        if (const Bone *b = bone_find(*owner, id)) {
+          bones += (bones.empty() ? "" : " and ") + b->name;
+        }
       }
-      const int held = fix_pose_on_frame(*editing_fix, doc.frame_current);
-      const std::string where = held >= 0 ? "Pose " + std::to_string(held + 1) + ": " +
-                                                fix_pose_label(*owner, *editing_fix, editing_fix->poses[size_t(held)]) +
-                                                ". They're held there: key what should change"
-                                          : "This frame isn't one of its poses: keys here don't play. Its poses are "
-                                            "marked on the ruler";
-      ImGui::SetTooltip("Editing the fix for %s.\n%s.\n\nPython: oanim.data.document.action", drivers.c_str(),
-                        where.c_str());
+      ImGui::SetTooltip("Editing the fix that follows %s: their keys are its line, everything else keyed the fix "
+                        "along it.\n\nPython: oanim.data.document.action", bones.c_str());
     }
     else {
       ImGui::SetTooltip("Timeline being edited: the mainline, or an action of the bone layer you're in or one around it "
@@ -442,87 +437,6 @@ static void action_menu(Context &C, float width)
       ImGui::PopID();
     }
 
-    /* Action bone actions playing together now (each turned at least 5%): fixing this pose, in the fix for all of
-     * them or one for some of them. Not while one is edited (an action bone action shows alone; a fix holds its
-     * drivers). */
-    if (owner && (!in_action || !action_adds(*owner, doc.action)) && doc.frame_current != 0) {
-      const std::vector<std::pair<std::string, float>> counting = action_bone_actions_counting(*owner);
-      if (counting.size() >= 2) {
-        ImGui::PushID("playing");
-        ImGui::SeparatorText("Playing now");
-        std::string line;
-        for (const auto &[name, t] : counting) {
-          const float length = action_bone_action_length(*owner, name);
-          line += (line.empty() ? "" : "   \xC2\xB7   ") + name + " " + percent(length > 0.0f ? std::min(t / length, 1.0f) : 0.0f);
-        }
-        ImGui::Indent();
-        ImGui::TextDisabled("%s", line.c_str());
-        ImGui::Unindent();
-        std::vector<std::string> names;
-        for (const auto &[name, t] : counting) {
-          names.push_back(name);
-        }
-        std::sort(names.begin(), names.end());
-        /* One item per fix: for all of them first, then those for some of them. */
-        const auto fix_item = [&](const FixAction *fix, const std::vector<std::string> &drivers, bool all) {
-          std::string joined;
-          for (const std::string &d : drivers) {
-            joined += (joined.empty() ? "" : ",") + d;
-          }
-          const int near_pose = fix ? fix_pose_near(*owner, *fix, counting) : -1;
-          const std::string only = all ? "" : "Only " + fix->name + ": ";
-          const std::string label = !fix       ? "+ New Fix Action for This Pose"
-                                    : near_pose >= 0 ? only + (all ? "Edit Fix: " + fix->name + "  \xC2\xB7  " : "edit ") + "pose " + std::to_string(near_pose + 1)
-                                                : (all ? "+ Add This Pose to Fix: " + fix->name : "+ " + only + "add this pose");
-          ImGui::PushID(joined.c_str());
-          if (ImGui::Selectable(label.c_str())) {
-            operator_call(C, "anim.fix_action_new", {{"drivers", joined}});
-          }
-          if (fix) {
-            const float strength = fix_action_strength(*owner, *fix, counting);
-            const std::string right = percent(strength) + " now";
-            const float rw = ImGui::CalcTextSize(right.c_str()).x;
-            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - rw));
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(COL_FIX_TEXT), "%s", right.c_str());
-          }
-          if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-            if (!fix) {
-              ImGui::SetTooltip("These action bones together don't look right? Make a fix for them: it opens with them "
-                                "held right here, to key the correction, and then plays by itself whenever they play "
-                                "together. Fix more poses of theirs in the same fix later");
-            }
-            else if (near_pose >= 0) {
-              ImGui::SetTooltip("The fix has this pose already (pose %d): open it to change the correction", near_pose + 1);
-            }
-            else {
-              ImGui::SetTooltip(all ? "Add this pose to the fix, starting from what it plays here now, and key the "
-                                      "correction. Each pose is exact; between them they blend"
-                                    : "Fix this pose in the fix for these action bones only, leaving the others out "
-                                      "(when they aren't what looks wrong)");
-            }
-          }
-          ImGui::PopID();
-        };
-        const FixAction *for_all = nullptr;
-        for (const FixAction &f : owner->fix_actions) {
-          std::vector<std::string> d = f.drivers;
-          std::sort(d.begin(), d.end());
-          for_all = d == names ? &f : for_all;
-        }
-        fix_item(for_all, names, true);
-        for (const FixAction &f : owner->fix_actions) {
-          const bool inside = &f != for_all && f.drivers.size() >= 2 && fix_action_broken(*owner, f).empty() &&
-                              std::all_of(f.drivers.begin(), f.drivers.end(), [&](const std::string &d) {
-                                return std::find(names.begin(), names.end(), d) != names.end();
-                              });
-          if (inside) {
-            fix_item(&f, f.drivers, false);
-          }
-        }
-        ImGui::PopID();
-      }
-    }
-
     ImGui::Separator();
     if (ImGui::Selectable("Mainline", !in_action)) {
       operator_call(C, "anim.action_set", {{"name", ""}});
@@ -556,45 +470,28 @@ static void action_menu(Context &C, float width)
               [&](const std::string &name) {
                 action_item(*rig, name, name, action_bone_action_full_turn(*rig, name) ? "360Â°" : "", dim);
               });
-      const std::vector<std::pair<std::string, float>> playing = action_bone_actions_playing(*rig);
       section("Fix Actions",
-              [&](const std::string &n) { return fix_action_find(*rig, n) != nullptr || bone_fix_find(*rig, n) != nullptr; },
+              [&](const std::string &n) { return bone_fix_find(*rig, n) != nullptr; },
               [&](const std::string &name) {
-                /* One that follows bones: how much plays now, and which. */
-                if (const BoneFix *bf = bone_fix_find(*rig, name)) {
-                  const bool open = doc.action == name && doc.action_layer == rig->id;
-                  const float strength = bone_fix_play(*rig, *bf, open).strength;
-                  action_item(*rig, name, name, strength > 0.0f ? percent(strength) : "", strength > 0.0f ? COL_FIX_TEXT : dim);
-                  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-                    std::string bones;
-                    for (const uint64_t id : bf->follows) {
-                      if (const Bone *b = bone_find(*rig, id)) {
-                        bones += (bones.empty() ? "" : " and ") + b->name;
-                      }
-                    }
-                    ImGui::SetTooltip("Follows %s along its line (%s now)", bones.c_str(), percent(strength).c_str());
-                  }
-                  return;
-                }
-                const FixAction &f = *fix_action_find(*rig, name);
-                const std::string broken = fix_action_broken(*rig, f);
-                const float strength = broken.empty() ? fix_action_strength(*rig, f, playing) : 0.0f;
-                action_item(*rig, name, name, !broken.empty() ? "broken" : strength > 0.0f ? percent(strength) : "",
-                            !broken.empty() ? COL_BROKEN : strength > 0.0f ? COL_FIX_TEXT : dim);
+                /* How much plays now, and which bones it follows. */
+                const BoneFix *bf = bone_fix_find(*rig, name);
+                const bool open = doc.action == name && doc.action_layer == rig->id;
+                const float strength = bone_fix_play(*rig, *bf, open).strength;
+                action_item(*rig, name, name, strength > 0.0f ? percent(strength) : "", strength > 0.0f ? COL_FIX_TEXT : dim);
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-                  std::string drivers;
-                  for (const std::string &d : f.drivers) {
-                    drivers += (drivers.empty() ? "" : " and ") + d;
+                  std::string bones;
+                  for (const uint64_t id : bf->follows) {
+                    if (const Bone *b = bone_find(*rig, id)) {
+                      bones += (bones.empty() ? "" : " and ") + b->name;
+                    }
                   }
-                  ImGui::SetTooltip(broken.empty() ? "Fixes %s playing together (%s now)"
-                                                   : "Can't play: %s. Its keys are kept",
-                                    broken.empty() ? drivers.c_str() : broken.c_str(), percent(strength).c_str());
+                  ImGui::SetTooltip("Follows %s along its line (%s now)", bones.c_str(), percent(strength).c_str());
                 }
               });
     }
-    if (owner && !single && (in_action || action_bone_actions_playing(*owner).size() < 2)) {
+    if (owner && !single) {
       ImGui::Separator();
-      ImGui::TextDisabled("Select one bone for its actions.\nTurn two action bones together to fix them.");
+      ImGui::TextDisabled("Select one bone for its actions.");
     }
     else if (!owner) {
       ImGui::Separator();
@@ -4289,34 +4186,6 @@ static void timeline_body(Area &area, Context &C)
     const std::string label = std::to_string(int(f));
     const float tw = ImGui::CalcTextSize(label.c_str()).x;
     dl->AddText(ImVec2(x - tw * 0.5f, p0.y + (ruler_h - font_size) * 0.5f), COL_RULER_TEXT, label.c_str());
-  }
-  /* Editing a fix: each pose's frame marked (a line, its number on the ruler's foot, at the bottom the pose),
-   * the one shown brighter. Keys on other frames don't play. */
-  if (const Layer *fix_owner = doc.action.empty() ? nullptr : layer_find(doc, doc.action_layer)) {
-    if (const FixAction *fix = fix_action_find(*fix_owner, doc.action)) {
-      const int shown = fix_pose_on_frame(*fix, doc.frame_current);
-      const float label_y = p1.y - font_size - 4.0f;
-      for (size_t k = 0; k < fix->poses.size(); k++) {
-        const float x = frame_x(float(fix->poses[k].frame));
-        const bool here = int(k) == shown;
-        const ImU32 col = here ? COL_FIX_TEXT : (COL_FIX_TEXT & 0x90ffffff);
-        dl->AddLine(ImVec2(x, p0.y + ruler_h), ImVec2(x, p1.y), col, here ? 2.0f : 1.5f);
-        dl->AddRectFilled(ImVec2(x - 1.0f, p0.y + ruler_h - 4.0f), ImVec2(x + 1.0f, p0.y + ruler_h), col);
-        /* The pose shown named in full; each label kept short of the next pose's line. */
-        std::string label = "Pose " + std::to_string(k + 1);
-        if (here) {
-          label += ": " + fix_pose_label(*fix_owner, *fix, fix->poses[k]);
-        }
-        float next_x = p1.x;
-        for (const FixPose &other : fix->poses) {
-          const float ox = frame_x(float(other.frame));
-          next_x = ox > x + 1.0f ? std::min(next_x, ox - 3.0f) : next_x;
-        }
-        dl->PushClipRect(ImVec2(x, p0.y), ImVec2(std::max(x, next_x), p1.y), true);
-        dl->AddText(ImVec2(x + 4.0f, label_y), col, label.c_str());
-        dl->PopClipRect();
-      }
-    }
   }
   dl->PopClipRect();
 

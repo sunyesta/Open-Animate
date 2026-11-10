@@ -96,21 +96,6 @@ rig.bone_set("eye", knob=(0.0, 20.0))
 go(5)
 assert far(pupil.shown()[0], inside_u) < 1e-4, ("the mainline matches the action", pupil.shown()[0], inside_u)
 
-# --- A fix: inside it the knob sits at its pose's corner ---------------------------------------------------------------
-rig.bone_set("eye", knob=(40.0, 20.0))
-go(5)
-corner = bone("eye")["knob_head"]
-assert ops.anim.fix_action_new() == {'FINISHED'}
-fix = doc.action
-assert fix
-pose_frame = rig.fix_actions[0]["poses"][0]["frame"]
-go(pose_frame)
-assert close(bone("eye")["knob_head"], corner), ("inside the fix the knob sits at its pose", bone("eye")["knob_head"], corner)
-in_fix = pupil.shown()[0]
-assert ops.anim.action_set(name="") == {'FINISHED'}
-go(5)
-assert far(pupil.shown()[0], in_fix) < 1e-4, ("the mainline matches the fix", pupil.shown()[0], in_fix)
-
 # --- Another action of the rig keys the knob as ever ---------------------------------------------------------------
 layers.active = rig
 assert ops.anim.action_new(name="glance") == {'FINISHED'}

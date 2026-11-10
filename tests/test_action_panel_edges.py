@@ -184,39 +184,6 @@ def mirror_keeps_loop():
 mirror_keeps_loop()
 
 
-# --- Muting a fix, or one of its action bones -------------------------------------------------------------------------
-def muted_fix_and_driver():
-    r = Rig()
-    r.dial_action("dial", moved=(0.0, 2.0))
-    r.dial_action("arm", moved=(2.0, 0.0))
-    r.doc.frame_current = 30
-    r.play("dial", frame=20)
-    r.play("arm", frame=20)
-    r.settle()
-    together = r.where()
-    assert ops.anim.fix_action_new() == {'FINISHED'}, "a fix for both"
-    fix = r.doc.action
-    r.face.set_point(0, (together[0] + 1.0, together[1] + 1.0))
-    r.doc.frame_current = r.doc.frame_current + 1
-    r.doc.action = ""
-    r.doc.frame_current = 30
-    r.settle()
-    fixed = r.where()
-    assert not close(fixed, together), ("the fix plays", fixed, together)
-    assert r.action(fix)["frame_by"] == "FIX" and close(r.action(fix)["frame"], 1.0), r.action(fix)
-    r.play(fix, mute=1)
-    r.settle()
-    assert close(r.where(), together), ("a muted fix doesn't play", r.where(), together)
-    r.play(fix, mute=0)
-    r.play("arm", mute=1)
-    r.settle()
-    assert close(r.where(), (0.0, 2.0)), ("a muted driver: neither it nor its fix", r.where())
-    assert r.play(fix, frame=3) == {'CANCELLED'}, "a fix's frame isn't set"
-
-
-muted_fix_and_driver()
-
-
 # --- Loop on an action bone action that isn't a whole turn ------------------------------------------------------------
 def loop_on_plain_bone():
     r = Rig()

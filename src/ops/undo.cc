@@ -170,7 +170,7 @@ void UndoStack::push(const std::string &name, Document &doc)
     before_push(doc, was, before_push_data);
   }
   animation_record(doc);
-  fix_actions_tidy(doc);
+  bone_fixes_tidy(doc);
   if (steps_.empty()) {
     reset(doc);
   }

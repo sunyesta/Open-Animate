@@ -743,152 +743,6 @@ void anim_operators_register()
   }
   {
     OperatorType ot;
-    ot.idname = "anim.fix_action_new";
-    ot.name = "Fix This Pose";
-    ot.description = "Fix the pose of the action bones playing now (two or more, each turned at least 5%): the fix "
-                     "action for them (made if there is none) opens at this pose (added if it has none this close), to "
-                     "key the correction. It plays by itself whenever they play together. drivers=\"a,b\": fix only "
-                     "these of them";
-    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-    ot.poll = [](Context &C) { return C.document && action_owner(*C.document, C.document->active_layer); };
-    ot.exec = [](Context &C) {
-      Document &doc = *C.document;
-      Layer *owner = !doc.action.empty() ? layer_find(doc, doc.action_layer) : action_owner(doc, doc.active_layer);
-      if (!owner) {
-        owner = action_owner(doc, doc.active_layer);
-      }
-      if (!doc.action.empty() && action_adds(*owner, doc.action)) {
-        report(ReportType::Warning, "Fix a pose from the mainline (or an ordinary action), with its action bones turned");
-        return OpStatus::Cancelled;
-      }
-      std::vector<std::string> drivers;
-      for (const std::string &part : split_list(op_arg(C, "drivers"))) {
-        drivers.push_back(part);
-      }
-      const FixOpened opened = document_fix_pose_here(doc, owner->id, drivers);
-      if (!opened.error.empty()) {
-        report(ReportType::Warning, opened.error);
-        return OpStatus::Cancelled;
-      }
-      const std::string pose = "pose " + std::to_string(opened.pose + 1) + " (frame " + std::to_string(doc.frame_current) + ")";
-      report(ReportType::Info, opened.new_fix    ? "New fix \"" + opened.name + "\": key the correction on " + pose
-                               : opened.new_pose ? "Added " + pose + " to \"" + opened.name + "\": key the correction"
-                                                 : "\"" + opened.name + "\" " + pose + " fixes this pose: editing it");
-      return OpStatus::Finished;
-    };
-    operators().add(std::move(ot));
-  }
-  {
-    OperatorType ot;
-    ot.idname = "anim.fix_pose_add";
-    ot.name = "Add Fix Pose";
-    ot.description = "Add a pose to fix action `name`, its action bones at `shares` (\"0.5,0.3\": each one's share of "
-                     "its length, in the fix's order), starting from what the fix plays there now, and edit it";
-    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-    ot.poll = [](Context &C) { return C.document && action_owner(*C.document, C.document->active_layer); };
-    ot.exec = [](Context &C) {
-      Document &doc = *C.document;
-      const std::string name = op_has_arg(C, "name") ? op_arg(C, "name") : doc.action;
-      Layer *owner = !doc.action.empty() && doc.action == name ? layer_find(doc, doc.action_layer)
-                                                                 : action_owner(doc, doc.active_layer);
-      const FixAction *fix = owner ? fix_action_find(*owner, name) : nullptr;
-      if (!fix) {
-        report(ReportType::Warning, "No fix action named " + name);
-        return OpStatus::Cancelled;
-      }
-      std::vector<float> shares;
-      for (const std::string &part : split_list(op_arg(C, "shares"))) {
-        shares.push_back(std::strtof(part.c_str(), nullptr));
-      }
-      if (shares.size() != fix->drivers.size() ||
-          std::any_of(shares.begin(), shares.end(), [](float v) { return v < FIX_COUNTS_FROM - 1e-6f; }))
-      {
-        report(ReportType::Warning, "Give a share for each of its action bones, each at least 0.05");
-        return OpStatus::Cancelled;
-      }
-      const int pose = document_fix_pose_add(doc, owner->id, name, shares);
-      if (pose < 0) {
-        return OpStatus::Cancelled;
-      }
-      report(ReportType::Info, "Added pose " + std::to_string(pose + 1) + " (frame " + std::to_string(doc.frame_current) +
-                                   "): key the correction");
-      return OpStatus::Finished;
-    };
-    operators().add(std::move(ot));
-  }
-  {
-    OperatorType ot;
-    ot.idname = "anim.fix_pose_remove";
-    ot.name = "Remove Fix Pose";
-    ot.description = "Remove pose `pose` (1 is the first) of fix action `name` and its keys; a fix keeps at least one "
-                     "(delete the fix instead)";
-    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-    ot.poll = [](Context &C) { return C.document && action_owner(*C.document, C.document->active_layer); };
-    ot.exec = [](Context &C) {
-      Document &doc = *C.document;
-      const std::string name = op_has_arg(C, "name") ? op_arg(C, "name") : doc.action;
-      Layer *owner = !doc.action.empty() && doc.action == name ? layer_find(doc, doc.action_layer)
-                                                                 : action_owner(doc, doc.active_layer);
-      const FixAction *fix = owner ? fix_action_find(*owner, name) : nullptr;
-      if (!fix) {
-        report(ReportType::Warning, "No fix action named " + name);
-        return OpStatus::Cancelled;
-      }
-      const int pose = op_arg_int(C, "pose", 0) - 1;
-      if (pose < 0 || size_t(pose) >= fix->poses.size()) {
-        report(ReportType::Warning, "It has poses 1 to " + std::to_string(fix->poses.size()));
-        return OpStatus::Cancelled;
-      }
-      if (fix->poses.size() < 2) {
-        report(ReportType::Warning, "It's the fix's only pose: delete the fix instead");
-        return OpStatus::Cancelled;
-      }
-      return document_fix_pose_remove(doc, owner->id, name, size_t(pose)) ? OpStatus::Finished : OpStatus::Cancelled;
-    };
-    operators().add(std::move(ot));
-  }
-  {
-    OperatorType ot;
-    ot.idname = "anim.fix_pose_snap";
-    ot.name = "Snap to Fix Pose";
-    ot.description = "Put fix action `name`'s action bones at its pose `pose` (1 is the first; layer=id: that bone "
-                     "layer's): each one's knob moved or bone turned to the frame the pose keeps, keyed as any move is";
-    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-    ot.poll = [](Context &C) { return C.document != nullptr; };
-    ot.exec = [](Context &C) {
-      Document &doc = *C.document;
-      const std::string name = op_arg(C, "name");
-      Layer *owner = named_action_owner(C, name);
-      const FixAction *fix = owner ? fix_action_find(*owner, name) : nullptr;
-      if (!fix) {
-        report(ReportType::Warning, "No fix action named " + name);
-        return OpStatus::Cancelled;
-      }
-      const int pose = op_arg_int(C, "pose", 0) - 1;
-      if (pose < 0 || size_t(pose) >= fix->poses.size()) {
-        report(ReportType::Warning, "It has poses 1 to " + std::to_string(fix->poses.size()));
-        return OpStatus::Cancelled;
-      }
-      /* As moving the knob by hand: not on the setup pose, nor inside an action bone or fix action (it holds them). */
-      if (doc.frame_current == 0) {
-        report(ReportType::Warning, "Nothing plays on frame 0: go to another frame");
-        return OpStatus::Cancelled;
-      }
-      if (!doc.action.empty() && doc.action_layer == owner->id && action_adds(*owner, doc.action)) {
-        report(ReportType::Warning, "Go back to the mainline (or an ordinary action) to pose its action bones");
-        return OpStatus::Cancelled;
-      }
-      const FixPose at = fix->poses[size_t(pose)];
-      const std::vector<std::string> drivers = fix->drivers;
-      for (size_t k = 0; k < drivers.size() && k < at.at.size(); k++) {
-        action_frame_set(*owner, drivers[k], at.at[k]);
-      }
-      return OpStatus::Finished;
-    };
-    operators().add(std::move(ot));
-  }
-  {
-    OperatorType ot;
     ot.idname = "anim.action_rename";
     ot.name = "Rename Action";
     ot.description = "Rename action `name` of the bone layer the active layer is in (or is; layer=id: that one) to "
@@ -939,18 +793,7 @@ void anim_operators_register()
       if (same && !(frame_given && !name.empty())) {
         return OpStatus::Cancelled;
       }
-      /* A fix opens on the pose nearest the one now (its first, with none near), worked out before leaving it. */
-      int frame = frame_given ? op_arg_int(C, "frame", doc.frame_current) : -1;
-      if (!frame_given && !name.empty()) {
-        for (const Layer *flat : document_layers_flat(doc)) {
-          if (const FixAction *f = flat->is_bone_layer() && (!on || flat->id == on->id) ? fix_action_find(*flat, name) : nullptr;
-              f && !f->poses.empty())
-          {
-            const int nearest = fix_action_mix(*flat, *f, action_bone_actions_playing(*flat)).nearest;
-            frame = f->poses[size_t(std::max(nearest, 0))].frame;
-          }
-        }
-      }
+      const int frame = frame_given ? op_arg_int(C, "frame", doc.frame_current) : -1;
       if (!same && !(on ? document_set_action(doc, on->id, name) : document_set_action_by_name(doc, name))) {
         report(ReportType::Warning, "No action named " + name);
         return OpStatus::Cancelled;
@@ -1005,8 +848,8 @@ void anim_operators_register()
           return OpStatus::Cancelled;
         }
         if (!action_frame_set(*owner, name, frame)) {
-          report(ReportType::Warning, fix_action_find(*owner, name) ? "A fix plays as its drivers do"
-                                                                     : "Its bone has no keys in it yet to say how far");
+          report(ReportType::Warning, bone_fix_find(*owner, name) ? "A fix plays as its bones move"
+                                                                   : "Its bone has no keys in it yet to say how far");
           return OpStatus::Cancelled;
         }
       }
