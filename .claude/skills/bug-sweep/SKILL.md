@@ -32,7 +32,8 @@ Bones), knobs inside and past their box, add/delete/duplicate/extrude/subdivide/
 entered, left and made; points moved, deleted, dissolved, subdivided, split, added, extruded; weights assigned,
 removed, automatic, cleaned; Parent Bone with its deform modes; new drawings in the rig; insert/delete keys; Sculpt strokes with every brush (Dyntopo 40% of the time, at Resolution
 8-400 and each Refine Method) and Simplify; curvature, width, smooth, slide, merge, mirror, symmetrize, clear handles,
-unalign and handle moves; Auto-Freeze Keys on and off (on by default: `OA_FUZZ_FREEZE=0` leaves the file's setting), folding timeline rows (Key Together), Key Whole Drawing, layer move/turn/size/opacity, `freeze_check` (an edit between a layer's poses must leave them as they were), and `mpath` (motion paths drawn on a frame: the shortcuts, from keys and kept copies, must match working every frame out on copies, each dot must sit where that frame's pose puts it, and drawing them changes nothing; `OA_FUZZ_MPATH_W` weights it) (`OA_FUZZ_ONLY` limits a run to a list of op names; `OA_FUZZ_SAVE_END=<path>` saves the document at the end, to write a repro from a long log without shrinking). It checks
+unalign and handle moves; Auto-Freeze Keys on and off (on by default: `OA_FUZZ_FREEZE=0` leaves the file's setting), folding timeline rows (Key Together), Key Whole Drawing, layer move/turn/size/opacity; fix actions that follow bones (`fix_new`, `fix_follow`, `fix_set`,
+`fix_mute`, `fix_enter`, `fix_key`, `fix_peek`, `fix_still`, with `check_fixes` after every op), `freeze_check` (an edit between a layer's poses must leave them as they were), and `mpath` (motion paths drawn on a frame: the shortcuts, from keys and kept copies, must match working every frame out on copies, each dot must sit where that frame's pose puts it, and drawing them changes nothing; `OA_FUZZ_MPATH_W` weights it) (`OA_FUZZ_ONLY` limits a run to a list of op names; `OA_FUZZ_SAVE_END=<path>` saves the document at the end, to write a repro from a long log without shrinking). It checks
 every op (no exception, finite numbers, a change only with an undo step, CANCELLED changes nothing, entering an action
 and leaving changes nothing) and every few ops (undo then redo exact, frames in different orders give the same pose,
 save/open exact, a point weighted wholly to one plain bone turns rigidly with it). A watchdog (`OA_FUZZ_HANG`, default
@@ -181,5 +182,12 @@ not a bug, check the times against the shutdown before shrinking.
 - **Key Together's state is per timeline and partly rebuilt on opening** (the timeline it last keyed in is saved, its
   layers recorded as loaded): test edits right after opening a file, inside an action entered again, and on a
   duplicate, not only mid-session on the mainline.
+- **`OA_SWEEP_TMP` must exist** before a run: a missing folder fails the first `harness.rebase()` with a bare
+  AssertionError on `open_mainfile`.
+- **Folding rows moves keys only on their own frames.** A check that folding (Key Together) moved nothing compares each
+  channel's own key frames, not every frame keyed anywhere on the layer.
+- **`mpath` changes the selection** to pick its targets: restore it after, or the next op's "changed" check blames the op.
+- **A name the operators refuse** (a fix renamed to a bone's turn action, "turn 2") can still come from an old file:
+  test it by editing the saved file's JSON and reopening it.
 - **A rig loop** (a bone's IK target riding on the chain, a constraint fed by what it moves) can make a pose depend on
   history by design: report it as a question, don't fix it as a bug.

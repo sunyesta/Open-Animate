@@ -902,6 +902,265 @@ def apply_mpath(op):
     return "py-done"
 
 
+
+# --- Fix actions that follow bones (BoneFix): made, followed, faded, entered and keyed, muted -------------------------
+def fixes_of(rig):
+    try:
+        return [f["name"] for f in rig.bone_fixes]
+    except Exception:
+        return []
+
+
+def fix_rigs():
+    return [r for r in rigs() if fixes_of(r)]
+
+
+@op("fix_new", 1.5)
+def _(rng):
+    """Create Fix Action on a knob, or on 2+ bones (sometimes a knob and a bone)."""
+    rig = a_rig(rng)
+    if not rig or not rig.bones:
+        return None
+    names = bone_names(rig)
+    knobs = [b["name"] for b in rig.bones if b.get("type") == "CONTROLLER_2D"]
+    if knobs and rng.random() < 0.6:
+        pick = [rng.choice(knobs)]
+        if rng.random() < 0.25:
+            pick.append(rng.choice(names))
+    else:
+        if len(names) < 2:
+            return None
+        pick = rng.sample(names, rng.choice([2, 2, 3]))
+    return {"rig": rig.id, "bones": sorted(set(pick)), "selected": rng.random() < 0.3}
+
+
+@op("fix_follow", 1.5)
+def _(rng):
+    rs = fix_rigs()
+    if not rs:
+        return None
+    rig = rng.choice(rs)
+    return {"rig": rig.id, "name": rng.choice(fixes_of(rig)), "bones": rng.sample(bone_names(rig), rng.choice([1, 1, 2])),
+            "follow": rng.random() < 0.6}
+
+
+@op("fix_set", 1.5)
+def _(rng):
+    rs = fix_rigs()
+    if not rs:
+        return None
+    rig = rng.choice(rs)
+    return {"rig": rig.id, "name": rng.choice(fixes_of(rig)), "fade": rng.choice(["LINEAR", "SMOOTH"])}
+
+
+@op("fix_mute", 1.5)
+def _(rng):
+    rs = fix_rigs()
+    if not rs:
+        return None
+    rig = rng.choice(rs)
+    return {"rig": rig.id, "name": rng.choice(fixes_of(rig)), "mute": rng.random() < 0.5}
+
+
+@op("fix_enter", 2)
+def _(rng):
+    """Enter a fix (anim.action_set), sometimes on a frame of its line."""
+    rs = fix_rigs()
+    if not rs:
+        return None
+    rig = rng.choice(rs)
+    out = {"rig": rig.id, "name": rng.choice(fixes_of(rig))}
+    if rng.random() < 0.4:
+        out["frame"] = rng.randint(1, FRAMES)
+    return out
+
+
+@op("fix_key", 8, "py")
+def _(rng):
+    """Inside a fix (entered first), on a frame >= 1: move one of the bones it follows along its line (a knob's place,
+    a bone's turn), or key the fix itself (another bone's turn, a point)."""
+    rs = fix_rigs()
+    if not rs:
+        return None
+    rig = rng.choice(rs)
+    name = rng.choice(fixes_of(rig))
+    f = rng.randint(1, FRAMES)
+    what = rng.choice(["follow", "follow", "bone", "point"])
+    out = {"rig": rig.id, "name": name, "f": f, "what": what}
+    if what == "follow":
+        out["k"] = [rng.uniform(-80, 80), rng.uniform(-80, 80)]
+        out["a"] = rng.uniform(-1.2, 1.2)
+        out["i"] = rng.randrange(8)
+    elif what == "bone":
+        out["bone"] = rng.choice(bone_names(rig))
+        out["a"] = rng.uniform(-0.8, 0.8)
+    else:
+        p = a_points(rng, 1)
+        if not p:
+            return None
+        out.update(layer=p["layer"], idx=p["idx"], d=[rng.gauss(0, 0.05), rng.gauss(0, 0.05)])
+    return out
+
+
+@op("fix_peek", 3, "meta")
+def _(rng):
+    rs = fix_rigs()
+    if not rs or doc.action:
+        return None
+    rig = rng.choice(rs)
+    return {"rig": rig.id, "name": rng.choice(fixes_of(rig))}
+
+
+@op("fix_still", 6, "meta")
+def _(rng):
+    """On the mainline, frame >= 1: a fix never moves the bones it follows (spec): muting it leaves them where they are."""
+    rs = fix_rigs()
+    if not rs or doc.action:
+        return None
+    rig = rng.choice(rs)
+    return {"rig": rig.id, "name": rng.choice(fixes_of(rig)), "f": rng.randint(1, FRAMES)}
+
+
+def fix_named(rig, name):
+    return next((f for f in rig.bone_fixes if f["name"] == name), None)
+
+
+def followed_pose(rig, names):
+    out = {}
+    for n in names:
+        b = bone(rig, n)
+        if b:
+            # (local: a parent the fix turns moves it in the layer, legitimately)
+            out[n] = (b["angle"],) + tuple(b.get("position", ())) + tuple(b.get("knob_shown", ()))
+    return out
+
+
+def apply_fix(op):
+    """The fix ops; None when `op` isn't one of them."""
+    o = op["op"]
+    if not o.startswith("fix_"):
+        return None
+    rig = find_layer(op["rig"])
+    if rig is None:
+        return "skip"
+    if o == "fix_new":
+        if any(b not in bone_names(rig) for b in op["bones"]):
+            return "skip"
+        L.active = rig
+        if op["selected"]:
+            ops.armature.select_none()
+            for k, b in enumerate(op["bones"]):
+                rig.select_bone(b, extend=k > 0)
+            return ops.armature.bone_fix_new()
+        return ops.armature.bone_fix_new(bones=",".join(op["bones"]))
+    if op["name"] not in fixes_of(rig):
+        return "skip"
+    L.active = rig
+    if o == "fix_follow":
+        if any(b not in bone_names(rig) for b in op["bones"]):
+            return "skip"
+        return ops.armature.bone_fix_follow(name=op["name"], bones=",".join(op["bones"]),
+                                            follow="1" if op["follow"] else "0")
+    if o == "fix_set":
+        return ops.armature.bone_fix_set(name=op["name"], fade=op["fade"])
+    if o == "fix_mute":
+        return ops.anim.action_play_set(name=op["name"], layer=str(rig.id), mute="1" if op["mute"] else "0")
+    if o == "fix_enter":
+        kw = {"name": op["name"], "layer": str(rig.id)}
+        if "frame" in op:
+            kw["frame"] = str(op["frame"])
+        return ops.anim.action_set(**kw)
+    if o == "fix_peek":
+        if doc.action or not doc.auto_key:
+            return "skip"
+        before = snap()
+        ops.anim.action_set(name=op["name"], layer=str(rig.id))
+        ops.anim.action_set(name="")
+        d = [x for x in edits(before, snap()) if not x.startswith(".action")]
+        if d:
+            raise Failure(f"fix-peek: entering fix {op['name']!r} and leaving at once changed {d[:4]}")
+        return "py-done"
+    if o == "fix_still":
+        if doc.action or not doc.auto_key:
+            return "skip"
+        f0 = doc.frame_current
+        doc.frame_current = op["f"]
+        rig = find_layer(op["rig"])
+        fix = fix_named(rig, op["name"])
+        playing = [a for a in rig.actions if a["name"] == op["name"]]
+        if not fix or not playing or playing[0]["mute"] or fix["strength"] <= 0:
+            doc.frame_current = f0
+            return "skip"
+        sides = {v for b in rig.bones if b.get("type") == "CONTROLLER_2D"
+                 for v in (b.get("controller_actions") or {}).values() if v}
+        linked = {a["holder"] for a in rig.actions if a.get("holder") and a["name"] in sides}
+        names = list(fix["follows"]) + sorted({a["holder"] for a in rig.actions if a.get("kind") == "ACTION_BONE"
+                                               and a.get("holder") and a["holder"] not in linked})
+        a = followed_pose(rig, names)
+        st = active_step()
+        assert ops.anim.action_play_set(name=op["name"], layer=str(rig.id), mute="1") == {'FINISHED'}
+        doc.frame_current = op["f"]
+        b = followed_pose(find_layer(op["rig"]), names)
+        ops.anim.action_play_set(name=op["name"], layer=str(rig.id), mute="0")
+        doc.frame_current = f0
+        for n in a:
+            w = max([abs(x - y) for x, y in zip(a[n], b.get(n, ()))] + [0.0])
+            if w > 1e-4 or len(a[n]) != len(b.get(n, ())):
+                raise Failure(f"fix-moves-follows: fix {op['name']!r} (strength {fix['strength']:.3f}, frame "
+                              f"{fix['frame']:.2f}) moves {n!r} (a bone it follows or an action bone: {n in fix["follows"]}) on frame {op['f']} by {w:.5f}: "
+                              f"{a[n]} playing vs {b.get(n)} muted")
+        return "py-done"
+    if o == "fix_key":
+        if doc.action != op["name"]:
+            ops.anim.action_set(name=op["name"], layer=str(rig.id))
+            if doc.action != op["name"]:
+                return "skip"
+        doc.frame_current = op["f"]
+        rig = find_layer(op["rig"])
+        fix = fix_named(rig, op["name"])
+        if fix is None:
+            return "skip"
+        if op["what"] == "follow":
+            if not fix["follows"]:
+                return "skip"
+            name = fix["follows"][op["i"] % len(fix["follows"])]
+            b = bone(rig, name)
+            if b is None:
+                return "skip"
+            if b.get("type") == "CONTROLLER_2D":
+                rig.bone_set(name, knob=tuple(op["k"]))
+            else:
+                rig.bone_set(name, angle=b["angle"] + op["a"])
+            return "py-done"
+        if op["what"] == "bone":
+            b = bone(rig, op["bone"])
+            if b is None or b.get("type") == "CONTROLLER_2D":
+                return "skip"
+            rig.bone_set(op["bone"], angle=b["angle"] + op["a"])
+            return "py-done"
+        layer = find_layer(op["layer"])
+        if layer is None or op["idx"][0] >= layer.point_count or not editable(layer):
+            return "skip"
+        x, y = layer.points[op["idx"][0]][:2]
+        layer.set_point(op["idx"][0], (x + op["d"][0], y + op["d"][1]))
+        return "py-done"
+    return None
+
+
+def check_fixes():
+    """Every fix's play: strength 0-1, its frame on its line (1 to its end), finite."""
+    for rig in rigs():
+        for f in rig.bone_fixes:
+            s, fr = f["strength"], f["frame"]
+            if not (math.isfinite(s) and math.isfinite(fr)):
+                raise Failure(f"fix-play: fix {f['name']!r} of {rig.name!r} plays non-finite {f}")
+            if s < -1e-6 or s > 1 + 1e-6:
+                raise Failure(f"fix-play: fix {f['name']!r} of {rig.name!r} strength {s} outside 0-1 {f}")
+            if f["end"] > f["start"] and (fr < f["start"] - 1e-3 or fr > f["end"] + 1e-3):
+                raise Failure(f"fix-play: fix {f['name']!r} of {rig.name!r} at frame {fr} off its line "
+                              f"{f['start']}-{f['end']} {f}")
+
+
 ONLY = [n for n in os.environ.get("OA_FUZZ_ONLY", "").split(",") if n]   # e.g. sculpt,simplify,frame,undo,redo
 
 
@@ -962,6 +1221,9 @@ def apply(op):
         return None if r == "py-done" else r
     if o in ("sculpt", "simplify"):
         return apply_sculpt(op)
+    fx = apply_fix(op)
+    if fx is not None:
+        return None if fx == "py-done" else fx
     new = apply_new(op)
     if new is not None:
         return None if new == "py-done" else new
@@ -1134,6 +1396,7 @@ def check_op(op, r, before, step_before):
     bn = bad_numbers(after)
     if bn:
         raise Failure(f"non-finite numbers at {bn[:3]}")
+    check_fixes()
     if TABLE[op["op"]][1] == "op":
         changed = edits(before, after)
         if r == {'CANCELLED'} and changed:
