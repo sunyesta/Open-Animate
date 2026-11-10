@@ -181,4 +181,61 @@ assert fixes() == []
 ops.ed.undo()
 assert [f["name"] for f in fixes()] == ["Look Fix"]
 
+# --- A knob linked to dials: their actions play under the fix as it is edited -------------------------------------------
+# (A head turn: the sides are the actions of bones turned by the knob. Inside other actions the link is off.)
+mainline()
+assert ops.layer.new_bone() == {'FINISHED'}
+rig = layers.active
+rig.name = "Head"
+ops.armature.bone_add(name="turn", head_x="5.0", head_y="1.0", tail_x="6.0", tail_y="1.0")
+ops.armature.select_none()
+ops.armature.bone_add(name="up", head_x="5.0", head_y="2.0", tail_x="6.0", tail_y="2.0")
+ops.armature.select_none()
+ops.armature.bone_add(name="Knob", head_x="3.0", head_y="3.0", tail_x="3.5", tail_y="3.0")
+for n in ("turn", "up"):
+    fresh().bone_set(n, strength=0.0)
+ops.layer.new()
+face = layers.active
+face.add_curve([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)])
+ops.layer.move_to_group(group=str(rig.id))
+layers.active = fresh()
+
+
+def dial_action(name, i, moved):
+    """Action bone action `name`: its bone turns a quarter by frame 20, taking the face's point `i` to `moved`."""
+    fresh().select_bone(name)
+    assert ops.anim.action_new(name=name, action_bone="1") == {'FINISHED'} and doc.action == name
+    doc.frame_current = 20
+    b = next(b for b in fresh().bones if b["name"] == name)
+    fresh().bone_set(name, angle=b["setup_angle"] + 1.5708)
+    face_now().set_point(i, moved)
+    doc.frame_current = 21
+    mainline()
+
+
+dial_action("turn", 0, (2.0, 0.0))
+dial_action("up", 1, (1.0, 1.0))
+fresh().select_bone("Knob")
+assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
+assert ops.armature.controller_side(side="RIGHT", action="turn") == {'FINISHED'}
+assert ops.armature.controller_side(side="UP", action="up") == {'FINISHED'}
+knob = lambda x, y, frame=5: (setattr(doc, "frame_current", frame), fresh().select_bone("Knob"),
+                              fresh().bone_set("Knob", knob=(x, y)), settle())
+knob(0.0, 20.0)
+assert close(point(1), (1.0, 1.0)), "up plays from the knob on the mainline"
+fresh().select_bone("Knob")
+assert ops.armature.bone_fix_new() == {'FINISHED'} and doc.frame_current == 1
+assert close(point(1), (1.0, 1.0)), ("the knob turns its dial in the fix, up playing", point(1))
+doc.frame_current = 30
+fresh().bone_set("Knob", knob=(20.0, 20.0))
+settle()
+assert close(point(0), (2.0, 0.0)) and close(point(1), (1.0, 1.0)), ("both play under the fix", point(0), point(1))
+face_now().set_point(2, (2.0, 0.5))
+settle()
+assert close(point(2), (2.0, 0.5))
+mainline()
+assert [f["name"] for f in fixes()] == ["up and turn"], fixes()
+knob(20.0, 20.0)
+assert close(point(0), (2.0, 0.0)) and close(point(2), (2.0, 0.5)), ("it plays on the mainline", point(2))
+
 print("test_bone_fixes: ok")

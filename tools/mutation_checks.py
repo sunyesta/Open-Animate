@@ -64,6 +64,8 @@ PENDING = [
      'a fix that follows bones is named after where it ends', 'tests/test_bone_fixes.py'),
     ('src/io/oanim_file.cc', 'j["bone_fixes"] = std::move(fixes);', '(void)fixes;',
      'fixes that follow bones saved with the file', 'tests/test_bone_fixes.py'),
+    ('src/anim/animation.cc', 'if (edited && bone_fix_find(*edited, doc.action)) {', 'if (false) {',
+     'a knob turns its linked dials while a fix that follows bones is edited', 'tests/test_bone_fixes.py'),
 ]
 
 def build(root):

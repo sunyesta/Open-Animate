@@ -4765,13 +4765,18 @@ static void report_held(const std::string &text)
   }
 }
 
-/* Whether `owner`'s channels are part of the action being edited: it owns it, or sits inside what does. */
+/* Whether `owner`'s channels are part of the action being edited: it owns it, or sits inside what does. A fix that
+ * follows bones is edited as the mainline is for this: its knobs turn their linked dials, so the actions the fix
+ * corrects play under it as they will on the mainline. */
 static bool controller_in_action(const Document &doc, const Layer &owner)
 {
   if (doc.action.empty()) {
     return false;
   }
   const Layer *edited = layer_find(doc, doc.action_layer);
+  if (edited && bone_fix_find(*edited, doc.action)) {
+    return false;
+  }
   const auto inside = [&](auto &&self, const Layer &layer) -> bool {
     return layer.id == owner.id ||
            std::any_of(layer.children.begin(), layer.children.end(), [&](const Layer &c) { return self(self, c); });
