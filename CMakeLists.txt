@@ -608,6 +608,8 @@ add_test(NAME bone_turn_actions
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_turn_actions.py)
 add_test(NAME bone_fixes
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_fixes.py)
+add_test(NAME bone_fix_edges
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_fix_edges.py)
 add_test(NAME motion_path_key_menu
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_key_menu.py)
 add_test(NAME breakdown_keys

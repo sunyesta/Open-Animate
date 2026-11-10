@@ -8,6 +8,7 @@
 
 #include "anim/animation.hh"
 #include "anim/channel.hh"
+#include "anim/controller.hh"
 #include "anim/draw_order.hh"
 #include "data/bones.hh"
 #include "data/layer_mirror.hh"
@@ -508,7 +509,11 @@ void mirror_bone_keys(Layer &target, const Layer &source_layer, const Transform2
       continue;
     }
     const Transform2D across = to_pose->setup.inverted() * flip * from_pose->setup;
-    mirror_keys(source->position_keys, bone.position_keys, from, to, [&](float2 v) { return across.apply_vector(v); });
+    /* A knob's place is in frames of its box, which mirrors with Left and Right swapped (as its spots): through the
+     * bones' setups it would turn over. */
+    const bool knobs = bone_is_controller(bone) && bone_is_controller(*source);
+    mirror_keys(source->position_keys, bone.position_keys, from, to,
+                [&](float2 v) { return knobs ? float2(-v.x, v.y) : across.apply_vector(v); });
     mirror_keys(source->angle_keys, bone.angle_keys, from, to, [](float v) { return -v; });
     mirror_keys(source->scale_keys, bone.scale_keys, from, to, [](float2 v) { return v; });
     mirror_keys(source->depth_keys, bone.depth_keys, from, to, [](float v) { return v; });

@@ -903,8 +903,9 @@ static void set_raw(Document &doc, Layer &sw, float value)
     switches_resolve(doc, frame);
     return;
   }
-  if (frame != 0 && !ch.animated() && doc.action.empty()) {
-    /* The default stays what it was (an action's keys start after frame 0, the shared setup). */
+  if (frame != 0 && !ch.animated()) {
+    /* The default stays what it was, in an action too (frame 0 is the shared setup: leaving, the action keeps only its
+     * keys after it, and the setup is what frame 0 shows). */
     ch.set_key(0, switch_default(sw)).interp = Interp::Step;
   }
   if (frame != 0 || ch.animated()) {

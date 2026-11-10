@@ -2508,7 +2508,10 @@ void rig_operators_register()
           report(ReportType::Warning, "No bone named " + part);
           return false;
         }
-        r_ids.push_back(b->id);
+        /* Named twice, a bone counts once. */
+        if (std::find(r_ids.begin(), r_ids.end(), b->id) == r_ids.end()) {
+          r_ids.push_back(b->id);
+        }
       }
       return true;
     }

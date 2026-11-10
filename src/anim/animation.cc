@@ -3505,7 +3505,12 @@ std::string document_bone_fix_new(Document &doc, uint64_t owner_id, const std::v
       ch.actions[fix.name] = c.keys;
     };
     if (bone_is_controller(b)) {
-      start(b.position_keys, b.transform);
+      /* A knob where its actions play: an independent one rides its Knob Parent, as the fix will measure it. */
+      const ChannelKeysQuiet scratch;
+      Channel<float2> c;
+      c.set_key(0, channel_setup(b.position_keys, b.transform));
+      c.set_key(1, controller_knob_played(*owner, b));
+      b.position_keys.actions[fix.name] = c.keys;
     }
     else {
       start(b.angle_keys, b.turn);
@@ -3568,21 +3573,6 @@ std::string document_bone_fix_mirror(Document &doc, uint64_t owner_id, const std
   const std::string made = bone_fix_unique(*layer_find(doc, owner_id), " mirrored fix");
   document_action_mirror(doc, owner_id, fix.name, made);
   owner = layer_find(doc, owner_id);
-  /* A knob's line in frames: its Left and Right swap, as its spots do (the mirror through its bone would turn it over). */
-  for (size_t k = 0; k < fix.follows.size(); k++) {
-    const Bone *from = bone_find(*owner, fix.follows[k]);
-    Bone *to = bone_find(*owner, mirrored.follows[k]);
-    if (!from || !to || !bone_is_controller(*from) || !bone_is_controller(*to)) {
-      continue;
-    }
-    if (const auto it = from->position_keys.actions.find(fix.name); it != from->position_keys.actions.end()) {
-      std::vector<Key<float2>> keys = it->second;
-      for (Key<float2> &key : keys) {
-        key.value.x = -key.value.x;
-      }
-      to->position_keys.actions[made] = std::move(keys);
-    }
-  }
   mirrored.name = made;
   owner->bone_fixes.push_back(mirrored);
   std::string named = bone_fix_name(*owner, owner->bone_fixes.back());
@@ -3907,6 +3897,27 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
       }
     };
     gather_switches(gather_switches, owner.children);
+    /* Action `name` at frame `t` has its say on switch `sw` once it has passed one of its switch keys. */
+    const auto switch_say = [&](Channel<float> &ch, Layer &sw, const std::string &name, float t) {
+      const auto it = ch.actions.find(name);
+      if (it == ch.actions.end() || sw.switch_rig_set) {
+        return;
+      }
+      const Key<float> *passed = nullptr;
+      for (const Key<float> &k : it->second) {
+        if (float(k.frame) > t + 1e-4f) {
+          break;
+        }
+        if (k.frame > 0) {
+          passed = &k;
+        }
+      }
+      if (passed && passed->value > SWITCH_RIG + 0.5f) {
+        sw.switch_rig = passed->value;
+        sw.switch_rig_set = true;
+        ch.action_bone_live = true;
+      }
+    };
     const auto play = [&](const std::string &name, float t, const void *skip, bool skip_driving) {
       /* A side's action keys its own knob's timing (how far out each frame plays): never a move of the knob. The
        * action may be a linked dial's own, so the knob is the controller it is a side of. */
@@ -3920,24 +3931,7 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
         }
         if (const auto sw = switches.find(static_cast<const void *>(&ch)); sw != switches.end()) {
           if constexpr (std::is_same_v<std::decay_t<decltype(ch)>, Channel<float>>) {
-            const auto it = ch.actions.find(name);
-            if (it == ch.actions.end() || sw->second->switch_rig_set) {
-              return;
-            }
-            const Key<float> *passed = nullptr;
-            for (const Key<float> &k : it->second) {
-              if (float(k.frame) > t + 1e-4f) {
-                break;
-              }
-              if (k.frame > 0) {
-                passed = &k;
-              }
-            }
-            if (passed && passed->value > SWITCH_RIG + 0.5f) {
-              sw->second->switch_rig = passed->value;
-              sw->second->switch_rig_set = true;
-              ch.action_bone_live = true;
-            }
+            switch_say(ch, *sw->second, name, t);
           }
           return;
         }
@@ -3990,7 +3984,16 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
       }
       owner_for_each_channel_with(owner, fix.name, [&](auto &ch, auto &value) {
         const void *key = static_cast<const void *>(&ch);
-        if (driving.count(key) || switches.count(key) || bone_fix_tracing(owner, fix, key)) {
+        /* A switch picks, it can't blend: the fix's pick where it plays, once more than half of it does. */
+        if (const auto sw = switches.find(key); sw != switches.end()) {
+          if constexpr (std::is_same_v<std::decay_t<decltype(ch)>, Channel<float>>) {
+            if (at.strength >= 0.5f) {
+              switch_say(ch, *sw->second, fix.name, at.frame);
+            }
+          }
+          return;
+        }
+        if (driving.count(key) || bone_fix_tracing(owner, fix, key)) {
           return;
         }
         const auto it = ch.actions.find(fix.name);
@@ -4510,6 +4513,16 @@ static std::array<std::string, 2> own_actions(const Layer &owner, const Bone &bo
   return own;
 }
 
+/* A bone converted: its keys in `ch` in the fixes that follow it, their line, go (as the other type they would move it). */
+template<typename C> static void bone_fix_lines_drop(const Layer &owner, const Bone &bone, C &ch)
+{
+  for (const BoneFix &fix : owner.bone_fixes) {
+    if (std::find(fix.follows.begin(), fix.follows.end(), bone.id) != fix.follows.end()) {
+      ch.actions.erase(fix.name);
+    }
+  }
+}
+
 std::string bone_convert_to_controller(Document &doc, uint64_t owner_id, uint64_t bone_id)
 {
   Layer *owner = layer_find(doc, owner_id);
@@ -4550,12 +4563,14 @@ std::string bone_convert_to_controller(Document &doc, uint64_t owner_id, uint64_
     }
   }
   bone = bone_find(*owner, bone_id);
-  /* Moves in its own actions would be its sides' timing now: they go (the knob doesn't move in them). */
+  /* Moves in its own actions would be its sides' timing now: they go (the knob doesn't move in them). Its turns in the
+   * fixes that follow it were their line: a knob's is its place. */
   for (const std::string &action : own) {
     if (!action.empty()) {
       bone->position_keys.actions.erase(action);
     }
   }
+  bone_fix_lines_drop(*owner, *bone, bone->angle_keys);
   std::vector<Key<float>> angle_keys = std::move(bone->angle_keys.keys);
   bone->angle_keys.keys.clear();
   /* A pin turned controller is a box like any other. */
@@ -4668,12 +4683,14 @@ std::string bone_convert_to_regular(Document &doc, uint64_t owner_id, uint64_t b
       bone->position_keys.keys.clear();
     }
   }
-  /* Its keys in its sides' actions were their timing, never a move: as a bone they'd move it. */
+  /* Its keys in its sides' actions were their timing, never a move: as a bone they'd move it. So were its keys in the
+   * fixes that follow it (their line). */
   for (const std::string &action : bone->controller_actions) {
     if (!action.empty()) {
       bone->position_keys.actions.erase(action);
     }
   }
+  bone_fix_lines_drop(*owner, *bone, bone->position_keys);
   bone->type = BoneType::Regular;
   bone->controller_actions = {};
   bone->controller_keys = {};
