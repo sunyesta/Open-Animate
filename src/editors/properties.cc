@@ -1989,6 +1989,174 @@ static void bones_panel(Context &C, Layer &armature)
 
 /* Blender's Bone tab: the active bone's own settings (its name, where it is on the setup frame or how
  * it is posed on others, its IK). */
+/* A way a regular or pin bone turns (slot 0 counterclockwise, 1 clockwise): its action, a list of the bone layer's
+ * that can be (New Action at the bottom), and a button: the pencil opens it (pressed while it is open; again, back to
+ * the mainline), + makes one; an empty way can be mirrored from the other. */
+static void bone_turn_row(Context &C, Layer &armature, const Bone &bone, const BoneTurnSlots &slots, int slot)
+{
+  const std::string now = slots.action[size_t(slot)];
+  const OpArgs::value_type way = {"direction", slot == 0 ? "CCW" : "CW"};
+  ImGui::PushID(slot);
+  const bool can_mirror = !slots.full_turn && now.empty() && !slots.action[size_t(1 - slot)].empty();
+  const float h = ImGui::GetFrameHeight();
+  const float spacing = ImGui::GetStyle().ItemSpacing.x;
+  ImGui::SetNextItemWidth(-(h + spacing) * (can_mirror ? 2.0f : 1.0f));
+  if (ImGui::BeginCombo("##action", now.empty() ? "None" : now.c_str(), ImGuiComboFlags_HeightLarge)) {
+    if (ImGui::Selectable("None", now.empty())) {
+      operator_call(C, "armature.bone_turn_action", {way, {"action", ""}});
+    }
+    for (const std::string &action : armature.actions) {
+      /* Fixes, a knob's sides and other bones' actions (or this one's other way) are taken. */
+      const bool taken = action != now && (fix_action_find(armature, action) || controller_of_action(armature, action) ||
+                                           controller_dial_of_action(armature, action));
+      if (fix_action_find(armature, action)) {
+        continue;
+      }
+      if (ImGui::Selectable(action.c_str(), action == now, taken ? ImGuiSelectableFlags_Disabled : 0)) {
+        operator_call(C, "armature.bone_turn_action", {way, {"action", action}});
+      }
+    }
+    ImGui::Separator();
+    if (ImGui::Selectable("New Action")) {
+      operator_call(C, "armature.bone_turn_action_new", {way});
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Make a new action turning the bone this way and open it");
+    }
+    ImGui::EndCombo();
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip(slots.full_turn ? "The action the bone plays as it turns round: a whole turn, round and round"
+                                      : "The action the bone plays as it turns this way. Picking one names it after "
+                                        "the bone; None lets go of it, its keys kept");
+  }
+  ImGui::SameLine();
+  if (now.empty()) {
+    if (ImGui::Button("+", ImVec2(h, 0))) {
+      operator_call(C, "armature.bone_turn_action_new", {way});
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Make a new action turning the bone this way and open it");
+    }
+  }
+  else {
+    const Document &doc = *C.document;
+    const bool open = doc.action == now && doc.action_layer == armature.id;
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    if (open) {
+      ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    }
+    const bool clicked = ImGui::Button("##edit", ImVec2(h, h));
+    if (open) {
+      ImGui::PopStyleColor();
+    }
+    pencil_icon(ImGui::GetWindowDrawList(), ImVec2(at.x + h * 0.5f, at.y + h * 0.5f), h * 0.5f,
+                ImGui::GetColorU32(ImGuiCol_Text));
+    if (clicked) {
+      operator_call(C, "anim.action_set", {{"layer", std::to_string(armature.id)}, {"name", open ? std::string() : now}});
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      if (open) {
+        ImGui::SetTooltip("Editing %s: click to go back to the mainline", now.c_str());
+      }
+      else {
+        ImGui::SetTooltip("Edit %s", now.c_str());
+      }
+    }
+  }
+  if (can_mirror) {
+    ImGui::SameLine();
+    if (ImGui::Button("M", ImVec2(h, 0))) {
+      operator_call(C, "armature.bone_turn_mirror", {way});
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Make this way from the other, as a mirrored action");
+    }
+  }
+  (void)bone;
+  ImGui::PopID();
+}
+
+/* The active bone's actions: a 2 Axis Controller's four sides; a regular or pin bone's Turns and an action each way
+ * (or one whole turn), each with how far the bone turns by its end. */
+static void bone_actions_panel(Context &C, Layer &armature)
+{
+  const Bone *active = bone_find(armature, armature.active_bone);
+  if (!active || !ui_panel_begin("Actions")) {
+    return;
+  }
+  const auto label = [](const char *text) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(text);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1);
+  };
+  if (bone_is_controller(*active)) {
+    for (int side = 0; side < CONTROLLER_SIDES; side++) {
+      label(controller_side_name(side));
+      controller_side_row(C, armature, *active, side);
+    }
+    ui_panel_end();
+    return;
+  }
+  const Document &doc = *C.document;
+  const BoneTurnSlots slots = bone_turn_slots(doc, armature, *active);
+  label("Turns");
+  if (ImGui::BeginCombo("##turns", slots.full_turn ? "Full Turn" : "Both Ways")) {
+    if (ImGui::Selectable("Both Ways", !slots.full_turn)) {
+      operator_call(C, "armature.bone_turns", {{"mode", "BOTH"}});
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("An action each way the bone turns, each playing as far as it reaches");
+    }
+    const bool both = !slots.action[0].empty() && !slots.action[1].empty();
+    if (ImGui::Selectable("Full Turn", slots.full_turn, both ? ImGuiSelectableFlags_Disabled : 0)) {
+      operator_call(C, "armature.bone_turns", {{"mode", "FULL"}});
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::SetTooltip(both ? "Full Turn plays one action: let go of one of the two first"
+                             : "One action, a whole turn: turning on past it starts it over, turning back past the "
+                               "setup plays it from its end");
+    }
+    ImGui::EndCombo();
+  }
+  /* How far each way turns by its end, while dragged (applied on letting go: one undo step). */
+  static float dragging[2] = {0.0f, 0.0f};
+  static int dragged = -1;
+  for (int slot = 0; slot < (slots.full_turn ? 1 : 2); slot++) {
+    label(slots.full_turn ? "Full Turn" : slot == 0 ? "Counterclockwise" : "Clockwise");
+    bone_turn_row(C, armature, *active, slots, slot);
+    const std::string &name = slots.action[size_t(slot)];
+    if (slots.full_turn || name.empty()) {
+      continue;
+    }
+    const std::vector<Key<float>> *keys = bone_turn_keys(doc, armature, *active, name);
+    const float reach = keys && !keys->empty() ? std::fabs(keys->back().value) * 180.0f / PI : 0.0f;
+    label("Reach");
+    ImGui::PushID(slot);
+    float shown = dragged == slot ? dragging[slot] : reach;
+    if (ui_drag_float("##reach", &shown, 0.5f, 0.1f, 3600.0f, "%.1f\xC2\xB0")) {
+      dragging[slot] = shown;
+      dragged = slot;
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("How far the bone turns this way by the action's end: its turn keys there scale to end at it");
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit() && dragged == slot) {
+      operator_call(C, "armature.bone_turn_reach",
+                    {{"direction", slot == 0 ? "CCW" : "CW"}, {"angle", std::to_string(dragging[slot])}});
+      dragged = -1;
+    }
+    else if (!ImGui::IsItemActive() && dragged == slot) {
+      dragged = -1;
+    }
+    ImGui::PopID();
+  }
+  ui_panel_end();
+}
+
 static void bone_panel(Context &C, Layer &armature)
 {
   Document &doc = *C.document;
@@ -2113,10 +2281,6 @@ static void bone_panel(Context &C, Layer &armature)
         if (held) {
           ImGui::EndDisabled();
         }
-      }
-      for (int side = 0; side < CONTROLLER_SIDES; side++) {
-        label(controller_side_name(side));
-        controller_side_row(C, armature, *active, side);
       }
       label("Frame Size");
       if (ui_drag_float("##controller_frame_size", &active->controller_frame_size, 0.0001f, 0.00001f, 10.0f, "%.4f")) {
@@ -10437,6 +10601,7 @@ void properties_draw(Area &area, Context &C)
           break;
         }
         bone_panel(C, armature);
+        bone_actions_panel(C, armature);
         if (const Bone *active = bone_find(armature, armature.active_bone); active && bone_is_controller(*active)) {
           controller_fixes_panel(C, armature, *active);
           if (const Bone *still = bone_find(armature, armature.active_bone); still && bone_is_controller(*still)) {

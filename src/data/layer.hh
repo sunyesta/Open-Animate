@@ -725,6 +725,9 @@ struct Bone {
   /* The bone collections it is in (their ids, in its bone layer). */
   std::vector<uint64_t> collections;
   BoneType type = BoneType::Regular;
+  /* A regular or pin bone's Turns, Full Turn: its one action bone action is a whole turn, played round and round (the
+   * Bone tab's Actions; bone_turn_slots). Off: an action each way. */
+  bool full_turn = false;
   /* A 2 Axis Controller: each side's action by ControllerSide, "" for none (a side with none isn't there). */
   std::array<std::string, CONTROLLER_SIDES> controller_actions;
   /* How far one action frame is (bone layer units), the same either way: the box is its actions' frames times this, so

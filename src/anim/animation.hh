@@ -24,6 +24,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <array>
+
 #include "anim/channel.hh"
 
 namespace oanim {
@@ -164,6 +166,18 @@ float action_bone_action_length(const Layer &owner, const std::string &name);
 /* A 360 action bone action (Moho's 360 action bone): its bone's last key is exactly one whole turn from the setup,
  * so the bone's turn counts round and round (modulo a turn). */
 bool action_bone_action_full_turn(const Layer &owner, const std::string &name);
+/* A regular or pin bone's own action bone actions (named after it, and its name with " 2"), each in the slot of the way
+ * its last key turns the bone: [0] counterclockwise (a positive turn), [1] clockwise; one not keyed yet goes where its
+ * name puts it ([0] the plain name), the other slot when that is taken. `full_turn`: its Turns is Full Turn (set, or
+ * an action of its turning a whole turn): the one action in [0]. The Bone tab's Actions. */
+struct BoneTurnSlots {
+  std::array<std::string, 2> action;
+  bool full_turn = false;
+};
+BoneTurnSlots bone_turn_slots(const Document &doc, const Layer &owner, const Bone &bone);
+/* The bone's turn keys in action `name`: the timeline's while it is open, else those put away; null with none. */
+const std::vector<Key<float>> *bone_turn_keys(const Document &doc, const Layer &owner, const Bone &bone,
+                                              const std::string &name);
 
 /* --- The Actions panel (ActionPlay, data/layer.hh): every action's Frame, Mute and Loop. ---------------------- */
 

@@ -2193,6 +2193,280 @@ void rig_operators_register()
                  return OpStatus::Finished;
                });
 
+  /* --- A regular or pin bone's action bone actions, in a slot each way (the Bone tab's Actions). -------------- */
+
+  /* The active bone when it can turn actions (not a controller); a report when not. */
+  const auto active_turner = [](Context &C) -> Bone * {
+    Layer *armature = active_armature(C);
+    Bone *bone = armature ? bone_find(*armature, armature->active_bone) : nullptr;
+    if (!bone || bone_is_controller(*bone)) {
+      report(ReportType::Warning, "The active bone isn't a regular or pin bone");
+      return nullptr;
+    }
+    return bone;
+  };
+  /* direction=CCW (counterclockwise, slot 0) or CW. */
+  const auto turn_slot = [](Context &C) {
+    return op_arg(C, "direction", "CCW") == "CW" ? 1 : 0;
+  };
+  /* The bone's turn keys in action `name`, to change: the timeline's while it is open, else those put away. */
+  const auto turn_keys_edit = [](Document &doc, Layer &owner, Bone &bone,
+                                 const std::string &name) -> std::vector<Key<float>> & {
+    if (doc.action == name && doc.action_layer == owner.id) {
+      return bone.angle_keys.keys;
+    }
+    return bone.angle_keys.actions[name];
+  };
+  /* Keys `frame` to `value`, in frame order. */
+  const auto turn_key_put = [](std::vector<Key<float>> &keys, int frame, float value) {
+    auto it = std::find_if(keys.begin(), keys.end(), [&](const Key<float> &k) { return k.frame >= frame; });
+    if (it != keys.end() && it->frame == frame) {
+      it->value = value;
+      return;
+    }
+    Key<float> k;
+    k.frame = frame;
+    k.value = value;
+    keys.insert(it, k);
+  };
+  /* The turn keys made to end at `reach` (radians, signed): all of them scaled, so the turns between keep their share;
+   * with none, keyed there on frame `frame` (and the setup on 0 while it is open). */
+  const auto turn_reach_set = [turn_key_put](std::vector<Key<float>> &keys, int frame, float reach, bool open) {
+    const float last = keys.empty() ? 0.0f : keys.back().value;
+    if (std::fabs(last) < 1e-6f) {
+      turn_key_put(keys, keys.empty() || keys.back().frame == 0 ? frame : keys.back().frame, reach);
+      if (open) {
+        turn_key_put(keys, 0, 0.0f);
+      }
+    }
+    else {
+      for (Key<float> &k : keys) {
+        k.value *= reach / last;
+      }
+    }
+    channel_keys_changed();
+  };
+  /* A name of its own for an action let go of a bone (no longer named after it). */
+  const auto free_name = [](const Layer &owner, const std::string &base) {
+    std::string name = base;
+    for (int i = 1; std::find(owner.actions.begin(), owner.actions.end(), name) != owner.actions.end(); i++) {
+      name = base + " " + std::to_string(i);
+    }
+    return name;
+  };
+  /* The bone's name for a new action of its own: its name, else its name with " 2"; "" with both taken. */
+  const auto own_name = [](const Layer &owner, const Bone &bone) {
+    for (const std::string &name : {bone.name, bone.name + " 2"}) {
+      if (std::find(owner.actions.begin(), owner.actions.end(), name) == owner.actions.end()) {
+        return name;
+      }
+    }
+    return std::string();
+  };
+
+  rig_operator("armature.bone_turn_action_new", "New Turn Action",
+               "Make an action bone action for the active bone turning it direction=CCW (counterclockwise) or CW, "
+               "keyed turned 90 degrees that way on frame 10 (with Full Turn, a whole turn on frame 36), and open it",
+               bone_layer_active, [active_turner, turn_slot, turn_key_put, own_name](Context &C) {
+                 Bone *bone = active_turner(C);
+                 if (!bone) {
+                   return OpStatus::Cancelled;
+                 }
+                 Document &doc = *C.document;
+                 Layer &owner = *active_armature(C);
+                 const BoneTurnSlots slots = bone_turn_slots(doc, owner, *bone);
+                 const int slot = slots.full_turn ? 0 : turn_slot(C);
+                 if (!slots.action[size_t(slot)].empty()) {
+                   report(ReportType::Warning, "That way has an action: " + slots.action[size_t(slot)]);
+                   return OpStatus::Cancelled;
+                 }
+                 const std::string name = own_name(owner, *bone);
+                 if (name.empty()) {
+                   report(ReportType::Warning, bone->name + " and " + bone->name + " 2 are taken");
+                   return OpStatus::Cancelled;
+                 }
+                 const uint64_t owner_id = owner.id, bone_id = bone->id;
+                 owner.actions.push_back(name);
+                 document_set_action(doc, owner_id, name);
+                 Bone &b = *bone_find(*layer_find(doc, owner_id), bone_id);
+                 std::vector<Key<float>> &keys = b.angle_keys.keys;
+                 const int frame = slots.full_turn ? 36 : 10;
+                 turn_key_put(keys, 0, 0.0f);
+                 turn_key_put(keys, frame, slots.full_turn ? 2.0f * PI : (slot == 0 ? 0.5f : -0.5f) * PI);
+                 channel_keys_changed();
+                 doc.frame_current = frame;
+                 animation_evaluate(doc, frame);
+                 return OpStatus::Finished;
+               });
+
+  rig_operator("armature.bone_turn_action", "Set Turn Action",
+               "Put action `action` in the active bone's direction=CCW or CW slot, as its action bone action that "
+               "way (renamed after the bone); action=\"\" lets go of the one there (renamed, its keys kept)",
+               bone_layer_active,
+               [active_turner, turn_slot, turn_keys_edit, turn_reach_set, free_name, own_name](Context &C) {
+                 Bone *bone = active_turner(C);
+                 if (!bone) {
+                   return OpStatus::Cancelled;
+                 }
+                 Document &doc = *C.document;
+                 Layer &owner = *active_armature(C);
+                 const uint64_t owner_id = owner.id, bone_id = bone->id;
+                 const BoneTurnSlots slots = bone_turn_slots(doc, owner, *bone);
+                 const int slot = slots.full_turn ? 0 : turn_slot(C);
+                 const std::string now = slots.action[size_t(slot)], action = op_arg(C, "action");
+                 if (action == now) {
+                   return OpStatus::Cancelled;
+                 }
+                 if (!action.empty()) {
+                   if (std::find(owner.actions.begin(), owner.actions.end(), action) == owner.actions.end()) {
+                     report(ReportType::Warning, "No action named " + action);
+                     return OpStatus::Cancelled;
+                   }
+                   if (fix_action_find(owner, action) || controller_of_action(owner, action) ||
+                       controller_dial_of_action(owner, action))
+                   {
+                     report(ReportType::Warning, action + " is already played by a bone or fixes a pose");
+                     return OpStatus::Cancelled;
+                   }
+                   /* Keyed turning the bone the other way, it belongs in the other slot. */
+                   const std::vector<Key<float>> *keys = bone_turn_keys(doc, owner, *bone, action);
+                   const float last = keys && !keys->empty() ? keys->back().value : 0.0f;
+                   if (!slots.full_turn && last * (slot == 0 ? 1.0f : -1.0f) < -1e-6f) {
+                     report(ReportType::Warning, action + " turns " + bone->name + " the other way");
+                     return OpStatus::Cancelled;
+                   }
+                 }
+                 /* What is there now lets go first, so its name is free. */
+                 if (!now.empty()) {
+                   document_action_rename(doc, owner_id, now, free_name(owner, now + " (unlinked)"));
+                 }
+                 if (action.empty()) {
+                   return OpStatus::Finished;
+                 }
+                 Layer &o = *layer_find(doc, owner_id);
+                 const bool open = doc.action == action && doc.action_layer == owner_id;
+                 const int length = int(std::lround(action_length(o, action, open)));
+                 const std::string name = own_name(o, *bone_find(o, bone_id));
+                 if (name.empty() || !document_action_rename(doc, owner_id, action, name)) {
+                   report(ReportType::Warning, "Can't name it after " + bone->name);
+                   return OpStatus::Cancelled;
+                 }
+                 /* Not turning the bone yet: it does now, 90 degrees that way by its last frame (a whole turn with Full
+                  * Turn). */
+                 Layer &o2 = *layer_find(doc, owner_id);
+                 Bone &b = *bone_find(o2, bone_id);
+                 std::vector<Key<float>> &keys = turn_keys_edit(doc, o2, b, name);
+                 if (keys.empty() || std::fabs(keys.back().value) < 1e-6f) {
+                   const float reach = slots.full_turn ? 2.0f * PI : (slot == 0 ? 0.5f : -0.5f) * PI;
+                   turn_reach_set(keys, length > 0 ? length : 10, reach, open);
+                 }
+                 animation_evaluate(doc, doc.frame_current);
+                 return OpStatus::Finished;
+               });
+
+  rig_operator("armature.bone_turn_mirror", "Mirror Turn Action",
+               "Make the active bone's action one way (direction=CCW or CW) from its action the other way, as a "
+               "mirrored action",
+               bone_layer_active, [active_turner, turn_slot, own_name](Context &C) {
+                 Bone *bone = active_turner(C);
+                 if (!bone) {
+                   return OpStatus::Cancelled;
+                 }
+                 Document &doc = *C.document;
+                 if (!doc.action.empty()) {
+                   report(ReportType::Warning, "Go back to the mainline to mirror an action");
+                   return OpStatus::Cancelled;
+                 }
+                 Layer &owner = *active_armature(C);
+                 const BoneTurnSlots slots = bone_turn_slots(doc, owner, *bone);
+                 const int slot = turn_slot(C);
+                 const std::string from = slots.action[size_t(1 - slot)];
+                 if (slots.full_turn || from.empty() || !slots.action[size_t(slot)].empty()) {
+                   report(ReportType::Warning, "Mirror makes an empty way from an action the other way");
+                   return OpStatus::Cancelled;
+                 }
+                 const std::string to = own_name(owner, *bone);
+                 if (to.empty()) {
+                   return OpStatus::Cancelled;
+                 }
+                 const uint64_t owner_id = owner.id, bone_id = bone->id;
+                 std::string text = "Mirrored " + from + " into " + to;
+                 for (const std::string &note : document_action_mirror(doc, owner_id, from, to)) {
+                   text += "; " + note;
+                 }
+                 /* The bone turns the other way in it, whatever a partner (_L, _R) got. */
+                 Bone &b = *bone_find(*layer_find(doc, owner_id), bone_id);
+                 std::vector<Key<float>> turned = b.angle_keys.actions[from];
+                 for (Key<float> &k : turned) {
+                   k.value = -k.value;
+                 }
+                 b.angle_keys.actions[to] = std::move(turned);
+                 channel_keys_changed();
+                 animation_evaluate(doc, doc.frame_current);
+                 report(ReportType::Info, text);
+                 return OpStatus::Finished;
+               });
+
+  rig_operator("armature.bone_turn_reach", "Turn Action Reach",
+               "How far the active bone turns (angle=, degrees) by the end of its action direction=CCW or CW: its "
+               "turn keys there scaled to end at it",
+               bone_layer_active, [active_turner, turn_slot, turn_keys_edit, turn_reach_set](Context &C) {
+                 Bone *bone = active_turner(C);
+                 if (!bone) {
+                   return OpStatus::Cancelled;
+                 }
+                 Document &doc = *C.document;
+                 Layer &owner = *active_armature(C);
+                 const BoneTurnSlots slots = bone_turn_slots(doc, owner, *bone);
+                 const int slot = turn_slot(C);
+                 const std::string name = slots.action[size_t(slot)];
+                 const float degrees = std::strtof(op_arg(C, "angle", "90").c_str(), nullptr);
+                 if (slots.full_turn || name.empty() || !(degrees > 0.0f)) {
+                   report(ReportType::Warning, slots.full_turn ? "A full turn reaches 360 degrees"
+                                               : name.empty()   ? "No action that way"
+                                                                : "Reach is more than 0 degrees");
+                   return OpStatus::Cancelled;
+                 }
+                 std::vector<Key<float>> &keys = turn_keys_edit(doc, owner, *bone, name);
+                 turn_reach_set(keys, 10, degrees * PI / 180.0f * (slot == 0 ? 1.0f : -1.0f),
+                                doc.action == name && doc.action_layer == owner.id);
+                 animation_evaluate(doc, doc.frame_current);
+                 return OpStatus::Finished;
+               });
+
+  rig_operator("armature.bone_turns", "Turns",
+               "How the active bone's actions turn it: mode=BOTH (an action each way) or FULL (one action, a whole "
+               "turn played round and round). Its action's turn keys are scaled to end at 90 or 360 degrees",
+               bone_layer_active, [active_turner, turn_keys_edit, turn_reach_set](Context &C) {
+                 Bone *bone = active_turner(C);
+                 if (!bone) {
+                   return OpStatus::Cancelled;
+                 }
+                 Document &doc = *C.document;
+                 Layer &owner = *active_armature(C);
+                 const BoneTurnSlots slots = bone_turn_slots(doc, owner, *bone);
+                 const bool full = op_arg(C, "mode", "FULL") == "FULL";
+                 if (full == slots.full_turn) {
+                   return OpStatus::Cancelled;
+                 }
+                 if (full && !slots.action[0].empty() && !slots.action[1].empty()) {
+                   report(ReportType::Warning, "Full Turn plays one action: delete or let go of one of them first");
+                   return OpStatus::Cancelled;
+                 }
+                 bone->full_turn = full;
+                 for (const std::string &name : slots.action) {
+                   if (name.empty()) {
+                     continue;
+                   }
+                   std::vector<Key<float>> &keys = turn_keys_edit(doc, owner, *bone, name);
+                   const float way = !keys.empty() && keys.back().value < 0.0f ? -1.0f : 1.0f;
+                   turn_reach_set(keys, full ? 36 : 10, way * (full ? 2.0f : 0.5f) * PI,
+                                  doc.action == name && doc.action_layer == owner.id);
+                 }
+                 animation_evaluate(doc, doc.frame_current);
+                 return OpStatus::Finished;
+               });
+
   /* --- Spots: named places for a 2 Axis Controller's knob (the Bone tab's Spots panel). ---------------------- */
 
   /* bone=: that controller of the active bone layer, else the active bone. */

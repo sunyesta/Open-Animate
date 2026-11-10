@@ -927,6 +927,9 @@ static json layer_to_json(const Layer &layer)
       if (b.shape_layer != 0) {
         bj["shape_layer"] = b.shape_layer;
       }
+      if (b.full_turn) {
+        bj["full_turn"] = true;
+      }
       if (!b.collections.empty()) {
         bj["collections"] = b.collections;
       }
@@ -2927,6 +2930,7 @@ static Layer layer_from_json(const json &j, int depth)
     }
     b.pin_size = std::clamp(get_float(bj, "pin_size", 1.0f), 0.1f, 20.0f);
     b.shape_layer = bj.value("shape_layer", uint64_t(0));
+    b.full_turn = get_bool(bj, "full_turn", false);
     if (bj.value("type", std::string()) == "CONTROLLER_2D") {
       b.type = BoneType::Controller2D;
       if (const json actions = bj.value("controller_actions", json()); actions.is_object()) {

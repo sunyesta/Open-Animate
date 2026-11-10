@@ -3186,6 +3186,10 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["strength"] = b.strength;
       d["selected"] = b.selected;
       d["id"] = b.id;
+      /* A regular or pin bone's action bone actions each way (the Bone tab's Actions): counterclockwise, clockwise. */
+      const BoneTurnSlots turns = bone_turn_slots(*current_context().document, layer, b);
+      d["turn_actions"] = py::make_tuple(turns.action[0], turns.action[1]);
+      d["full_turn"] = turns.full_turn;
       d["select_head"] = bone_head_selected(layer, b);
       d["select_tail"] = bone_tail_selected(layer, b);
       d["connected"] = b.connected;

@@ -47,6 +47,15 @@ PENDING = [
      'for (const auto &[t, frame] : motion_path_selected_keys(*C.document, motion_path_targets(C))) {',
      'for (const auto &[t, frame] : std::vector<std::pair<MotionPathTarget, int>>()) {',
      'Only Selected shows a whole drawing point picked on its path', 'tests/test_timeline_path_picks.py'),
+    ('src/ops/rig_ops.cc', '        k.value *= reach / last;', '        (void)k;', 'Reach scales the turn keys',
+     'tests/test_bone_turn_actions.py'),
+    ('src/io/oanim_file.cc', '        bj["full_turn"] = true;', '        (void)0;', 'Full Turn saved with the bone',
+     'tests/test_bone_turn_actions.py'),
+    ('src/ops/rig_ops.cc', 'if (!slots.full_turn && last * (slot == 0 ? 1.0f : -1.0f) < -1e-6f) {', 'if (false) {',
+     'an action turning the other way is refused', 'tests/test_bone_turn_actions.py'),
+    ('src/anim/animation.cc', 'place(own[size_t(i)].first, own[size_t(i)].second > 0 ? 0 : 1);',
+     'place(own[size_t(i)].first, own[size_t(i)].first == bone.name ? 0 : 1);', 'turn slots go by direction',
+     'tests/test_bone_turn_actions.py'),
 ]
 
 def build(root):

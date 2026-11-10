@@ -2500,6 +2500,64 @@ bool action_bone_action_full_turn(const Layer &owner, const std::string &name)
   return it != driver->angle_keys.actions.end() && action_bone_keys_full_turn(it->second);
 }
 
+const std::vector<Key<float>> *bone_turn_keys(const Document &doc, const Layer &owner, const Bone &bone,
+                                              const std::string &name)
+{
+  if (doc.action == name && doc.action_layer == owner.id) {
+    return &bone.angle_keys.keys;
+  }
+  const auto it = bone.angle_keys.actions.find(name);
+  return it != bone.angle_keys.actions.end() ? &it->second : nullptr;
+}
+
+BoneTurnSlots bone_turn_slots(const Document &doc, const Layer &owner, const Bone &bone)
+{
+  BoneTurnSlots slots;
+  if (bone_is_controller(bone)) {
+    return slots;
+  }
+  /* Its two names, each with the way its last key turns the bone (0 not keyed). */
+  std::array<std::pair<std::string, int>, 2> own;
+  int count = 0;
+  for (const std::string &name : {bone.name, bone.name + " 2"}) {
+    if (std::find(owner.actions.begin(), owner.actions.end(), name) == owner.actions.end() ||
+        fix_action_find(owner, name) || controller_dial_of_action(owner, name) != &bone)
+    {
+      continue;
+    }
+    const std::vector<Key<float>> *keys = bone_turn_keys(doc, owner, bone, name);
+    const float last = keys && !keys->empty() ? keys->back().value : 0.0f;
+    const int way = last > 1e-6f ? 1 : last < -1e-6f ? -1 : 0;
+    if (keys && !keys->empty() && std::fabs(std::fabs(last) - 2.0f * PI) < 0.1f * PI / 180.0f) {
+      slots.full_turn = true;
+    }
+    own[size_t(count++)] = {name, way};
+  }
+  slots.full_turn = slots.full_turn || bone.full_turn;
+  const auto place = [&](const std::string &name, int want) {
+    const int slot = slots.action[size_t(want)].empty() ? want : 1 - want;
+    if (slots.action[size_t(slot)].empty()) {
+      slots.action[size_t(slot)] = name;
+    }
+  };
+  /* Keyed ones first, so one not keyed yet takes what is left. */
+  for (int i = 0; i < count; i++) {
+    if (own[size_t(i)].second != 0) {
+      place(own[size_t(i)].first, own[size_t(i)].second > 0 ? 0 : 1);
+    }
+  }
+  for (int i = 0; i < count; i++) {
+    if (own[size_t(i)].second == 0) {
+      place(own[size_t(i)].first, own[size_t(i)].first == bone.name ? 0 : 1);
+    }
+  }
+  /* A whole turn plays from the first slot. */
+  if (slots.full_turn && slots.action[0].empty()) {
+    std::swap(slots.action[0], slots.action[1]);
+  }
+  return slots;
+}
+
 /* What each action bone action's bone picks: its frame for the bone's turn in `turns` (owner's bones, in order), or a
  * controller's for where its knob is in `knobs` (frames). */
 static std::vector<std::pair<std::string, float>> action_bone_frames_for(const Layer &owner,
