@@ -4643,19 +4643,22 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
 
   /* The Envelope method's own Method (Curve and Cage Deform's Envelope alike) and what goes with it. */
   const auto envelope_rows = [&](const bool weighted) {
-    static const char *const METHOD_NAMES[] = {"Standard", "Blended"};
+    static const char *const METHOD_NAMES[] = {"Standard", "Blended", "Seamless"};
     static const char *const METHOD_TIPS[] = {
         "As Toon Boom Harmony's envelope deformer, open or closed: each point keeps its distance out from its nearest "
         "place on the shape and goes where that place goes, turning with it, so lines along the shape bend round its "
         "corners. Where two places are equally near the drawing can tear, as it does in Harmony",
         "As Toon Boom Harmony's Weighted Deform node: each point moves (never turns) by a smooth blend of how places all "
         "along the shape have moved, the nearer ones counting most. Nothing tears, and the drawing far away moves by "
-        "about the shape's average move. Pre-Blend and Post-Blend shape the blend"};
+        "about the shape's average move. Pre-Blend and Post-Blend shape the blend",
+        "Standard, without its tears: each point still turns and stretches with its nearest place on the shape, but "
+        "where two places are about as near (inside a bend, at a corner) it follows both, blended by how near each "
+        "is, so the drawing bends smoothly there"};
     modifier_row_label("Envelope", column, "How what is around the shape follows it");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ui_key_button_width() - 4.0f);
     const int method = int(m.deform_envelope_method);
     if (ImGui::BeginCombo("##envelope_method", METHOD_NAMES[method])) {
-      for (int k = 0; k < 2; k++) {
+      for (int k = 0; k < 3; k++) {
         if (ImGui::Selectable(METHOD_NAMES[k], k == method) && k != method) {
           m.deform_envelope_method = EnvelopeMethod(k);
           done = true;

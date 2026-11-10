@@ -427,6 +427,8 @@ add_test(NAME envelope_deform
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_envelope_deform.py)
 add_test(NAME envelope_weighted
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_envelope_weighted.py)
+add_test(NAME envelope_seamless
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_envelope_seamless.py)
 add_test(NAME envelope_stress
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_envelope_stress.py)
 add_test(NAME envelope_edges

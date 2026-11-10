@@ -824,14 +824,15 @@ enum class MeshMethod { Cells, Outline, Points };
 const char *mesh_method_id(MeshMethod method);
 bool mesh_method_from_id(const std::string &id, MeshMethod &r_method);
 
-/* How Envelope Deform carries what is around its shape, both as Toon Boom Harmony does: Standard (its envelope
- * deformer: each point by its single nearest place, turning with the shape there) or Blended (its Weighted Deform
- * node: each point moved, never turned, by a smooth blend of the moves of places all along the shape). Blended was
- * called Weighted until 2026-11-03, too like the Weights setting below it. */
-enum class EnvelopeMethod { Standard, Blended };
+/* How Envelope Deform carries what is around its shape: Standard (Toon Boom Harmony's envelope deformer: each point by
+ * its single nearest place, turning with the shape there), Blended (Harmony's Weighted Deform node: each point moved,
+ * never turned, by a smooth blend of the moves of places all along the shape) or Seamless (Open Animate's own, added
+ * 2026-11-03: Standard, but where two places are about as near a point it goes as both do, blended, so it never
+ * tears). Blended was called Weighted until 2026-11-03, too like the Weights setting below it. */
+enum class EnvelopeMethod { Standard, Blended, Seamless };
 
-/* An Envelope Method's name in files and Python ("STANDARD", "BLENDED"), and back. Blended's old name, "WEIGHTED", is
- * read only from files (oanim_file.cc); Python doesn't take it. */
+/* An Envelope Method's name in files and Python ("STANDARD", "BLENDED", "SEAMLESS"), and back. Blended's old name,
+ * "WEIGHTED", is read only from files (oanim_file.cc); Python doesn't take it. */
 const char *envelope_method_id(EnvelopeMethod method);
 bool envelope_method_from_id(const std::string &id, EnvelopeMethod &r_method);
 

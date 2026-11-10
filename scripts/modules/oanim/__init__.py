@@ -586,7 +586,9 @@ class _Layer:
         envelope_method "STANDARD", each point follows its nearest
         place on the shape; or "BLENDED", Harmony's Weighted Deform: each point moves (never turns) by a smooth blend of
         the moves of places all along the shape, with pre_blend (0 or more: evens the blend out) and post_blend
-        (above 0 sharpens it, below 0 softens it). With STANDARD, influence (Harmony's region of influence):
+        (above 0 sharpens it, below 0 softens it); or "SEAMLESS", Open Animate's own: STANDARD, but where two places
+        are about as near a point it follows both, blended, so the drawing never tears. With STANDARD or SEAMLESS,
+        influence (Harmony's region of influence):
         "EVERYWHERE" (Harmony's Infinite), or "CAPSULE" (its Elliptic): each segment of the shape reaches
         influence_left out on its left (looking the way it runs) and influence_right on its right, influence_begin past
         its start and influence_end past its end (a half ellipse), fading out over influence_fade beyond, all in layer
