@@ -178,12 +178,14 @@ std::vector<Layer *> timeline_layers(Context &C)
 }
 
 /* What Only Selected shows: the layers picked in the Layers editor (the active one unless deselected there),
- * and those whose points or bones are picked while they are being edited. Nothing picked, nothing shown. */
+ * those whose points or bones are picked while they are being edited, and those with something picked on their
+ * paths with the Motion Path tool (a key, dot or handle). Nothing picked, nothing shown. */
 static std::vector<Layer *> timeline_selected_layers(Context &C)
 {
   std::vector<Layer *> layers;
   Document &doc = *C.document;
   const std::shared_ptr<const std::set<uint64_t>> edited = editable_layer_ids(doc);
+  const std::set<uint64_t> on_paths = motion_path_picked_owners(C).layers;
   for (const Layer *flat : document_layers_flat(doc)) {
     if (flat->locked) {
       continue;
@@ -198,7 +200,7 @@ static std::vector<Layer *> timeline_selected_layers(Context &C)
                        (edits && std::any_of(flat->bones.begin(), flat->bones.end(), [](const Bone &b) {
                           return b.selected || b.select_head || b.select_tail;
                         }));
-    if (picked || holds) {
+    if (picked || holds || on_paths.contains(flat->id)) {
       layers.push_back(layer_find(doc, flat->id));
     }
   }

@@ -2773,6 +2773,23 @@ static bool bone_picked_any(const Bone &b)
   return b.selected || b.select_head || b.select_tail;
 }
 
+/* What is picked on the motion paths, as the rows were last asked for (shown_layers): its bones and drawings count as
+ * picked, as selected ones do. */
+static MotionPathPickedOwners g_path_picked;
+
+/* The layers the timeline shows, and what is picked on their paths. */
+static std::vector<Layer *> shown_layers_now(Context &C)
+{
+  g_path_picked = motion_path_picked_owners(C);
+  return timeline_shown_layers(C);
+}
+
+/* A bone picked: selected, or picked on its path. */
+static bool bone_picked_in(const Layer &l, const Bone &b)
+{
+  return bone_picked_any(b) || g_path_picked.bones.contains({l.id, b.id});
+}
+
 /* `layers`: what the timeline shows. `open_all`: every folding row open (for listing them). `show_all`: a row
  * for every channel, keys or not (the filters' All). */
 static std::vector<ChannelRow> channel_rows_built(const Area &area, const std::vector<Layer *> &layers, Document &doc,
@@ -2949,7 +2966,7 @@ static std::vector<ChannelRow> channel_rows_built(const Area &area, const std::v
        * picked bone's rows are), there being no Selected Points row to show it. */
       const KeyFilter sel{KEY_POINTS, true};
       if (l->key_whole_drawing) {
-        add("Drawing", {l}, points, depth, "", false, keyed({l}, sel), 0);
+        add("Drawing", {l}, points, depth, "", false, keyed({l}, sel) || g_path_picked.drawings.contains(l->id), 0);
         rows.back().chain = ChannelRow::Chain::WholeDrawing;
         rows.back().chain_layer = l->id;
         rows.back().picked_frames = picked_frames({l});
@@ -2961,15 +2978,17 @@ static std::vector<ChannelRow> channel_rows_built(const Area &area, const std::v
       }
     }
     /* With Only Selected, a bone layer with bones picked lists just those (all of them when none is). */
-    const bool any_picked = std::any_of(l->bones.begin(), l->bones.end(), bone_picked_any);
+    const bool any_picked = std::any_of(l->bones.begin(), l->bones.end(),
+                                        [&](const Bone &b) { return bone_picked_in(*l, b); });
     const bool only_picked = doc.timeline_only_selected && any_picked;
-    const KeyFilter bones{KEY_BONES, only_picked};
+    /* The Bones row's keys: the selected bones' (a bone picked only on its path isn't selected: then all of them). */
+    const KeyFilter bones{KEY_BONES, only_picked && std::any_of(l->bones.begin(), l->bones.end(), bone_picked_any)};
     /* Only Selected with no bone picked: no bones (their keys aren't the layer's). */
     if (!(sel_only && !any_picked) && ((show_all && !l->bones.empty()) || keyed({l}, bones))) {
       if (add("Bones", {l}, bones, depth, "bones:" + id, any_picked, false, 0, any_picked)) {
         for (const Bone &b : l->bones) {
           const KeyFilter one = bone_filter(b, KEY_BONES, false);
-          const bool red = bone_picked_any(b);
+          const bool red = bone_picked_in(*l, b);
           if (only_picked && !red) {
             continue;
           }
@@ -2999,7 +3018,8 @@ static std::vector<ChannelRow> channel_rows_built(const Area &area, const std::v
   const auto picks_in = [&](const Layer &l) {
     return (edited->contains(l.id) && std::any_of(l.drawing.points.begin(), l.drawing.points.end(),
                                                   [](const MeshPoint &p) { return p.selected; })) ||
-           std::any_of(l.bones.begin(), l.bones.end(), bone_picked_any);
+           std::any_of(l.bones.begin(), l.bones.end(), [&](const Bone &b) { return bone_picked_in(l, b); }) ||
+           g_path_picked.drawings.contains(l.id);
   };
   const auto picks_under = [&](auto &&self, const Layer &l) -> bool {
     return picks_in(l) || std::any_of(l.children.begin(), l.children.end(),
@@ -3353,7 +3373,7 @@ std::vector<std::pair<std::string, bool>> timeline_key_menu_top(Context &C, int 
 {
   Area area;
   const std::vector<ChannelRow> rows =
-      channel_rows(area, timeline_shown_layers(C), *C.document, timeline_pinned_layer_ids(C));
+      channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C));
   if (row < 0 || row >= int(rows.size())) {
     return {};
   }
@@ -3372,7 +3392,7 @@ bool timeline_key_press_simulate(Context &C, int row, int frame, int to_frame, b
   Area area;
   ui_bind_project(C.document, C.undo);
   const std::vector<ChannelRow> rows =
-      channel_rows(area, timeline_shown_layers(C), *C.document, timeline_pinned_layer_ids(C));
+      channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C));
   if (row < 0 || row >= int(rows.size())) {
     return false;
   }
@@ -3413,7 +3433,7 @@ int timeline_hidden_count(Context &C)
   Area area;
   ui_bind_project(C.document, C.undo);
   int hidden = 0;
-  channel_rows(area, timeline_shown_layers(C), *C.document, timeline_pinned_layer_ids(C), false, &hidden);
+  channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C), false, &hidden);
   return hidden;
 }
 
@@ -3422,7 +3442,7 @@ bool timeline_row_fold_at(Context &C, int row, bool open)
   Area area;
   ui_bind_project(C.document, C.undo);
   const std::vector<ChannelRow> rows =
-      channel_rows(area, timeline_shown_layers(C), *C.document, timeline_pinned_layer_ids(C));
+      channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C));
   if (row < 0 || row >= int(rows.size()) || rows[row].fold.empty()) {
     return false;
   }
@@ -3435,7 +3455,7 @@ bool timeline_row_chain_at(Context &C, int row)
   Area area;
   ui_bind_project(C.document, C.undo);
   const std::vector<ChannelRow> rows =
-      channel_rows(area, timeline_shown_layers(C), *C.document, timeline_pinned_layer_ids(C));
+      channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C));
   return row >= 0 && row < int(rows.size()) && row_chain_release(C, rows[size_t(row)]);
 }
 
@@ -3446,7 +3466,7 @@ std::vector<TimelineRowInfo> timeline_rows_list(Context &C, bool as_shown)
   ui_bind_project(C.document, C.undo);
   std::vector<TimelineRowInfo> list;
   const std::vector<ChannelRow> rows =
-      channel_rows(area, timeline_shown_layers(C), *C.document, timeline_pinned_layer_ids(C), !as_shown);
+      channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C), !as_shown);
   const KeyFocus focus = key_focus(C);
   const std::vector<bool> teal = focus_rows(rows, focus_channels(*C.document, focus));
   for (size_t r = 0; r < rows.size(); r++) {
@@ -3516,7 +3536,7 @@ bool timeline_row_alt_click(Context &C, int row, int frame, bool shift)
   Area area;
   ui_bind_project(C.document, C.undo);
   const std::vector<ChannelRow> rows =
-      channel_rows(area, timeline_shown_layers(C), *C.document, timeline_pinned_layer_ids(C));
+      channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C));
   if (row < 0 || row >= int(rows.size()) || !rows[size_t(row)].stretch_pickable()) {
     return false;
   }
@@ -3558,7 +3578,7 @@ static void timeline_body(Area &area, Context &C)
   /* Channel rows: Pinned, All, then each animated (active or selected) layer, as Blender's Dope
    * Sheet lists the selected objects. The names sit in a column on the left. */
   int rows_hidden = 0;
-  const std::vector<Layer *> shown_layers = timeline_shown_layers(C);
+  const std::vector<Layer *> shown_layers = shown_layers_now(C);
   /* Only Selected with nothing picked: a line saying so, where the rows would be. */
   const bool nothing_picked = doc.timeline_only_selected && !doc.timeline_lock && shown_layers.empty();
   std::vector<ChannelRow> rows =
@@ -3859,7 +3879,7 @@ static void timeline_body(Area &area, Context &C)
       C.wm->modal_keys.clear();
     }
     /* The document was replaced: look the layers up again. */
-    rows = channel_rows(area, timeline_shown_layers(C), doc, timeline_pinned_layer_ids(C));
+    rows = channel_rows(area, shown_layers_now(C), doc, timeline_pinned_layer_ids(C));
     summaries.resize(rows.size());
     summarize();
   }

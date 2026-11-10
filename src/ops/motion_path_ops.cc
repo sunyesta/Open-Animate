@@ -76,6 +76,31 @@ MotionPathPicks motion_path_picks(Context &C)
   return r;
 }
 
+MotionPathPickedOwners motion_path_picked_owners(Context &C)
+{
+  MotionPathPickedOwners r;
+  if (!C.document || !C.wm || C.wm->tool_settings.tool != Tool::MotionPath) {
+    return r;
+  }
+  const auto add = [&](const MotionPathTarget &t) {
+    r.layers.insert(t.layer);
+    if (t.bone != 0) {
+      r.bones.insert({t.layer, t.bone});
+    }
+    else if (t.point != 0 || t.drawing) {
+      r.drawings.insert(t.layer);
+    }
+  };
+  for (const MotionPathPickedStretch &p : motion_path_picks(C).stretches) {
+    add(p.target);
+  }
+  /* A key picked on a path that picks no stretch of its own (a whole drawing's point, its timing the drawing's). */
+  for (const auto &[t, frame] : motion_path_selected_keys(*C.document, motion_path_targets(C))) {
+    add(t);
+  }
+  return r;
+}
+
 /* The stretch of `t` holding the picked one (a span across breakdowns is one). */
 static bool stretch_holding(const Document &doc, const MotionPathPickedStretch &p, MotionPathStretch &r_stretch)
 {

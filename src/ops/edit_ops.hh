@@ -130,6 +130,15 @@ struct MotionPathPicks {
   int shown = -1;
 };
 MotionPathPicks motion_path_picks(Context &C);
+/* Whose paths have something picked with the Motion Path tool (a key, dot or handle of a picked stretch): their layers,
+ * their bones (layer and bone id) and the layers whose points' or drawing's are. The timeline's Only Selected shows
+ * them as picked. */
+struct MotionPathPickedOwners {
+  std::set<uint64_t> layers;
+  std::set<std::pair<uint64_t, uint64_t>> bones;
+  std::set<uint64_t> drawings;
+};
+MotionPathPickedOwners motion_path_picked_owners(Context &C);
 /* Picks what is on `frame` of each of `targets` (its key, else its dot between keys; `extend`: added to what is
  * picked, else instead of it) and goes to that frame. Not an undo step. Whether anything was picked. */
 bool motion_path_pick_at(Context &C, const std::vector<struct MotionPathTarget> &targets, int frame, bool extend);

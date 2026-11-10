@@ -39,6 +39,14 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 PENDING = [
     ('src/anim/animation.cc', 'settled[i] += drawing_key_whole_away(layer, doc.action);', '(void)0;',
      'Key Whole Drawing turned on lines up every action', 'tests/test_key_whole_drawing_actions.py'),
+    ('src/ops/anim_ops.cc', 'if (picked || holds || on_paths.contains(flat->id)) {', 'if (picked || holds) {',
+     'Only Selected shows layers picked on their paths', 'tests/test_timeline_path_picks.py'),
+    ('src/editors/timeline.cc', 'return bone_picked_any(b) || g_path_picked.bones.contains({l.id, b.id});',
+     'return bone_picked_any(b);', 'Only Selected lists bones picked on their paths', 'tests/test_timeline_path_picks.py'),
+    ('src/ops/motion_path_ops.cc',
+     'for (const auto &[t, frame] : motion_path_selected_keys(*C.document, motion_path_targets(C))) {',
+     'for (const auto &[t, frame] : std::vector<std::pair<MotionPathTarget, int>>()) {',
+     'Only Selected shows a whole drawing point picked on its path', 'tests/test_timeline_path_picks.py'),
 ]
 
 def build(root):
