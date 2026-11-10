@@ -2440,6 +2440,103 @@ void rig_operators_register()
                  return OpStatus::Finished;
                });
 
+  /* --- Fix actions that follow bones (the Bone tab's Fix Actions section). --------------------------------------- */
+
+  /* bones="a,b": those bones of `owner` by name; else the selected ones, the active bone first. */
+  const auto fix_bones = [](Context &C, const Layer &owner, std::vector<uint64_t> &r_ids) {
+    r_ids.clear();
+    if (op_has_arg(C, "bones")) {
+      const std::string list = op_arg(C, "bones");
+      size_t at = 0;
+      while (at <= list.size()) {
+        const size_t comma = std::min(list.find(',', at), list.size());
+        const std::string part = list.substr(at, comma - at);
+        at = comma + 1;
+        if (part.empty()) {
+          continue;
+        }
+        const Bone *b = bone_find_by_name(owner, part);
+        if (!b) {
+          report(ReportType::Warning, "No bone named " + part);
+          return false;
+        }
+        r_ids.push_back(b->id);
+      }
+      return true;
+    }
+    for (const Bone &b : owner.bones) {
+      if (b.selected && b.id == owner.active_bone) {
+        r_ids.push_back(b.id);
+      }
+    }
+    for (const Bone &b : owner.bones) {
+      if (b.selected && b.id != owner.active_bone) {
+        r_ids.push_back(b.id);
+      }
+    }
+    return true;
+  };
+
+  rig_operator("armature.bone_fix_new", "Create Fix Action",
+               "A fix action following the selected bones (bones=\"a,b\": these), opened on frame 1 with them keyed "
+               "where they are now: key them where it ends, and the fix along the way. It needs 2 ways to follow (a 2 "
+               "Axis Controller's knob goes 2)",
+               bone_layer_active, [fix_bones](Context &C) {
+                 Document &doc = *C.document;
+                 Layer &owner = *active_armature(C);
+                 std::vector<uint64_t> ids;
+                 if (!fix_bones(C, owner, ids)) {
+                   return OpStatus::Cancelled;
+                 }
+                 int ways = 0;
+                 for (const uint64_t id : ids) {
+                   ways += bone_fix_ways(*bone_find(owner, id));
+                 }
+                 if (ways < 2) {
+                   report(ReportType::Warning, "Select 2 bones, or a 2 Axis Controller: a fix follows 2 ways or more");
+                   return OpStatus::Cancelled;
+                 }
+                 const std::string name = document_bone_fix_new(doc, owner.id, ids);
+                 return name.empty() ? OpStatus::Cancelled : OpStatus::Finished;
+               });
+
+  rig_operator("armature.bone_fix_follow", "Follow Bones",
+               "Fix action `name` of the active bone layer follows the selected bones too (bones=\"a,b\": these); "
+               "follow=0: no longer (their keys in it go with them)",
+               bone_layer_active, [fix_bones](Context &C) {
+                 Document &doc = *C.document;
+                 Layer &owner = *active_armature(C);
+                 const std::string name = op_arg(C, "name");
+                 const BoneFix *fix = bone_fix_find(owner, name);
+                 if (!fix) {
+                   report(ReportType::Warning, "No fix action named " + name + " follows bones");
+                   return OpStatus::Cancelled;
+                 }
+                 std::vector<uint64_t> ids;
+                 if (!fix_bones(C, owner, ids)) {
+                   return OpStatus::Cancelled;
+                 }
+                 const bool follow = !op_has_arg(C, "follow") || op_arg_bool(C, "follow");
+                 if (!follow && fix->follows.size() <= std::set<uint64_t>(ids.begin(), ids.end()).size() &&
+                     std::all_of(fix->follows.begin(), fix->follows.end(), [&](uint64_t id) {
+                       return std::find(ids.begin(), ids.end(), id) != ids.end();
+                     }))
+                 {
+                   report(ReportType::Warning, "A fix follows one bone at least: delete it instead");
+                   return OpStatus::Cancelled;
+                 }
+                 animation_record(doc);
+                 bool any = false;
+                 for (const uint64_t id : ids) {
+                   any = document_bone_fix_follow(doc, owner.id, name, id, follow) || any;
+                 }
+                 if (!any) {
+                   report(ReportType::Warning, follow ? "It follows those already" : "It doesn't follow those");
+                   return OpStatus::Cancelled;
+                 }
+                 return OpStatus::Finished;
+               });
+
   /* --- Spots: named places for a 2 Axis Controller's knob (the Bone tab's Spots panel). ---------------------- */
 
   /* bone=: that controller of the active bone layer, else the active bone. */

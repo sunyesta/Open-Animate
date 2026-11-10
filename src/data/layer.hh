@@ -1102,6 +1102,19 @@ struct FixAction {
   std::vector<FixPose> poses;
   bool operator==(const FixAction &) const = default;
 };
+/* A fix action that follows bones (the Bone tab's Fix Actions): an action of a bone layer whose own keys on the bones
+ * it follows (a bone's angle, a 2 Axis Controller's knob) trace a line of poses, from where they are on frame 1 to
+ * where they are on the last frame they are keyed on; its other keys are the fix along that line. On the mainline it
+ * plays by itself: the frame whose pose the bones are nearest along what changes on the line, as much as what stays
+ * put on it is there (anim/animation.hh, bone_fix_play). */
+struct BoneFix {
+  std::string name;
+  /* The bones it follows, by id. */
+  std::vector<uint64_t> follows;
+  /* Named after the actions playing where it ends, renamed as that changes until renamed by hand. */
+  bool auto_name = true;
+  bool operator==(const BoneFix &) const = default;
+};
 
 /* How an action of a bone layer plays (the Armature tab's Actions panel, as Blender's Shape Keys). An action with no
  * bone or knob of its own plays at its Frame, keyable here (0: not playing, as an action bone at rest); one with a
@@ -1305,6 +1318,8 @@ struct Layer {
   std::vector<std::string> actions;
   /* Bone layers: which of those actions are fix actions, and what drives them. */
   std::vector<FixAction> fix_actions;
+  /* Bone layers: which are fix actions that follow bones (see BoneFix). */
+  std::vector<BoneFix> bone_fixes;
   /* Bone layers: how its actions play, those whose Frame, Mute or Loop has been set (see ActionPlay). */
   std::vector<ActionPlay> action_plays;
   /* Bone layers, runtime: the frame the bones show (for constraints' delays) and where dynamics put

@@ -56,6 +56,14 @@ PENDING = [
     ('src/anim/animation.cc', 'place(own[size_t(i)].first, own[size_t(i)].second > 0 ? 0 : 1);',
      'place(own[size_t(i)].first, own[size_t(i)].first == bone.name ? 0 : 1);', 'turn slots go by direction',
      'tests/test_bone_turn_actions.py'),
+    ('src/anim/animation.cc', 'play.strength *= std::clamp(w.now / w.line.front(), 0.0f, 1.0f);', '(void)0;',
+     'a fix that follows bones plays as much as what stays put is there', 'tests/test_bone_fixes.py'),
+    ('src/anim/animation.cc', 'if (first != keys.end() && first->frame > 1) {', 'if (false) {',
+     'a fix that follows bones starts on frame 1', 'tests/test_bone_fixes.py'),
+    ('src/anim/animation.cc', 'fix && fix->auto_name && left != name) {', 'fix && false) {',
+     'a fix that follows bones is named after where it ends', 'tests/test_bone_fixes.py'),
+    ('src/io/oanim_file.cc', 'j["bone_fixes"] = std::move(fixes);', '(void)fixes;',
+     'fixes that follow bones saved with the file', 'tests/test_bone_fixes.py'),
 ]
 
 def build(root):

@@ -384,6 +384,16 @@ class _Layer:
         action bones at a pose."""
         return [dict(f) for f in _oanim.layer_fix_actions(self._id)]
 
+    @property
+    def bone_fixes(self):
+        """A bone layer's fix actions that follow bones (the Bone tab's Fix Actions): [{"name", "follows" (bone
+        names), "start" (1), "end" (the last frame its bones are keyed on in it), "frame" (the frame of it playing
+        now), "strength" (how much plays now, 0-1), "auto_name" (named after the actions playing where it ends)}].
+        Its keys on the bones it follows (an angle, a knob's place) are its line from frame 1 to its end; its other
+        keys the fix along it. Make one with oanim.ops.armature.bone_fix_new(bones="a,b") (else the selected bones),
+        change what it follows with bone_fix_follow(name=, bones=, follow=0|1)."""
+        return [dict(f) for f in _oanim.layer_bone_fixes(self._id)]
+
     def field_state(self, path):
         """How the field of channel `path` ("location", 'bones["arm"].angle') shows now: (key state:
         "NONE", "ANIMATED" or "KEYED" on this frame, action bone: True while an action bone action plays into it,

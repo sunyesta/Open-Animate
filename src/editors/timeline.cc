@@ -551,14 +551,31 @@ static void action_menu(Context &C, float width)
         }
       };
       const auto plain = [&](const std::string &name) { action_item(*rig, name, name, "", 0); };
-      section("Actions", [&](const std::string &n) { return !action_adds(*rig, n); }, plain);
+      section("Actions", [&](const std::string &n) { return !action_adds(*rig, n) && !bone_fix_find(*rig, n); }, plain);
       section("Action Bone Actions", [&](const std::string &n) { return action_bone_of(*rig, n) != nullptr; },
               [&](const std::string &name) {
                 action_item(*rig, name, name, action_bone_action_full_turn(*rig, name) ? "360Â°" : "", dim);
               });
       const std::vector<std::pair<std::string, float>> playing = action_bone_actions_playing(*rig);
-      section("Fix Actions", [&](const std::string &n) { return fix_action_find(*rig, n) != nullptr; },
+      section("Fix Actions",
+              [&](const std::string &n) { return fix_action_find(*rig, n) != nullptr || bone_fix_find(*rig, n) != nullptr; },
               [&](const std::string &name) {
+                /* One that follows bones: how much plays now, and which. */
+                if (const BoneFix *bf = bone_fix_find(*rig, name)) {
+                  const bool open = doc.action == name && doc.action_layer == rig->id;
+                  const float strength = bone_fix_play(*rig, *bf, open).strength;
+                  action_item(*rig, name, name, strength > 0.0f ? percent(strength) : "", strength > 0.0f ? COL_FIX_TEXT : dim);
+                  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                    std::string bones;
+                    for (const uint64_t id : bf->follows) {
+                      if (const Bone *b = bone_find(*rig, id)) {
+                        bones += (bones.empty() ? "" : " and ") + b->name;
+                      }
+                    }
+                    ImGui::SetTooltip("Follows %s along its line (%s now)", bones.c_str(), percent(strength).c_str());
+                  }
+                  return;
+                }
                 const FixAction &f = *fix_action_find(*rig, name);
                 const std::string broken = fix_action_broken(*rig, f);
                 const float strength = broken.empty() ? fix_action_strength(*rig, f, playing) : 0.0f;

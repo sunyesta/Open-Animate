@@ -5093,7 +5093,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     for (const std::string &name : layer.actions) {
       py::dict d;
       d["name"] = name;
-      d["kind"] = action_bone_of(layer, name) ? "ACTION_BONE" : fix_action_find(layer, name) ? "FIX" : "ACTION";
+      d["kind"] = action_bone_of(layer, name)                                      ? "ACTION_BONE"
+                  : fix_action_find(layer, name) || bone_fix_find(layer, name) ? "FIX"
+                                                                               : "ACTION";
       d["full_turn"] = action_bone_action_full_turn(layer, name);
       const Bone *holder = nullptr;
       const ActionFrameBy by = action_frame_by(layer, name, &holder);
@@ -5124,6 +5126,33 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     for (const auto &[name, t] : action_bone_actions_playing(layer)) {
       const float length = action_bone_action_length(layer, name);
       out.append(py::make_tuple(name, t, length > 0.0f ? std::min(t / length, 1.0f) : 0.0f));
+    }
+    return out;
+  });
+  m.def("layer_bone_fixes", [layer_or_raise](uint64_t id) {
+    Layer &layer = layer_or_raise(id);
+    const Document &doc = *current_context().document;
+    py::list out;
+    for (const BoneFix &f : layer.bone_fixes) {
+      const bool edited = doc.action == f.name && doc.action_layer == layer.id;
+      const BoneFixPlay play = bone_fix_play(layer, f, edited);
+      py::dict d;
+      py::list follows;
+      for (const uint64_t b : f.follows) {
+        for (const Bone &o : layer.bones) {
+          if (o.id == b) {
+            follows.append(o.name);
+          }
+        }
+      }
+      d["name"] = f.name;
+      d["follows"] = follows;
+      d["start"] = play.start;
+      d["end"] = play.end;
+      d["frame"] = play.frame;
+      d["strength"] = play.strength;
+      d["auto_name"] = f.auto_name;
+      out.append(d);
     }
     return out;
   });

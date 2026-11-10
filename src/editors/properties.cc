@@ -2129,6 +2129,266 @@ static void bone_actions_panel(Context &C, Layer &armature)
   ui_panel_end();
 }
 
+/* The fix actions that follow the active bone (BoneFix): each with how much of it plays now, a pencil that opens it and
+ * whether it plays; + makes one following the selected bones, - deletes the one picked. Under the list the picked one's
+ * bones (x lets go of one, Add Selected Bones), and where it starts and ends (a click opens it there). */
+static void bone_fixes_panel(Context &C, Layer &armature)
+{
+  const Bone *active = bone_find(armature, armature.active_bone);
+  if (!active || !ui_collapsing_header("Fix Actions", true)) {
+    return;
+  }
+  ImGui::PushID("##bone_fixes_panel");
+  Document &doc = *C.document;
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float h = ImGui::GetFrameHeight();
+  const float row_h = h + 2.0f;
+  const OpArgs::value_type layer_arg = {"layer", std::to_string(armature.id)};
+  const auto tip = [](const char *text) {
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::SetTooltip("%s", text);
+    }
+  };
+  struct ListState {
+    std::string picked, renaming, rename_text;
+  };
+  static std::map<uint64_t, ListState> states;
+  ListState &st = states[armature.id];
+  std::vector<std::string> fixes;
+  for (const BoneFix &f : armature.bone_fixes) {
+    if (std::find(f.follows.begin(), f.follows.end(), active->id) != f.follows.end()) {
+      fixes.push_back(f.name);
+    }
+  }
+  const bool editing_here = !doc.action.empty() && doc.action_layer == armature.id;
+  const auto listed = [&](const std::string &n) { return std::find(fixes.begin(), fixes.end(), n) != fixes.end(); };
+  /* The one edited is the one picked; else the last picked, or the first. */
+  if (editing_here && listed(doc.action)) {
+    st.picked = doc.action;
+  }
+  if (!listed(st.picked)) {
+    st.picked = fixes.empty() ? std::string() : fixes.front();
+  }
+
+  const float side = h + style.ItemSpacing.x;
+  const float list_w = ImGui::GetContentRegionAvail().x - side;
+  const ImVec2 list_min = ImGui::GetCursorScreenPos();
+  const float rows = std::max(3.0f, float(fixes.size()) + 1.0f);
+  ImGui::BeginChild("##fixes", ImVec2(list_w, rows * row_h + style.WindowPadding.y), ImGuiChildFlags_Borders);
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  std::string doomed;
+  for (const std::string &name : fixes) {
+    const BoneFix *fix = bone_fix_find(armature, name);
+    const bool open = editing_here && doc.action == name;
+    ImGui::PushID(name.c_str());
+    const ImVec2 row = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    const float amount_w = h * 2.2f;
+    const float right_w = amount_w + h * 2.0f + style.ItemSpacing.x * 3.0f;
+    const float icon_x = row.x + style.FramePadding.x;
+    const float text_x = icon_x + h * 0.8f;
+    const float cy = row.y + (row_h - 2.0f) * 0.5f;
+    if (st.renaming == name) {
+      ImGui::SetCursorScreenPos(ImVec2(text_x, row.y));
+      ImGui::SetNextItemWidth(w - right_w - (text_x - row.x));
+      if (ImGui::IsWindowAppearing() || !ImGui::IsAnyItemActive()) {
+        ImGui::SetKeyboardFocusHere();
+      }
+      ImGui::InputText("##rename", &st.rename_text, ImGuiInputTextFlags_AutoSelectAll);
+      if (ImGui::IsItemDeactivated()) {
+        if (!st.rename_text.empty() && st.rename_text != name) {
+          operator_call(C, "anim.action_rename", {layer_arg, {"name", name}, {"to", st.rename_text}});
+          st.picked = st.rename_text;
+        }
+        st.renaming.clear();
+      }
+    }
+    else {
+      if (name == st.picked) {
+        dl->AddRectFilled(row, ImVec2(row.x + w, row.y + row_h - 2.0f), IM_COL32(0x33, 0x4d, 0x80, 255), 3.0f);
+      }
+      ImGui::SetNextItemAllowOverlap();
+      if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(w - right_w, row_h - 2.0f)))
+      {
+        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+          st.renaming = name;
+          st.rename_text = name;
+        }
+        st.picked = name;
+      }
+      tip("A fix action: it plays by itself as the bones it follows go along its line. Click to pick it, double-click "
+          "to rename; right-click for more");
+      if (ImGui::BeginPopupContextItem("##fix_menu")) {
+        ImGui::TextDisabled("%s", name.c_str());
+        ImGui::Separator();
+        if (ImGui::MenuItem("Rename")) {
+          st.renaming = name;
+          st.rename_text = name;
+        }
+        if (ImGui::MenuItem("Delete")) {
+          doomed = name;
+        }
+        ImGui::EndPopup();
+      }
+      dl->AddText(ImVec2(text_x, row.y + style.FramePadding.y),
+                  ImGui::GetColorU32(action_muted(armature, name) ? ImGuiCol_TextDisabled : ImGuiCol_Text), name.c_str());
+    }
+    const ImVec2 ic(icon_x + h * 0.3f, cy);
+    const float r = h * 0.22f;
+    dl->AddQuad(ImVec2(ic.x, ic.y - r), ImVec2(ic.x + r, ic.y), ImVec2(ic.x, ic.y + r), ImVec2(ic.x - r, ic.y),
+                UI_FIX_COLOR, 1.3f);
+    /* How much plays now, the pencil, and whether it plays. */
+    ImGui::SameLine(w - right_w + style.ItemSpacing.x);
+    const BoneFixPlay play = fix ? bone_fix_play(armature, *fix, open) : BoneFixPlay();
+    const std::string amount = std::to_string(int(std::lround(play.strength * 100.0f))) + "%";
+    ImGui::BeginDisabled();
+    ImGui::Button(amount.c_str(), ImVec2(amount_w, 0.0f));
+    ImGui::EndDisabled();
+    tip("How much of it plays now, as its bones are");
+    ImGui::SameLine();
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    if (open) {
+      ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    }
+    const bool edit = ImGui::Button("##edit", ImVec2(h, h));
+    if (open) {
+      ImGui::PopStyleColor();
+    }
+    pencil_icon(dl, ImVec2(at.x + h * 0.5f, at.y + h * 0.5f), h * 0.5f, ImGui::GetColorU32(ImGuiCol_Text));
+    if (edit) {
+      operator_call(C, "anim.action_set", {layer_arg, {"name", open ? std::string() : name}});
+    }
+    tip(open ? "Editing it: click to go back to the mainline" : "Edit it");
+    ImGui::SameLine();
+    bool plays = !action_muted(armature, name);
+    if (ImGui::Checkbox("##plays", &plays)) {
+      operator_call(C, "anim.action_play_set", {layer_arg, {"name", name}, {"mute", plays ? "0" : "1"}});
+    }
+    tip("Unchecked: muted, it doesn't play, its keys kept");
+    ImGui::SetCursorScreenPos(ImVec2(row.x, row.y + row_h));
+    ImGui::PopID();
+  }
+  ImGui::Dummy(ImVec2(0.0f, 0.0f));
+  ImGui::EndChild();
+  const ImVec2 list_max = ImGui::GetItemRectMax();
+  if (!doomed.empty()) {
+    operator_call(C, "anim.action_delete", {layer_arg, {"name", doomed}});
+    ImGui::PopID();
+    return;
+  }
+
+  /* Beside the list: + and -. */
+  ImGui::SetCursorScreenPos(ImVec2(list_min.x + list_w + style.ItemSpacing.x, list_min.y));
+  ImGui::BeginGroup();
+  int ways = 0;
+  std::vector<uint64_t> selected;
+  for (const Bone &b : armature.bones) {
+    if (b.selected) {
+      ways += bone_fix_ways(b);
+      selected.push_back(b.id);
+    }
+  }
+  ImGui::BeginDisabled(ways < 2);
+  if (ImGui::Button("+", ImVec2(h, h))) {
+    operator_call(C, "armature.bone_fix_new");
+  }
+  ImGui::EndDisabled();
+  tip(ways < 2 ? "Select 2 bones, or a 2 Axis Controller: a fix follows 2 ways or more"
+               : "Create Fix Action: one following the selected bones, opened on frame 1 with them keyed where they "
+                 "are now. Key them where it ends, and the fix along the way");
+  ImGui::BeginDisabled(st.picked.empty());
+  if (ImGui::Button("-", ImVec2(h, h))) {
+    operator_call(C, "anim.action_delete", {layer_arg, {"name", st.picked}});
+  }
+  ImGui::EndDisabled();
+  tip("Delete the picked fix action, with its keys");
+  ImGui::EndGroup();
+  ImGui::SetCursorScreenPos(ImVec2(list_min.x, list_max.y + style.ItemSpacing.y));
+
+  const BoneFix *fix = st.picked.empty() ? nullptr : bone_fix_find(armature, st.picked);
+  if (fix && ImGui::BeginTable("##fix_details", 2)) {
+    const bool open = editing_here && doc.action == fix->name;
+    const std::string name = fix->name;
+    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, h * 3.6f);
+    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+    const auto label = [](const char *text) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(text);
+      ImGui::TableSetColumnIndex(1);
+    };
+    /* The bones it follows, each with the ways it goes; x lets go of one. */
+    const std::vector<uint64_t> follows = fix->follows;
+    bool first = true;
+    for (const uint64_t id : follows) {
+      const Bone *b = bone_find(armature, id);
+      if (!b) {
+        continue;
+      }
+      label(first ? "Follows" : "");
+      first = false;
+      ImGui::PushID(int(id));
+      const ImVec2 p = ImGui::GetCursorScreenPos();
+      const float w = ImGui::GetContentRegionAvail().x - h - style.ItemSpacing.x;
+      ImDrawList *tdl = ImGui::GetWindowDrawList();
+      tdl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(ImGuiCol_FrameBg), style.FrameRounding);
+      tdl->AddText(ImVec2(p.x + style.FramePadding.x, p.y + style.FramePadding.y), ImGui::GetColorU32(ImGuiCol_Text),
+                   b->name.c_str());
+      const std::string goes = bone_fix_bone_ways(armature, *fix, id, open);
+      const float gw = ImGui::CalcTextSize(goes.c_str()).x;
+      tdl->AddText(ImVec2(p.x + w - gw - style.FramePadding.x, p.y + style.FramePadding.y),
+                   ImGui::GetColorU32(ImGuiCol_TextDisabled), goes.c_str());
+      ImGui::Dummy(ImVec2(w, h));
+      tip(bone_is_controller(*b) ? "Its knob's place traces the fix's line: keyed in the fix"
+                                 : "Its turn traces the fix's line: keyed in the fix");
+      ImGui::SameLine();
+      ImGui::BeginDisabled(follows.size() < 2);
+      if (ImGui::Button("x", ImVec2(h, h))) {
+        operator_call(C, "armature.bone_fix_follow", {{"name", name}, {"bones", b->name}, {"follow", "0"}});
+      }
+      ImGui::EndDisabled();
+      tip(follows.size() < 2 ? "A fix follows one bone at least: delete it instead"
+                             : "Stop following it (its keys in the fix go with it)");
+      ImGui::PopID();
+    }
+    label(first ? "Follows" : "");
+    const bool can_add = std::any_of(selected.begin(), selected.end(), [&](uint64_t id) {
+      return std::find(follows.begin(), follows.end(), id) == follows.end();
+    });
+    ImGui::BeginDisabled(!can_add);
+    if (ImGui::Button("+ Add Selected Bones", ImVec2(-1.0f, 0.0f))) {
+      operator_call(C, "armature.bone_fix_follow", {{"name", name}});
+    }
+    ImGui::EndDisabled();
+    tip(can_add ? "It follows the selected bones too" : "Select bones it doesn't follow yet");
+    /* Where it starts and ends: a click opens it there. */
+    const BoneFixPlay play = bone_fix_play(armature, *fix, open);
+    for (const bool start : {true, false}) {
+      label(start ? "Starts" : "Ends");
+      const float frame = start ? play.start : play.end;
+      const std::string pose = bone_fix_pose_label(armature, *fix, open, frame);
+      const std::string on = "frame " + std::to_string(int(std::lround(frame)));
+      ImGui::PushID(start ? "start" : "end");
+      ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
+      const ImVec2 p = ImGui::GetCursorScreenPos();
+      if (ImGui::Button(pose.c_str(), ImVec2(-1.0f, 0.0f))) {
+        operator_call(C, "anim.action_set", {layer_arg, {"name", name}, {"frame", std::to_string(int(std::lround(frame)))}});
+      }
+      ImGui::PopStyleVar();
+      const float ow = ImGui::CalcTextSize(on.c_str()).x;
+      ImGui::GetWindowDrawList()->AddText(ImVec2(ImGui::GetItemRectMax().x - ow - style.FramePadding.x,
+                                                 p.y + style.FramePadding.y),
+                                          ImGui::GetColorU32(ImGuiCol_TextDisabled), on.c_str());
+      tip(start ? "Where its bones are on frame 1: click to open it there"
+                : "Where its bones are on the last frame they are keyed on: click to open it there");
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+  ImGui::PopID();
+}
+
 static void bone_panel(Context &C, Layer &armature)
 {
   Document &doc = *C.document;
@@ -10574,6 +10834,7 @@ void properties_draw(Area &area, Context &C)
         }
         bone_panel(C, armature);
         bone_actions_panel(C, armature);
+        bone_fixes_panel(C, armature);
         if (const Bone *active = bone_find(armature, armature.active_bone); active && bone_is_controller(*active)) {
           controller_fixes_panel(C, armature, *active);
           if (const Bone *still = bone_find(armature, armature.active_bone); still && bone_is_controller(*still)) {

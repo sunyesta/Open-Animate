@@ -33,6 +33,7 @@ namespace oanim {
 struct Bone;
 struct ActionPlay;
 struct FixAction;
+struct BoneFix;
 struct FixPose;
 struct Document;
 struct Layer;
@@ -158,6 +159,37 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
 const FixAction *fix_action_find(const Layer &owner, const std::string &name);
 /* Why it can't play (a driver deleted, or not an action bone action any more), or "" when it can. */
 std::string fix_action_broken(const Layer &owner, const FixAction &fix);
+
+/* --- Fix actions that follow bones (BoneFix, data/layer.hh: the Bone tab's Fix Actions). One is an ordinary action
+ * while edited (its bones keyed and moved in it, the action bone actions playing under it from where they are); on the
+ * mainline it plays after the action bone actions and the fixes above, never moving the bones it follows or an action
+ * bone, at the frame the bones' pose picks. ----------------------------------------------------------------------- */
+
+const BoneFix *bone_fix_find(const Layer &owner, const std::string &name);
+/* How far a bone counts toward a fix: a 2 Axis Controller 2 (its knob goes two ways), any other 1. */
+int bone_fix_ways(const Bone &bone);
+/* Where a fix plays as the bones are now: its line from `start` (1) to `end` (the last frame its bones are keyed on;
+ * nothing plays with none past 1), `frame` the frame of it whose pose is nearest along what changes on the line, and
+ * `strength` how much plays (0 to 1: each bone or knob axis staying put on the line, away from rest, as a share of
+ * where it stays). */
+struct BoneFixPlay {
+  float start = 1.0f, end = 1.0f, frame = 1.0f, strength = 0.0f;
+};
+BoneFixPlay bone_fix_play(const Layer &owner, const BoneFix &fix, bool edited = false);
+/* "Bone Up and Right": the actions its bones play where it ends (on `frame`, or its last), as named by the side or turn
+ * they are on, else its bones' names with "Fix". `edited`: its keys are in the channels, the timeline edited. */
+std::string bone_fix_name(const Layer &owner, const BoneFix &fix, bool edited = false, int frame = -1);
+/* "Up 24 · Right 0": where `fix`'s bones are on `frame` of it (a knob in frames each way, a bone's turn in degrees),
+ * each named when it follows more than one. */
+std::string bone_fix_pose_label(const Layer &owner, const BoneFix &fix, bool edited, float frame);
+/* "Up · Right": the ways bone `bone` has gone where `fix` ends (a knob's sides, a bone's turn), "" for none. */
+std::string bone_fix_bone_ways(const Layer &owner, const BoneFix &fix, uint64_t bone, bool edited);
+/* A new fix following `follows` (bone ids), keyed on frame 1 where they are now, named for that, and opened on
+ * frame 1. Returns its name, or "" (none of them in `owner`). */
+std::string document_bone_fix_new(Document &doc, uint64_t owner, const std::vector<uint64_t> &follows);
+/* Bone `bone` added to or taken from what fix `name` follows. Taken, its keys in the fix go with it (they would play as
+ * the fix). */
+bool document_bone_fix_follow(Document &doc, uint64_t owner, const std::string &name, uint64_t bone, bool follow);
 /* The action bone actions of `owner` playing now, its bones as they are: each with the frame its bone's turn
  * picks (more than 0). */
 std::vector<std::pair<std::string, float>> action_bone_actions_playing(const Layer &owner);

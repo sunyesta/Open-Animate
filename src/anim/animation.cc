@@ -2236,6 +2236,8 @@ void drawing_timeline_swap(VectorDrawing &drawing, const std::string &from, cons
   drawing = std::move(holder.drawing);
 }
 
+static std::string bone_fix_unique(const Layer &owner, const std::string &base, const std::string &self = {});
+
 bool document_set_action(Document &doc, uint64_t owner_id, const std::string &name)
 {
   Layer *owner = name.empty() ? nullptr : layer_find(doc, owner_id);
@@ -2257,8 +2259,19 @@ bool document_set_action(Document &doc, uint64_t owner_id, const std::string &na
       owner_for_each_channel(*from, [&](auto &ch, auto &value) { swap_timeline(ch, value, from_name, ""); });
     }
   }
+  const uint64_t left_layer = doc.action_layer;
+  const std::string left = doc.action;
   doc.action.clear();
   doc.action_layer = 0;
+  /* A fix that follows bones, left: named after the actions playing where it now ends (unless renamed by hand). */
+  if (Layer *from = left.empty() ? nullptr : layer_find(doc, left_layer)) {
+    if (const BoneFix *fix = bone_fix_find(*from, left); fix && fix->auto_name && left != name) {
+      const std::string renamed = bone_fix_unique(*from, bone_fix_name(*from, *fix), left);
+      if (renamed != left) {
+        document_action_rename(doc, left_layer, left, renamed);
+      }
+    }
+  }
   if (owner) {
     owner_for_each_channel(*owner, [&](auto &ch, auto &value) { swap_timeline(ch, value, "", name); });
     doc.action = name;
@@ -2352,6 +2365,7 @@ bool document_action_delete(Document &doc, uint64_t owner_id, const std::string 
   }
   std::erase(owner->actions, name);
   std::erase_if(owner->fix_actions, [&](const FixAction &f) { return f.name == name; });
+  std::erase_if(owner->bone_fixes, [&](const BoneFix &f) { return f.name == name; });
   std::erase_if(owner->action_plays, [&](const ActionPlay &a) { return a.name == name; });
   for (Bone &bone : owner->bones) {
     std::replace(bone.controller_actions.begin(), bone.controller_actions.end(), name, std::string());
@@ -2813,7 +2827,7 @@ ActionFrameBy action_frame_by(const Layer &owner, const std::string &name, const
 {
   const Bone *holder = nullptr;
   ActionFrameBy by = ActionFrameBy::Own;
-  if (fix_action_find(owner, name)) {
+  if (fix_action_find(owner, name) || bone_fix_find(owner, name)) {
     by = ActionFrameBy::Fix;
   }
   else if ((holder = controller_of_action(owner, name))) {
@@ -2914,6 +2928,9 @@ float action_frame_shown(const Layer &owner, const std::string &name)
       return a ? a->frame : 0.0f;
     }
     case ActionFrameBy::Fix:
+      if (const BoneFix *bf = bone_fix_find(owner, name)) {
+        return bone_fix_play(owner, *bf).strength;
+      }
       return fix_action_strength(owner, *fix_action_find(owner, name), action_bone_actions_playing(owner));
     default: {
       /* Where its bone or knob has it, muted or not. */
@@ -3487,6 +3504,15 @@ void fix_actions_tidy(Document &doc)
                                "the ruler or the pose map, or go back to the mainline to turn " + (count == 1 ? "it" : "them"));
     }
   }
+  /* A fix that follows a bone deleted follows the rest. */
+  for (const Layer *flat : document_layers_flat(doc)) {
+    if (flat->is_bone_layer() && !flat->bone_fixes.empty()) {
+      Layer &owner = *layer_find(doc, flat->id);
+      for (BoneFix &fix : owner.bone_fixes) {
+        std::erase_if(fix.follows, [&](uint64_t id) { return bone_find(owner, id) == nullptr; });
+      }
+    }
+  }
   /* Poses whose keys are all gone. */
   std::vector<std::pair<uint64_t, std::string>> emptied;
   for (const Layer *flat : document_layers_flat(doc)) {
@@ -3581,6 +3607,9 @@ bool document_action_rename(Document &doc, uint64_t owner_id, const std::string 
   for (ActionPlay &a : owner->action_plays) {
     a.name = a.name == from ? to : a.name;
   }
+  for (BoneFix &f : owner->bone_fixes) {
+    f.name = f.name == from ? to : f.name;
+  }
   owner_for_each_channel(*owner, [&](auto &ch, auto & /*value*/) {
     if (auto it = ch.actions.find(from); it != ch.actions.end()) {
       auto keys = std::move(it->second);
@@ -3649,6 +3678,458 @@ void armature_bone_renamed(Document &doc, uint64_t owner_id, const std::string &
   for (const char *other : {"", " 2"}) {
     document_action_rename(doc, owner_id, from + other, to + other);
   }
+}
+
+/* --- Fix actions that follow bones (BoneFix) ------------------------------------------------------------------ */
+
+const BoneFix *bone_fix_find(const Layer &owner, const std::string &name)
+{
+  for (const BoneFix &f : owner.bone_fixes) {
+    if (f.name == name) {
+      return &f;
+    }
+  }
+  return nullptr;
+}
+
+int bone_fix_ways(const Bone &bone)
+{
+  return bone_is_controller(bone) ? 2 : 1;
+}
+
+/* What traces a followed bone's line: a knob's place (frames), any other bone's turn. */
+static bool bone_fix_traces(const Bone &bone, const void *ch)
+{
+  return bone_is_controller(bone) ? ch == &bone.position_keys : ch == &bone.angle_keys;
+}
+
+/* A channel's keys in action `name`: in the channel itself while that is the timeline edited. */
+template<typename C> static const auto *bone_fix_keys(const C &ch, const std::string &name, bool edited)
+{
+  if (edited) {
+    return &ch.keys;
+  }
+  const auto it = ch.actions.find(name);
+  return it == ch.actions.end() ? nullptr : &it->second;
+}
+
+/* Samples keys (frame 0 the setup) at fractional frames, the channel made once. */
+template<typename T> struct BoneFixSampler {
+  Channel<T> c;
+  BoneFixSampler(const std::vector<Key<T>> *keys, const T &setup)
+  {
+    const ChannelKeysQuiet scratch;
+    if (keys) {
+      c.keys = *keys;
+    }
+    c.set_key(0, setup);
+  }
+  T at(float t) const
+  {
+    const int f0 = int(std::floor(t));
+    const float frac = t - float(f0);
+    const T a = c.evaluate(f0);
+    return frac <= 0.0f ? a : a + (c.evaluate(f0 + 1) - a) * frac;
+  }
+};
+
+static constexpr float BONE_FIX_STEP = 0.25f;
+
+/* `now(i, axis)`: where bone `i` of `owner` is (its turn from its setup; a knob's frames on that axis). */
+template<typename NowFn>
+static BoneFixPlay bone_fix_play_with(const Layer &owner, const BoneFix &fix, bool edited, NowFn now)
+{
+  BoneFixPlay play;
+  /* One way the bones go: on each sample of the line, where it is now, and what counts as no change. */
+  struct Way {
+    std::vector<float> line;
+    float now = 0.0f, eps = 1e-3f;
+  };
+  std::vector<Way> ways;
+  float end = 1.0f;
+  std::vector<size_t> found;
+  for (const uint64_t id : fix.follows) {
+    for (size_t i = 0; i < owner.bones.size(); i++) {
+      const Bone &b = owner.bones[i];
+      if (b.id != id) {
+        continue;
+      }
+      if (bone_is_controller(b)) {
+        if (const auto *keys = bone_fix_keys(b.position_keys, fix.name, edited); keys && !keys->empty()) {
+          end = std::max(end, float(keys->back().frame));
+        }
+      }
+      else if (const auto *keys = bone_fix_keys(b.angle_keys, fix.name, edited); keys && !keys->empty()) {
+        end = std::max(end, float(keys->back().frame));
+      }
+      found.push_back(i);
+    }
+  }
+  play.end = end;
+  if (end <= play.start || found.empty()) {
+    return play;
+  }
+  const int samples = int(std::ceil((end - play.start) / BONE_FIX_STEP)) + 1;
+  const auto t_of = [&](int s) { return std::min(play.start + float(s) * BONE_FIX_STEP, end); };
+  for (const size_t i : found) {
+    const Bone &b = owner.bones[i];
+    if (bone_is_controller(b)) {
+      const BoneFixSampler<float2> line(bone_fix_keys(b.position_keys, fix.name, edited),
+                                        channel_setup(b.position_keys, b.transform));
+      Way x, y;
+      x.eps = y.eps = 1e-2f;
+      x.now = now(i, 0);
+      y.now = now(i, 1);
+      for (int s = 0; s < samples; s++) {
+        const float2 at = line.at(t_of(s));
+        x.line.push_back(at.x);
+        y.line.push_back(at.y);
+      }
+      ways.push_back(std::move(x));
+      ways.push_back(std::move(y));
+    }
+    else {
+      const float setup = channel_setup(b.angle_keys, b.turn);
+      const BoneFixSampler<float> line(bone_fix_keys(b.angle_keys, fix.name, edited), setup);
+      Way w;
+      w.now = now(i, 0);
+      for (int s = 0; s < samples; s++) {
+        w.line.push_back(line.at(t_of(s)) - setup);
+      }
+      ways.push_back(std::move(w));
+    }
+  }
+  /* What stays put on the line, away from rest, says how much plays; what changes, where on it. */
+  play.strength = 1.0f;
+  std::vector<std::pair<const Way *, float>> moving;
+  for (const Way &w : ways) {
+    const auto [lo, hi] = std::minmax_element(w.line.begin(), w.line.end());
+    if (*hi - *lo > w.eps) {
+      moving.push_back({&w, *hi - *lo});
+    }
+    else if (std::abs(w.line.front()) > w.eps) {
+      play.strength *= std::clamp(w.now / w.line.front(), 0.0f, 1.0f);
+    }
+  }
+  if (moving.empty()) {
+    play.frame = end;
+    return play;
+  }
+  /* The nearest point of the line, each way measured against how far it goes along it. */
+  float best = std::numeric_limits<float>::max();
+  for (int s = 0; s + 1 < samples || s == 0; s++) {
+    const int n = std::min(s + 1, samples - 1);
+    float along = 0.0f, length = 0.0f;
+    for (const auto &[w, span] : moving) {
+      const float a = w->line[size_t(s)], d = w->line[size_t(n)] - a;
+      along += (w->now - a) * d / (span * span);
+      length += d * d / (span * span);
+    }
+    const float u = length > 1e-12f ? std::clamp(along / length, 0.0f, 1.0f) : 0.0f;
+    float off = 0.0f;
+    for (const auto &[w, span] : moving) {
+      const float a = w->line[size_t(s)], d = w->line[size_t(n)] - a;
+      const float gap = (w->now - (a + d * u)) / span;
+      off += gap * gap;
+    }
+    if (off < best - 1e-9f) {
+      best = off;
+      play.frame = t_of(s) + (t_of(n) - t_of(s)) * u;
+    }
+  }
+  return play;
+}
+
+BoneFixPlay bone_fix_play(const Layer &owner, const BoneFix &fix, bool edited)
+{
+  return bone_fix_play_with(owner, fix, edited, [&](size_t i, int axis) {
+    const Bone &b = owner.bones[i];
+    if (bone_is_controller(b)) {
+      const float2 at = controller_knob_played(owner, b);
+      return axis == 0 ? at.x : at.y;
+    }
+    return b.turn - channel_setup(b.angle_keys, b.turn);
+  });
+}
+
+/* Whether channel `ch` of `owner` traces one of `fix`'s bones' line. */
+static bool bone_fix_tracing(const Layer &owner, const BoneFix &fix, const void *ch)
+{
+  for (const Bone &b : owner.bones) {
+    if (std::find(fix.follows.begin(), fix.follows.end(), b.id) != fix.follows.end() && bone_fix_traces(b, ch)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* What a fix adds to a channel playing `play`: its key there less the setup, times how much plays (a yes/no channel
+ * takes it whole once half there). The fix starts on frame 1: a channel first keyed later starts from its setup there,
+ * not on frame 0. */
+template<typename T>
+static bool bone_fix_delta(const std::vector<Key<T>> &keys, const T &setup, const BoneFixPlay &play, bool constant,
+                           T &r_delta)
+{
+  r_delta = setup - setup;
+  if (keys.empty() || play.strength <= 0.0f || (constant && play.strength < 0.5f)) {
+    return false;
+  }
+  const auto first = std::find_if(keys.begin(), keys.end(), [](const Key<T> &k) { return k.frame >= 1; });
+  T d = setup - setup;
+  if (first != keys.end() && first->frame > 1) {
+    std::vector<Key<T>> held = keys;
+    Key<T> start = *first;
+    start.frame = 1;
+    start.value = setup;
+    held.insert(held.begin() + (first - keys.begin()), start);
+    d = action_bone_sample(held, setup, play.frame, constant) - setup;
+  }
+  else {
+    d = action_bone_sample(keys, setup, play.frame, constant) - setup;
+  }
+  r_delta = constant ? d : d * play.strength;
+  return true;
+}
+
+std::string bone_fix_name(const Layer &owner, const BoneFix &fix, bool edited, int frame)
+{
+  std::vector<std::string> names;
+  std::vector<std::string> bones;
+  for (const uint64_t id : fix.follows) {
+    const Bone *b = nullptr;
+    for (const Bone &o : owner.bones) {
+      b = o.id == id ? &o : b;
+    }
+    if (!b) {
+      continue;
+    }
+    bones.push_back(b->name);
+    if (bone_is_controller(*b)) {
+      const auto *keys = bone_fix_keys(b->position_keys, fix.name, edited);
+      if (!keys || keys->empty()) {
+        continue;
+      }
+      const BoneFixSampler<float2> line(keys, channel_setup(b->position_keys, b->transform));
+      const float2 at = line.at(float(frame >= 0 ? frame : keys->back().frame));
+      /* Up or Down first, as said aloud ("up and right"). */
+      for (const auto &[v, plus, minus] : {std::tuple(at.y, CONTROLLER_UP, CONTROLLER_DOWN),
+                                           std::tuple(at.x, CONTROLLER_RIGHT, CONTROLLER_LEFT)})
+      {
+        const int side = v > 1e-2f ? plus : v < -1e-2f ? minus : -1;
+        if (side >= 0 && size_t(side) < b->controller_actions.size() && !b->controller_actions[size_t(side)].empty()) {
+          names.push_back(b->controller_actions[size_t(side)]);
+        }
+      }
+    }
+    else {
+      const auto *keys = bone_fix_keys(b->angle_keys, fix.name, edited);
+      if (!keys || keys->empty()) {
+        continue;
+      }
+      const float setup = channel_setup(b->angle_keys, b->turn);
+      const BoneFixSampler<float> line(keys, setup);
+      const float turn = line.at(float(frame >= 0 ? frame : keys->back().frame)) - setup;
+      if (std::abs(turn) > 1e-3f) {
+        /* The action turning it that way. */
+        for (const std::string &a : owner.actions) {
+          if (controller_dial_of_action(owner, a) != b) {
+            continue;
+          }
+          const auto *ak = b->angle_keys.actions.count(a) ? &b->angle_keys.actions.at(a) : nullptr;
+          if (ak && !ak->empty() && (ak->back().value - ak->front().value) * turn > 0.0f) {
+            names.push_back(a);
+            break;
+          }
+        }
+      }
+    }
+  }
+  if (names.empty()) {
+    std::string out;
+    for (const std::string &n : bones) {
+      out += (out.empty() ? "" : " and ") + n;
+    }
+    return (out.empty() ? std::string("Bone") : out) + " Fix";
+  }
+  /* "Bone Up and Right": a later name sharing the first's first word drops it. */
+  const std::string first_word = names[0].substr(0, names[0].find(' '));
+  std::string out = names[0];
+  for (size_t k = 1; k < names.size(); k++) {
+    std::string n = names[k];
+    if (n.size() > first_word.size() + 1 && n.compare(0, first_word.size() + 1, first_word + " ") == 0) {
+      n = n.substr(first_word.size() + 1);
+    }
+    out += " and " + n;
+  }
+  return out;
+}
+
+/* Where followed bone `b` is on `frame` of `fix`: a knob's frames, or {turn from setup, 0}. */
+static float2 bone_fix_at(const Bone &b, const BoneFix &fix, bool edited, float frame)
+{
+  if (bone_is_controller(b)) {
+    return BoneFixSampler<float2>(bone_fix_keys(b.position_keys, fix.name, edited),
+                                  channel_setup(b.position_keys, b.transform))
+        .at(frame);
+  }
+  const float setup = channel_setup(b.angle_keys, b.turn);
+  return {BoneFixSampler<float>(bone_fix_keys(b.angle_keys, fix.name, edited), setup).at(frame) - setup, 0.0f};
+}
+
+std::string bone_fix_pose_label(const Layer &owner, const BoneFix &fix, bool edited, float frame)
+{
+  std::string out;
+  const auto add = [&](const std::string &part) { out += (out.empty() ? "" : " \xC2\xB7 ") + part; };
+  for (const uint64_t id : fix.follows) {
+    const Bone *b = nullptr;
+    for (const Bone &o : owner.bones) {
+      b = o.id == id ? &o : b;
+    }
+    if (!b) {
+      continue;
+    }
+    const std::string who = fix.follows.size() > 1 ? b->name + " " : std::string();
+    const float2 at = bone_fix_at(*b, fix, edited, frame);
+    if (bone_is_controller(*b)) {
+      add(who + (at.y < -1e-2f ? "Down " : "Up ") + std::to_string(int(std::lround(std::abs(at.y)))));
+      add(std::string(at.x < -1e-2f ? "Left " : "Right ") + std::to_string(int(std::lround(std::abs(at.x)))));
+    }
+    else {
+      add(who + std::to_string(int(std::lround(at.x * 180.0f / PI))) + "\xC2\xB0");
+    }
+  }
+  return out;
+}
+
+std::string bone_fix_bone_ways(const Layer &owner, const BoneFix &fix, uint64_t bone, bool edited)
+{
+  const Bone *b = nullptr;
+  for (const Bone &o : owner.bones) {
+    b = o.id == bone ? &o : b;
+  }
+  if (!b) {
+    return {};
+  }
+  const BoneFixPlay play = bone_fix_play(owner, fix, edited);
+  const float2 at = bone_fix_at(*b, fix, edited, play.end);
+  std::string out;
+  const auto add = [&](const char *part) { out += (out.empty() ? "" : " \xC2\xB7 ") + std::string(part); };
+  if (bone_is_controller(*b)) {
+    if (std::abs(at.y) > 1e-2f) {
+      add(at.y > 0.0f ? "Up" : "Down");
+    }
+    if (std::abs(at.x) > 1e-2f) {
+      add(at.x > 0.0f ? "Right" : "Left");
+    }
+  }
+  else if (std::abs(at.x) > 1e-3f) {
+    add(at.x > 0.0f ? "Counterclockwise" : "Clockwise");
+  }
+  return out;
+}
+
+/* `base`, or with " 2", " 3", ... where taken by another action of `owner` (not `self`). */
+static std::string bone_fix_unique(const Layer &owner, const std::string &base, const std::string &self)
+{
+  const auto taken = [&](const std::string &n) {
+    return n != self && std::find(owner.actions.begin(), owner.actions.end(), n) != owner.actions.end();
+  };
+  std::string name = base;
+  for (int i = 2; taken(name); i++) {
+    name = base + " " + std::to_string(i);
+  }
+  return name;
+}
+
+std::string document_bone_fix_new(Document &doc, uint64_t owner_id, const std::vector<uint64_t> &follows)
+{
+  Layer *owner = layer_find(doc, owner_id);
+  if (!owner || !owner->is_bone_layer()) {
+    return {};
+  }
+  BoneFix fix;
+  for (const uint64_t id : follows) {
+    if (bone_find(*owner, id) && std::find(fix.follows.begin(), fix.follows.end(), id) == fix.follows.end()) {
+      fix.follows.push_back(id);
+    }
+  }
+  if (fix.follows.empty()) {
+    return {};
+  }
+  /* Made from the mainline: back there first, so the bones are where it shows them. */
+  document_set_action(doc, 0, "");
+  animation_record(doc);
+  owner = layer_find(doc, owner_id);
+  fix.name = " new fix";
+  /* Its line starts where the bones are now: keyed on frame 1, their setup on 0. */
+  for (const uint64_t id : fix.follows) {
+    Bone &b = *bone_find(*owner, id);
+    const auto start = [&](auto &ch, const auto &value) {
+      const ChannelKeysQuiet scratch;
+      std::decay_t<decltype(ch)> c;
+      c.set_key(0, channel_setup(ch, value));
+      c.set_key(1, value - ch.from_action_bones);
+      ch.actions[fix.name] = c.keys;
+    };
+    if (bone_is_controller(b)) {
+      start(b.position_keys, b.transform);
+    }
+    else {
+      start(b.angle_keys, b.turn);
+    }
+  }
+  const std::string name = bone_fix_unique(*owner, bone_fix_name(*owner, fix, false, 1));
+  owner_for_each_channel(*owner, [&](auto &ch, auto & /*value*/) {
+    if (auto it = ch.actions.find(fix.name); it != ch.actions.end()) {
+      auto keys = std::move(it->second);
+      ch.actions.erase(it);
+      ch.actions[name] = std::move(keys);
+    }
+  });
+  fix.name = name;
+  owner->actions.push_back(name);
+  owner->bone_fixes.push_back(fix);
+  document_set_action(doc, owner_id, name);
+  doc.frame_current = 1;
+  animation_evaluate(doc, doc.frame_current);
+  return name;
+}
+
+bool document_bone_fix_follow(Document &doc, uint64_t owner_id, const std::string &name, uint64_t bone, bool follow)
+{
+  Layer *owner = layer_find(doc, owner_id);
+  BoneFix *fix = owner ? const_cast<BoneFix *>(bone_fix_find(*owner, name)) : nullptr;
+  Bone *b = owner ? bone_find(*owner, bone) : nullptr;
+  if (!fix || !b) {
+    return false;
+  }
+  const auto at = std::find(fix->follows.begin(), fix->follows.end(), bone);
+  if (follow == (at != fix->follows.end())) {
+    return false;
+  }
+  if (follow) {
+    fix->follows.push_back(bone);
+    return true;
+  }
+  fix->follows.erase(at);
+  /* Its line's keys would play as the fix. */
+  const bool edited = doc.action == name && doc.action_layer == owner_id;
+  const auto drop = [&](auto &ch) {
+    if (edited) {
+      ch.keys.clear();
+    }
+    else {
+      ch.actions.erase(name);
+    }
+  };
+  if (bone_is_controller(*b)) {
+    drop(b->position_keys);
+  }
+  else {
+    drop(b->angle_keys);
+  }
+  animation_evaluate(doc, doc.frame_current);
+  return true;
 }
 
 void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone> &bones)
@@ -3745,12 +4226,55 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
       }
     }
   }
+  for (const BoneFix &fix : owner.bone_fixes) {
+    if (action_muted(owner, fix.name)) {
+      continue;
+    }
+    const BoneFixPlay at = bone_fix_play_with(owner, fix, false, [&](size_t i, int axis) {
+      if (bone_is_controller(owner.bones[i])) {
+        const float2 k = bone_transform_from_position(owner.bones[i], bones[i].position);
+        return axis == 0 ? k.x : k.y;
+      }
+      return bones[i].angle - owner.bones[i].setup_angle;
+    });
+    if (at.strength <= 0.0f) {
+      continue;
+    }
+    for (size_t j = 0; j < bones.size(); j++) {
+      const Bone &src = owner.bones[j];
+      Bone &b = bones[j];
+      if (const auto it = src.position_keys.actions.find(fix.name);
+          it != src.position_keys.actions.end() && !bone_fix_tracing(owner, fix, &src.position_keys))
+      {
+        float2 d;
+        if (bone_fix_delta(it->second, setup_of(src.position_keys, src.transform), at, false, d)) {
+          b.position += rotate(d, src.setup_angle);
+        }
+      }
+      if (!driving.count(&src.angle_keys) && !bone_fix_tracing(owner, fix, &src.angle_keys)) {
+        if (const auto it = src.angle_keys.actions.find(fix.name); it != src.angle_keys.actions.end()) {
+          float d;
+          if (bone_fix_delta(it->second, setup_of(src.angle_keys, src.turn), at, false, d)) {
+            b.angle += d;
+          }
+        }
+      }
+      if (const auto it = src.scale_keys.actions.find(fix.name); it != src.scale_keys.actions.end()) {
+        float2 d;
+        if (bone_fix_delta(it->second, setup_of(src.scale_keys, src.scale), at, false, d)) {
+          b.scale += d;
+        }
+      }
+    }
+  }
 }
 
 static bool has_action_bone_actions(const Document &doc)
 {
   for (const Layer *layer : document_layers_flat(doc)) {
-    if (layer->is_bone_layer() && !layer->action_plays.empty() && !layer->actions.empty()) {
+    if (layer->is_bone_layer() && (!layer->action_plays.empty() || !layer->bone_fixes.empty()) &&
+        !layer->actions.empty())
+    {
       return true;
     }
     for (const std::string &name : layer->actions) {
@@ -4076,6 +4600,37 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
       if (!fixes_played.count(fix.name)) {
         play_fix(fix, frames);
       }
+    }
+    /* Last the fixes that follow bones, from where everything before has put them (a bone another bone's action moves
+     * too). Not while a fix of drivers is edited (it shows its own), nor the one edited (its keys are the timeline). */
+    for (const BoneFix &fix : owner.bone_fixes) {
+      if (fixing || (fix.name == doc.action && owner.id == doc.action_layer) || action_muted(owner, fix.name)) {
+        continue;
+      }
+      const BoneFixPlay at = bone_fix_play(owner, fix);
+      if (at.strength <= 0.0f) {
+        continue;
+      }
+      owner_for_each_channel_with(owner, fix.name, [&](auto &ch, auto &value) {
+        const void *key = static_cast<const void *>(&ch);
+        if (driving.count(key) || switches.count(key) || bone_fix_tracing(owner, fix, key)) {
+          return;
+        }
+        const auto it = ch.actions.find(fix.name);
+        if (it == ch.actions.end()) {
+          return;
+        }
+        const auto setup = channel_setup(ch, value);
+        auto delta = setup - setup;
+        if (!bone_fix_delta(it->second, setup, at, ch.constant, delta)) {
+          return;
+        }
+        value += delta;
+        ch.last += delta;
+        ch.from_action_bones += delta;
+        ch.action_bone_live = ch.action_bone_live || !(delta == setup - setup);
+        doc.action_bones_applied = true;
+      });
     }
   }
 }

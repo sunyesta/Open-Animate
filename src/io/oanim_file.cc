@@ -1080,6 +1080,13 @@ static json layer_to_json(const Layer &layer)
       }
       j["fix_actions"] = std::move(fixes);
     }
+    if (!layer.bone_fixes.empty()) {
+      json fixes = json::array();
+      for (const BoneFix &f : layer.bone_fixes) {
+        fixes.push_back({{"name", f.name}, {"follows", f.follows}, {"auto_name", f.auto_name}});
+      }
+      j["bone_fixes"] = std::move(fixes);
+    }
     if (!layer.action_plays.empty()) {
       json plays = json::array();
       for (const ActionPlay &a : layer.action_plays) {
@@ -2658,6 +2665,20 @@ static Layer layer_from_json(const json &j, int depth)
     if (!f.name.empty() && std::find(layer.actions.begin(), layer.actions.end(), f.name) != layer.actions.end()) {
       layer.fix_actions.push_back(std::move(f));
     }
+  }
+  for (const json &fj : get_array(j, "bone_fixes")) {
+    BoneFix f;
+    f.name = fj.is_object() ? get_string(fj, "name") : std::string();
+    if (f.name.empty() || std::find(layer.actions.begin(), layer.actions.end(), f.name) == layer.actions.end()) {
+      continue;
+    }
+    for (const json &id : get_array(fj, "follows")) {
+      if (id.is_number_unsigned()) {
+        f.follows.push_back(id.get<uint64_t>());
+      }
+    }
+    f.auto_name = get_bool(fj, "auto_name", true);
+    layer.bone_fixes.push_back(std::move(f));
   }
   for (const json &pj : get_array(j, "action_plays")) {
     const std::string name = pj.is_object() ? get_string(pj, "name") : std::string();

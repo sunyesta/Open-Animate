@@ -914,6 +914,10 @@ void anim_operators_register()
         report(ReportType::Warning, "Can't rename it to " + to + " (taken?)");
         return OpStatus::Cancelled;
       }
+      /* Named by hand: a fix that follows bones keeps it. */
+      if (const BoneFix *fix = bone_fix_find(*owner, to)) {
+        const_cast<BoneFix *>(fix)->auto_name = false;
+      }
       return OpStatus::Finished;
     };
     operators().add(std::move(ot));
