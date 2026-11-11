@@ -65,6 +65,8 @@ PENDING = [
      'On Path: past the last key the actions add again', 'tests/test_motion_path_on_path.py'),
     ('src/anim/channel.cc', '  return ch.on_path && ch.keys.size() >= 2;', '  return ch.on_path;',
      'On Path dropped when its keys are all deleted and it is keyed again', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/motion_path.cc', '  if (!key && ch && motion_path_edit_keys_at(doc, target, frame)) {', '  if (false) {',
+     'A path with no keys: the handles its keys will have on what moves it diamonds', 'tests/test_motion_path_on_path.py'),
 ]
 
 def build(root):

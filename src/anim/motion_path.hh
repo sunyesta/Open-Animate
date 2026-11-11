@@ -201,6 +201,9 @@ bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool
 bool motion_path_edit_prepare(Document &doc, const MotionPathTarget &target);
 /* The frames keys go on when a path without keys is edited: the keys of what moves it, and the setup frame. */
 std::vector<int> motion_path_driver_frames(const Document &doc, const MotionPathTarget &target);
+/* Whether the first edit to the path adds a key on `frame` (it has no keys of its own and what moves it has one there):
+ * its diamond there then shows the handles that key will have (motion_path_handles), and dragging one adds the keys. */
+bool motion_path_edit_keys_at(const Document &doc, const MotionPathTarget &target, int frame);
 
 /* Where `target` shows now, and on `frame` (from its keys alone), in document space. */
 bool motion_path_position(const Document &doc, const MotionPathTarget &target, float2 &r_at);

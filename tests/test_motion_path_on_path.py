@@ -161,4 +161,23 @@ assert path()["on_path"] is False, "keyed again, not On Path"
 d = dots_at()
 assert math.dist(d[24], before[24]) < 0.05 * travel, ("the action still carries it", d[24], before[24])
 
+# No keys of its own: the knob's diamonds on its path show the handles the ear's keys will have, adding nothing until one
+# is dragged; dragged, the ear is keyed where the knob is (On Path) and the handle goes where it is put.
+rig_id, rig = build()
+args = dict(bone="Ear", head="1", layer=str(rig_id))
+assert ops.anim.motion_path_select(frame="30", **args) == {'FINISHED'}
+p = path()
+assert 30 in p["keys"], p["keys"]
+shown = {h["frame"]: h for h in p["handles"]}
+assert 30 in shown and shown[30]["in"] is not None, ("the knob's key shows the ear's handles", p["handles"])
+assert not rig().keyframes('bones["Ear"].position'), "showing them keys nothing"
+k30 = dots_at()[30]
+want_in = (k30[0] + 0.05, k30[1] - 0.2)
+assert ops.anim.motion_path_handle(frame="30", side="IN", x=str(want_in[0]), y=str(want_in[1]), **args) == {'FINISHED'}
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 6, 30]
+assert path()["on_path"] is True
+got = {h["frame"]: h for h in path()["handles"]}[30]["in"]
+assert math.dist(got, want_in) < 1e-3, ("the handle went where it was put", got, want_in)
+assert math.dist(dots_at()[30], k30) < 1e-4, "the key stays"
+
 print("test_motion_path_on_path: ok")

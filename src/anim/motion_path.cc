@@ -4566,6 +4566,15 @@ bool motion_path_handles(const Document &doc, const MotionPathTarget &target, in
   OANIM_PROFILE("motion_path_handles");
   const Channel<float2> *ch = handle_channel(const_cast<Document &>(doc), target);
   const Key<float2> *key = ch ? ch->key_at(frame) : nullptr;
+  if (!key && ch && motion_path_edit_keys_at(doc, target, frame)) {
+    /* No keys of its own, a diamond there from what moves it: the handles its key will have, the path put On Path
+     * (keys added, refitted) as the first edit to it puts it (motion_path_edit_prepare), on a copy. */
+    OANIM_PROFILE("motion_path_handles_unkeyed");
+    Document copy = doc;
+    g_doc_copies++;
+    const Channel<float2> *made = motion_path_on_path_set(copy, target, true) ? handle_channel(copy, target) : nullptr;
+    return made && made->key_at(frame) && motion_path_handles(copy, target, frame, r_key, r_in, r_out, r_mode);
+  }
   float2 cx, cy;
   if (!key || !key_jacobian(doc, target, frame, r_key, cx, cy)) {
     return false;
@@ -5578,6 +5587,16 @@ bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool
   ch.on_path = on;
   animation_evaluate(doc, doc.frame_current);
   return true;
+}
+
+bool motion_path_edit_keys_at(const Document &doc, const MotionPathTarget &target, int frame)
+{
+  const Bone *b = on_path_bone(const_cast<Document &>(doc), target);
+  if (!b || b->position_keys.keys.size() >= 2 || b->position_keys.follow_action) {
+    return false;
+  }
+  const std::vector<int> frames = motion_path_driver_frames(doc, target);
+  return std::binary_search(frames.begin(), frames.end(), frame);
 }
 
 bool motion_path_edit_prepare(Document &doc, const MotionPathTarget &target)
