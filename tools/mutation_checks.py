@@ -34,7 +34,10 @@ CMAKE = (r"C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/Common7/
 EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
-PENDING = []
+PENDING = [
+    ('src/anim/motion_path.cc', 'return !doc.action.empty() || !bone_fix_line_of(*layer, action.first, b, which);',
+     'return true;', 'Own Motion: a fix line on the knob leaves its path to its keys', 'tests/test_motion_path_fix_line.py'),
+]
 
 def build(root):
     return subprocess.run([CMAKE, "--build", "--preset", "release"], cwd=root, capture_output=True,

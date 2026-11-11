@@ -3292,6 +3292,13 @@ static bool bone_fix_tracing(const Layer &owner, const BoneFix &fix, const void 
   return false;
 }
 
+bool bone_fix_line_of(const Layer &owner, const std::string &name, const Bone &bone, const void *ch)
+{
+  const BoneFix *fix = bone_fix_find(owner, name);
+  return fix && std::find(fix->follows.begin(), fix->follows.end(), bone.id) != fix->follows.end() &&
+         bone_fix_traces(bone, ch);
+}
+
 /* What a fix adds to a channel playing `play`: its key there less the setup, times how much plays (a yes/no channel
  * takes it whole once half there). The fix starts on frame 1: a channel first keyed later starts from its setup there,
  * not on frame 0. */

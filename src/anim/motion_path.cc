@@ -1702,9 +1702,18 @@ bool own_values_from_keys(const Document &doc, const MotionPathTarget &t, const 
     if (b.position != bone_position_from_transform(b, b.transform) || b.angle != b.setup_angle + b.turn) {
       return false;
     }
-    /* What actions add (a controller's dial among them: its knob plays its action, which turns it), only as kept. */
+    /* What actions add (a controller's dial among them: its knob plays its action, which turns it), only as kept. A
+     * fix's keys on a bone it follows are its line, never played onto the bone: they add nothing (on the mainline;
+     * inside an action the channels hold that action's keys). */
+    const auto adds = [&](const auto &actions, const void *which) {
+      return std::any_of(actions.begin(), actions.end(), [&](const auto &action) {
+        return !doc.action.empty() || !bone_fix_line_of(*layer, action.first, b, which);
+      });
+    };
     ActionOffsets added;
-    if (bone_played(b) || !ch.actions.empty()) {
+    if (adds(b.position_keys.actions, &b.position_keys) || adds(ch.actions, &b.position_keys) ||
+        adds(b.angle_keys.actions, &b.angle_keys) || adds(b.scale_keys.actions, &b.scale_keys))
+    {
       const ActionOffsets *kept = action_offsets_kept(*layer, b, ch, frame);
       if (!kept) {
         return false;

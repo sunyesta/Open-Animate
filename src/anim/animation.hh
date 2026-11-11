@@ -149,6 +149,9 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
  * bone, at the frame the bones' pose picks. ----------------------------------------------------------------------- */
 
 const BoneFix *bone_fix_find(const Layer &owner, const std::string &name);
+/* Whether action `name` is a fix following `bone` whose keys on `ch` (one of the bone's channels) are its line, which
+ * it never plays onto the bone. */
+bool bone_fix_line_of(const Layer &owner, const std::string &name, const Bone &bone, const void *ch);
 /* How far a bone counts toward a fix: a 2 Axis Controller 2 (its knob goes two ways), any other 1. */
 int bone_fix_ways(const Bone &bone);
 /* Where a fix plays as the bones are now: its line from `start` (1) to `end` (the last frame its bones are keyed on;
