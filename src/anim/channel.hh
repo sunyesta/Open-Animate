@@ -318,6 +318,8 @@ template<typename T> void key_speeds_set(std::vector<Key<T>> &keys, size_t i, co
 template<typename T> void key_timing_set(std::vector<Key<T>> &keys, size_t i, TimingCurve curve);
 /* On Path (Channel::on_path): whether `frame` is from its first key to its last, where its keys hold where it is and
  * actions add nothing. */
+/* On Path, with keys enough to hold a path (two or more): with fewer it is keyed as any channel is, onto the actions. */
+bool channel_on_path(const Channel<float2> &ch);
 bool channel_on_path_at(const Channel<float2> &ch, int frame);
 /* What the actions added on `frame` as its keys have it (Key::path_offset): between two keys, as far from each as the
  * frame is; past the ends, the end's. */

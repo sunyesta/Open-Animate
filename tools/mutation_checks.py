@@ -63,6 +63,8 @@ PENDING = [
      'tests/test_motion_path_on_path.py'),
     ('src/anim/channel.cc', '    if (on_path && frame > keys.back().frame) {', '    if (false) {',
      'On Path: past the last key the actions add again', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/channel.cc', '  return ch.on_path && ch.keys.size() >= 2;', '  return ch.on_path;',
+     'On Path dropped when its keys are all deleted and it is keyed again', 'tests/test_motion_path_on_path.py'),
 ]
 
 def build(root):

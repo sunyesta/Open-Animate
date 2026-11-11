@@ -512,7 +512,7 @@ static bool record_with(Channel<T> &ch, const T &value, int frame, bool auto_key
     T put = base;
     [[maybe_unused]] T offset{};
     if constexpr (std::is_same_v<T, float2>) {
-      if (ch.on_path && ch.animated()) {
+      if (channel_on_path(ch)) {
         offset = channel_on_path_at(ch, frame) ? channel_path_offset_at(ch, frame) : ch.from_action_bones;
         if (!channel_on_path_at(ch, frame)) {
           put = value;

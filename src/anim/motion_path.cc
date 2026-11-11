@@ -5465,7 +5465,7 @@ bool motion_path_on_path_allowed(const Document &doc, const MotionPathTarget &ta
 bool motion_path_on_path(const Document &doc, const MotionPathTarget &target)
 {
   const Bone *b = on_path_bone(const_cast<Document &>(doc), target);
-  return b && b->position_keys.on_path;
+  return b && channel_on_path(b->position_keys);
 }
 
 std::vector<int> motion_path_driver_frames(const Document &doc, const MotionPathTarget &target)
@@ -5526,14 +5526,15 @@ static void on_path_frames(const Document &doc, const MotionPathTarget &t, int f
 bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool on)
 {
   Bone *b = on_path_bone(doc, target);
-  if (!b || (on && b->position_keys.on_path)) {
+  if (!b || (on && channel_on_path(b->position_keys))) {
     return false;
   }
   Channel<float2> &ch = b->position_keys;
   /* Off is a choice that stays: edits to the path keep to Follow Action (motion_path_edit_prepare). */
-  if (!on && !ch.on_path) {
+  if (!on && !channel_on_path(ch)) {
     const bool was = ch.follow_action;
     ch.follow_action = true;
+    ch.on_path = false;
     return !was;
   }
   ch.follow_action = !on;
@@ -5558,7 +5559,7 @@ bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool
   std::map<int, float2> at, added;
   /* Where it is now, as the keys and the actions put it, made the keys' path: On Path, where it is with the actions'
    * moves in; back off it, where it is less what the actions add (worked out with it off, so they add it). */
-  on_path_frames(doc, target, first, last, ch.on_path, at, added);
+  on_path_frames(doc, target, first, last, channel_on_path(ch), at, added);
   if (!on) {
     std::map<int, float2> real_at;
     added.clear();
@@ -5582,7 +5583,8 @@ bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool
 bool motion_path_edit_prepare(Document &doc, const MotionPathTarget &target)
 {
   const Bone *b = on_path_bone(doc, target);
-  return b && !b->position_keys.on_path && !b->position_keys.follow_action && motion_path_on_path_set(doc, target, true);
+  return b && !channel_on_path(b->position_keys) && !b->position_keys.follow_action &&
+         motion_path_on_path_set(doc, target, true);
 }
 
 bool motion_path_place(Document &doc, const MotionPathTarget &target, float2 at)

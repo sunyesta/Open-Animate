@@ -578,9 +578,14 @@ static float bezier_progress(const float2 p[4], float t)
   return (lengths[j - 1] + length(bezier(p, t) - bezier(p, float(j - 1) / PIECES))) / total;
 }
 
+bool channel_on_path(const Channel<float2> &ch)
+{
+  return ch.on_path && ch.keys.size() >= 2;
+}
+
 bool channel_on_path_at(const Channel<float2> &ch, int frame)
 {
-  return ch.on_path && !ch.keys.empty() && frame >= ch.keys.front().frame && frame <= ch.keys.back().frame;
+  return channel_on_path(ch) && frame >= ch.keys.front().frame && frame <= ch.keys.back().frame;
 }
 
 float2 channel_path_offset_at(const Channel<float2> &ch, int frame)
@@ -1586,10 +1591,10 @@ template<typename T> T Channel<T>::evaluate(int frame) const
   if constexpr (std::is_same_v<T, float2>) {
     /* On Path: past its first and last keys the actions move it again (they add to its own value then), from the key
      * less what they added there. */
-    if (on_path && frame < keys.front().frame) {
+    if (on_path && keys.size() >= 2 && frame < keys.front().frame) {
       return keys.front().value - keys.front().path_offset;
     }
-    if (on_path && frame > keys.back().frame) {
+    if (on_path && keys.size() >= 2 && frame > keys.back().frame) {
       return keys.back().value - keys.back().path_offset;
     }
   }
@@ -1779,6 +1784,13 @@ template<typename T> Key<T> &Channel<T>::set_key(int frame, const T &value)
     return *existing;
   }
   keys_changed();
+  if constexpr (std::is_same_v<T, float2>) {
+    /* On Path with its keys gone but one at most (the setup's): keys made again are made as any are, onto the actions,
+     * so it is On Path no more (else the actions' moves are left out with nothing in its keys to hold them). */
+    if (keys.size() < 2) {
+      on_path = false;
+    }
+  }
   const auto at = std::lower_bound(keys.begin(), keys.end(), frame,
                                    [](const Key<T> &k, int f) { return k.frame < f; });
   Key<T> key;

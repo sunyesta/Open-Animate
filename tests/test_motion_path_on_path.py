@@ -141,4 +141,24 @@ assert math.dist(d2[6], d[6]) < 1e-3 and math.dist(d2[30], d[30]) < 1e-3, ("the 
 doc.frame_current = 40
 assert math.dist(tuple(next(b for b in rig().bones if b["name"] == "Ear")["position"]), past) < 1e-3, "past the keys"
 
+# Its keys all deleted, then the ear moved with Auto Keying: keyed as any bone is, onto the action, which still carries it
+# (On Path was left on with no keys, and the next keys made the action's moves left out with nothing holding them).
+keys = rig().keyframes('bones["Ear"].position')
+for k in keys[1:]:
+    assert ops.anim.motion_path_key_delete(frame=str(k["frame"]), **args) == {'FINISHED'}
+# (Frame 0's key, the setup, stays: a path can't delete it.)
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0]
+assert path()["on_path"] is False, "one key holds no path: not On Path"
+doc.auto_key = True
+doc.frame_current = 18
+e = next(b for b in rig().bones if b["name"] == "Ear")["position"]
+rig().bone_set("Ear", position=(e[0] + 0.004, e[1]))
+doc.frame_current = 17
+doc.frame_current = 18
+doc.auto_key = False
+assert rig().keyframes('bones["Ear"].position'), "keyed"
+assert path()["on_path"] is False, "keyed again, not On Path"
+d = dots_at()
+assert math.dist(d[24], before[24]) < 0.05 * travel, ("the action still carries it", d[24], before[24])
+
 print("test_motion_path_on_path: ok")
