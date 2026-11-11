@@ -1564,6 +1564,18 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["points"] = pts;
       d["speed"] = speed;
       d["keys"] = p.keys;
+      /* The keys picked, as the tool shows them (and their handles once editing): motion_path_frame_picked. */
+      {
+        const std::map<int, KeyFrameSummary> picked =
+            layers_key_summary(motion_path_key_layers(doc, p.target), motion_path_key_filter(doc, p.target));
+        py::list keys_picked;
+        for (const int f : p.keys) {
+          if (motion_path_frame_picked(picked, C.wm->path_dots, p.target, f, true)) {
+            keys_picked.append(f);
+          }
+        }
+        d["keys_picked"] = keys_picked;
+      }
       /* The frames past their key or back before their start, drawn dashed. */
       d["overshoot"] = motion_path_overshoot_frames(doc, p.target);
       /* Each key's path handles as the Motion Path tool shows them once it's selected (as drawn; None for a side

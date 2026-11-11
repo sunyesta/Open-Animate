@@ -170,6 +170,8 @@ p = path()
 assert 30 in p["keys"], p["keys"]
 shown = {h["frame"]: h for h in p["handles"]}
 assert 30 in shown and shown[30]["in"] is not None, ("the knob's key shows the ear's handles", p["handles"])
+# Picked, so the viewport shows its handles (no key of the ear's to select there).
+assert 30 in p["keys_picked"], p["keys_picked"]
 assert not rig().keyframes('bones["Ear"].position'), "showing them keys nothing"
 k30 = dots_at()[30]
 want_in = (k30[0] + 0.05, k30[1] - 0.2)

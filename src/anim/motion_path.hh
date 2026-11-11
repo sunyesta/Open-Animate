@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -204,6 +205,12 @@ std::vector<int> motion_path_driver_frames(const Document &doc, const MotionPath
 /* Whether the first edit to the path adds a key on `frame` (it has no keys of its own and what moves it has one there):
  * its diamond there then shows the handles that key will have (motion_path_handles), and dragging one adds the keys. */
 bool motion_path_edit_keys_at(const Document &doc, const MotionPathTarget &target, int frame);
+/* Whether a path's frame is picked, as the tool shows it (a key picked shows its handles): a key selected there (`picked`,
+ * layers_key_summary of its key layers), or, on a key (`on_key`), its dot picked, as a diamond from what moves a path
+ * with no keys of its own is (motion_path_edit_keys_at). */
+bool motion_path_frame_picked(const std::map<int, KeyFrameSummary> &picked,
+                              const std::vector<std::pair<MotionPathTarget, int>> &dots,
+                              const MotionPathTarget &target, int frame, bool on_key);
 
 /* Where `target` shows now, and on `frame` (from its keys alone), in document space. */
 bool motion_path_position(const Document &doc, const MotionPathTarget &target, float2 &r_at);

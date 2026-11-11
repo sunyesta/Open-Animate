@@ -2292,7 +2292,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
         breakdown |= on_key && !key && motion_path_key_is_breakdown(doc, p.target, f);
         key |= on_key;
         shown |= on_key || (f - p.first) % step == 0;
-        if (const auto it = picked.find(f); it != picked.end() && it->second.selected > 0) {
+        if (motion_path_frame_picked(picked, wm.path_dots, p.target, f, on_key)) {
           selected = true;
           if (on_key && editing && motion_path_has_handles(doc, p.target)) {
             handle_keys.push_back({p.target, f});

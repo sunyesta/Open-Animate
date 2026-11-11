@@ -67,6 +67,8 @@ PENDING = [
      'On Path dropped when its keys are all deleted and it is keyed again', 'tests/test_motion_path_on_path.py'),
     ('src/anim/motion_path.cc', '  if (!key && ch && motion_path_edit_keys_at(doc, target, frame)) {', '  if (false) {',
      'A path with no keys: the handles its keys will have on what moves it diamonds', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/motion_path.cc', '  return on_key && std::any_of(dots.begin(), dots.end(),', '  return false && std::any_of(dots.begin(), dots.end(),',
+     'A diamond on a path with no keys, picked as a dot, shows its handles', 'tests/test_motion_path_on_path.py'),
 ]
 
 def build(root):

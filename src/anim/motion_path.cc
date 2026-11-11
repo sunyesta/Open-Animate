@@ -5589,10 +5589,20 @@ bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool
   return true;
 }
 
+bool motion_path_frame_picked(const std::map<int, KeyFrameSummary> &picked,
+                              const std::vector<std::pair<MotionPathTarget, int>> &dots,
+                              const MotionPathTarget &target, int frame, bool on_key)
+{
+  if (const auto it = picked.find(frame); it != picked.end() && it->second.selected > 0) {
+    return true;
+  }
+  return on_key && std::any_of(dots.begin(), dots.end(), [&](const auto &d) { return d.first.same(target) && d.second == frame; });
+}
+
 bool motion_path_edit_keys_at(const Document &doc, const MotionPathTarget &target, int frame)
 {
   const Bone *b = on_path_bone(const_cast<Document &>(doc), target);
-  if (!b || b->position_keys.keys.size() >= 2 || b->position_keys.follow_action) {
+  if (!b || b->position_keys.keys.size() >= 2 || b->position_keys.follow_action || b->position_keys.key_at(frame)) {
     return false;
   }
   const std::vector<int> frames = motion_path_driver_frames(doc, target);
