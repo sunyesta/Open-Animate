@@ -47,6 +47,8 @@ PENDING = [
      'Kept action offsets: a fix line in a knob keys moves nothing', 'tests/test_motion_path_knob_fix_offsets.py'),
     ('src/anim/motion_path.cc', '      if (!fix || fix->follows.empty()) {', '      if (true) {',
      'Kept action offsets: a fix played by a knob its keys alone move', 'tests/test_motion_path_knob_fix_offsets.py'),
+    ('src/anim/motion_path.cc', '    if ((i >= 2 && !fits(i - 2)) || (i + 1 < n && !fits(i + 1))) {', '    if (false) {',
+     'Path line: the keys curve shapes it only where the dots go as the keys do', 'tests/test_motion_path_line_actions.py'),
 ]
 
 def build(root):

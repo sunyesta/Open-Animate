@@ -2973,6 +2973,22 @@ static void path_shape_fill(const Document &doc, MotionPath &p)
     const float2 d = mirrored ? conj(v1 - v0) : v1 - v0;
     const float dd = dot(d, d);
     const float2 z = mul(p.points[i] - p.points[i - 1], float2{d.x, -d.y} * (1.0f / dd));
+    /* Only where the dots go as the keys do: the dots either side in the stretch where the same turn, scale and move
+     * puts their values. Else something else moves it as much (actions adding to a bone: a head turn moving an ear
+     * with keys of its own), and a bend in the keys' curve between two dots, blown up to the dots' step, loops. */
+    const auto fits = [&](size_t j) {
+      const int f = p.first + int(j);
+      if (f < keys[si - 1].frame || f > keys[si].frame) {
+        return true;
+      }
+      const float2 q = values[j] - v0;
+      const float2 want = p.points[i - 1] + mul(z, mirrored ? conj(q) : q);
+      const float reach = std::max(length(p.points[j] - p.points[i - 1]), length(p.points[j] - p.points[i]));
+      return length(want - p.points[j]) <= 0.25f * reach + 1e-7f;
+    };
+    if ((i >= 2 && !fits(i - 2)) || (i + 1 < n && !fits(i + 1))) {
+      continue;
+    }
     /* The vertices between, in the way the dot goes (backward too: a dot backing up along it). */
     const float margin = 1e-6f * std::max(along.back(), 1e-6f), lo = std::min(s0, s1), hi = std::max(s0, s1);
     const size_t first = p.shape[i].size();
