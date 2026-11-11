@@ -2102,9 +2102,46 @@ Channel<float2> *handle_channel(Document &doc, const MotionPathTarget &t)
   return &layer->position_keys;
 }
 
+/* Slopes `cx` and `cy` from nudges up by `h` from `value` (shown at `at` on `frame`): a way a nudge up didn't move it is
+ * held at an edge (Contain Knob clamps a knob on its box's), so measured down instead, where it moves off the edge;
+ * `work` places the values nudged down as the nudges up were. Without, a point there has no slope that way and can't be
+ * moved at all. */
+template<typename Work>
+static void slopes_off_edges(float2 value, int frame, float h, float2 at, float2 &cx, float2 &cy, Work work)
+{
+  constexpr float STILL = 1e-12f;
+  const bool x_still = dot(cx, cx) < STILL, y_still = dot(cy, cy) < STILL;
+  std::vector<HeldPlace> down;
+  if (x_still) {
+    down.push_back({frame, value - float2{h, 0.0f}});
+  }
+  if (y_still) {
+    down.push_back({frame, value - float2{0.0f, h}});
+  }
+  if (down.empty()) {
+    return;
+  }
+  work(down);
+  size_t k = 0;
+  const auto measured = [&](float2 &slope) {
+    const HeldPlace &p = down[k++];
+    const float2 s = (at - p.at) / h;
+    if (p.ok && dot(s, s) >= STILL) {
+      slope = s;
+    }
+  };
+  if (x_still) {
+    measured(cx);
+  }
+  if (y_still) {
+    measured(cy);
+  }
+}
+
 /* How `t` shows on `frame` as its position key there changes: where it is (r_at) and how far it moves for a step of
  * the key's value in x (r_cx) and y (r_cy). Keys hold values in their own space (a bone's turned with its rest, a
- * point's from where it sits at rest), so this is found by nudging the key on a copy. */
+ * point's from where it sits at rest), so this is found by nudging the key on a copy (off an edge it is held at, the
+ * other way: slopes_off_edges). */
 bool key_jacobian(const Document &doc, const MotionPathTarget &t, int frame, float2 &r_at, float2 &r_cx, float2 &r_cy)
 {
   const Channel<float2> *ch = handle_channel(const_cast<Document &>(doc), t);
@@ -2130,17 +2167,24 @@ bool key_jacobian(const Document &doc, const MotionPathTarget &t, int frame, flo
   for (HeldPlace &p : places) {
     p.frame = frame;
   }
-  held_places(copy, t, places, [&](Channel<float2> &c, const HeldPlace &p) {
-    Key<float2> *k = c.key_at(p.frame);
-    if (k) {
-      k->value = p.value;
-    }
-    return k != nullptr;
-  }, PLACES_KEY_VALUE, &doc);
+  const auto work = [&](std::vector<HeldPlace> &ps) {
+    held_places(copy, t, ps, [&](Channel<float2> &c, const HeldPlace &p) {
+      Key<float2> *k = c.key_at(p.frame);
+      if (k) {
+        k->value = p.value;
+      }
+      return k != nullptr;
+    }, PLACES_KEY_VALUE, &doc);
+  };
+  work(places);
   r_at = places[0].at;
   r_cx = (places[1].at - r_at) / h;
   r_cy = (places[2].at - r_at) / h;
-  return places[0].ok && places[1].ok && places[2].ok;
+  if (!(places[0].ok && places[1].ok && places[2].ok)) {
+    return false;
+  }
+  slopes_off_edges(start, frame, h, r_at, r_cx, r_cy, work);
+  return true;
 }
 
 /* The target's own keyed frames (after frame 0, the setup). */
@@ -2645,6 +2689,7 @@ static void held_copy_places(const Document &doc, const Channel<float2> &held, c
 
 constexpr float VALUE_STEP = 1e-2f;
 
+/* Off an edge it is held at, measured the other way (slopes_off_edges). */
 bool value_jacobian(const Document &doc, const MotionPathTarget &t, int frame, float2 value, float2 &r_at, float2 *r_cx,
                     float2 *r_cy)
 {
@@ -2668,9 +2713,65 @@ bool value_jacobian(const Document &doc, const MotionPathTarget &t, int frame, f
   if (!slopes) {
     return places[0].ok;
   }
+  if (!(places[0].ok && places[1].ok && places[2].ok)) {
+    return false;
+  }
   *r_cx = (places[1].at - r_at) / VALUE_STEP;
   *r_cy = (places[2].at - r_at) / VALUE_STEP;
-  return places[0].ok && places[1].ok && places[2].ok;
+  slopes_off_edges(value, frame, VALUE_STEP, r_at, *r_cx, *r_cy,
+                   [&](std::vector<HeldPlace> &ps) { held_copy_places(doc, copy, t, ps); });
+  return true;
+}
+
+/* The change to the value `v` of `t`'s position channel on `frame` (shown at `p`, value_jacobian's slopes `cx` `cy`
+ * there) that brings it to `at`, straight through the slopes. A contained knob's is kept inside its box: past an edge
+ * it would be held both ways and could never be dragged back. False where nothing moves it. */
+static bool value_step(const Document &doc, const MotionPathTarget &t, int frame, float2 v, float2 p, float2 cx,
+                       float2 cy, float2 at, float2 &r_step)
+{
+  const float det = cx.x * cy.y - cx.y * cy.x;
+  if (std::abs(det) < 1e-12f) {
+    return false;
+  }
+  const float2 miss = at - p;
+  r_step = {(miss.x * cy.y - miss.y * cy.x) / det, (cx.x * miss.y - cx.y * miss.x) / det};
+  const Layer *layer = layer_find(doc, t.layer);
+  const Bone *knob = layer && t.bone ? bone_find(*layer, t.bone) : nullptr;
+  if (!knob || !bone_is_controller(*knob) || !knob->controller_contain_knob) {
+    return true;
+  }
+  /* Each way on its own (the box holds each at its own edges, so a drag out past the top still goes along it). Inside
+   * the box the place goes straight with the value, past an edge it stops: placed a nudge past the step's end, how far
+   * it got, against its rate, is where the edge is, and the step stops a quarter nudge short of it. The rate is
+   * measured inside (halfway to where the slope puts the edge): the slopes are nudges, too rough to find it by. */
+  const float2 whole = r_step;
+  for (int axis = 0; axis < 2; axis++) {
+    const float amount = axis == 0 ? whole.x : whole.y, along = std::abs(amount);
+    if (along < 1e-9f) {
+      continue;
+    }
+    const float2 one = axis == 0 ? float2{amount, 0.0f} : float2{0.0f, amount};
+    const float2 slope = (axis == 0 ? cx : cy) * amount;
+    const float past = 1.0f + VALUE_STEP / along;
+    float2 far, in;
+    if (!value_jacobian(doc, t, frame, v + one * past, far, nullptr, nullptr)) {
+      continue;
+    }
+    const float2 got = far - p;
+    float edge = dot(got, slope) / dot(slope, slope);
+    const float half = 0.5f * std::min(edge, past);
+    if (half * along > 1e-6f && value_jacobian(doc, t, frame, v + one * half, in, nullptr, nullptr)) {
+      const float2 rate = (in - p) / half;
+      if (dot(rate, rate) > 1e-30f) {
+        edge = dot(got, rate) / dot(rate, rate);
+      }
+    }
+    if (edge >= 1.0f + 0.5f * VALUE_STEP / along) {
+      continue;
+    }
+    (axis == 0 ? r_step.x : r_step.y) *= std::clamp(edge - 0.25f * VALUE_STEP / along, 0.0f, 1.0f);
+  }
+  return true;
 }
 
 /* The progress (0-1 by length) along the stretch arriving at keys[i] nearest `v` (the keys' own space), looked for
@@ -4553,16 +4654,12 @@ bool motion_path_control_set(Document &doc, const MotionPathTarget &target, int 
   }
   const Key<float2> &a = *(b - 1);
   const float2 v = path_control_value(a.value, b->value, b->path_controls[size_t(index)]);
-  float2 p, cx, cy;
-  if (!value_jacobian(doc, target, near_frame, v, p, &cx, &cy)) {
+  float2 p, cx, cy, step;
+  if (!value_jacobian(doc, target, near_frame, v, p, &cx, &cy) ||
+      !value_step(doc, target, near_frame, v, p, cx, cy, at, step))
+  {
     return false;
   }
-  const float det = cx.x * cy.y - cx.y * cy.x;
-  if (std::abs(det) < 1e-12f) {
-    return false;
-  }
-  const float2 miss = at - p;
-  const float2 step{(miss.x * cy.y - miss.y * cy.x) / det, (cx.x * miss.y - cx.y * miss.x) / det};
   b->path_controls[size_t(index)] = path_control_stored(a.value, b->value, v + step);
   channel_keys_changed();
   animation_evaluate(doc, doc.frame_current);

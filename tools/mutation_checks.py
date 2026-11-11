@@ -37,6 +37,12 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 PENDING = [
     ('src/anim/motion_path.cc', 'return !doc.action.empty() || !bone_fix_line_of(*layer, action.first, b, which);',
      'return true;', 'Own Motion: a fix line on the knob leaves its path to its keys', 'tests/test_motion_path_fix_line.py'),
+    ('src/anim/motion_path.cc', '  if (down.empty()) {', '  if (true) {',
+     'A control point on a knob held at its box edge: slopes measured off the edge', 'tests/test_motion_path_control_edge.py'),
+    ('src/anim/motion_path.cc', 'if (!knob || !bone_is_controller(*knob) || !knob->controller_contain_knob) {', 'if (true) {',
+     'A control point dragged past a contained knob box edge stops there', 'tests/test_motion_path_control_edge.py'),
+    ('src/anim/motion_path.cc', 'edge = dot(got, rate) / dot(rate, rate);', 'edge = edge;',
+     'The box edge found from the rate measured inside, not the rough slopes', 'tests/test_motion_path_control_edge.py'),
 ]
 
 def build(root):
