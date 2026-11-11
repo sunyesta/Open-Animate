@@ -78,11 +78,8 @@ in their words (what they'd see), with the numbers that show it.
 
 ## 4. Fix while the probes keep running
 
-Many bugs: fix them in groups (by area, so no two groups touch the same files), each in a worktree of its own made from
-the branch (`git worktree add -b claude/fix-<area> ../fix-<area> HEAD`, configured with
-`-DFETCHCONTENT_SOURCE_DIR_<DEP>=<this build>/_deps/<dep>-src` so nothing is fetched again), and cherry-pick each group's
-commits into the branch when it is done. Groups write their mutation entries and spec wording to notes files; the
-branch takes them in one go (two groups appending to PENDING or editing one spec line conflict).
+Fix on the one branch, in the main folder (no worktrees or branches for fix groups): many bugs are
+fixed one after another, grouped by area so each build compiles few files.
 
 When the user wants fixes (they may say so up front), fix confirmed bugs one at a time, worst or simplest first,
 while probes keep reporting:

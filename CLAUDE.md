@@ -43,23 +43,14 @@ To find what makes an edit slow, time it: `oanim.wm.profile_enable(True)`, do th
 Python is embedded from `C:/Python314` (`OANIM_PYTHON_ROOT`), isolated from PYTHONPATH and user
 site-packages. Scripts load from the source tree's `scripts/` while developing.
 
-## Two chats at once
+## One branch
 
-Unrelated features can run side by side in separate chats, each in its own worktree. Two chats must never share
-a folder: their edits and builds collide, and mutation checks temporarily change the source.
+All work happens on `milestone-3-animation` in the main folder, one feature at a time: no feature branches, no
+second chat in a worktree of its own. Commit there; push only when told. The user's open app stays read-only.
+Mutation checks' `--lanes` folders are scratch copies for running checks side by side, not branches for features:
+remove them when the checks are done.
 
-- Start the second chat in a new worktree (the Code tab offers it when starting a session), on a branch of its own
-  made from `milestone-3-animation`. That folder has its own `build/`; its first configure and build take about
-  5 minutes. Keep it off very long paths: a first configure that fails is worth one more try before looking further.
-- Everything happens in that folder: edit, build, test, and run private copies from its `build/`.
-- Commit on the branch. Don't push it, and don't merge it without being told.
-- Merge one feature at a time: the user says when, it goes into `milestone-3-animation`, then rebuild and run every
-  test there. The other chat then brings that branch in before it merges.
-- `docs/SPEC.md` is where two features clash, because a section is one long line. Update it and the live Doc last, in
-  small edits, and on a conflict keep both changes.
-- The desktop shortcut runs the main folder's build, so a feature only shows there after merging. To try one sooner,
-  run `tools/run_openanimate.ps1` from its own folder.
-- The user's open app stays read-only from every chat. Only push from `milestone-3-animation`, when told.
+`docs/SPEC.md` sections are each one long line: update it and the live Doc in small edits.
 
 ## Layout
 

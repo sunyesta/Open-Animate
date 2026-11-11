@@ -20,8 +20,6 @@ one, so each rebuild compiles one file. --remove-lanes deletes them.
 Run it from the worktree's root, with nothing else building or editing the source there: it changes one file at a
 time, rebuilds (for C++), runs the test and puts the file back. A check the test still passes is "NOT CAUGHT": the
 test is strengthened until it fails. Once every check is caught and committed, PENDING is emptied.
-
-Two chats can both add entries here; on a merge conflict keep both lists.
 """
 
 import os
