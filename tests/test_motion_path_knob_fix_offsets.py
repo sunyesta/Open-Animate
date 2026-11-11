@@ -1,4 +1,4 @@
-"""Own Motion on a bone a knob's actions move, the knob followed by a fix: what the actions add is kept from the frames
+"""Own Motion on a bone a knob's actions move, and a fix following the knob: what the actions add is kept from the frames
 worked out once and reused while only the bone's keys change, so dragging its keys or control points works no frame out
 again (a head bone a head-turn knob moves took a third of a second a drag step, every frame worked out each time: the
 fix's line in the knob's keys was taken as something moving the knob). A control point's frames are kept too, beside the
@@ -67,12 +67,15 @@ rig().select_bone("Knob")
 assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
 for side in ("RIGHT", "UP"):
     assert ops.armature.controller_side(side=side, action="Knob " + side.title()) == {'FINISHED'}
-# A fix following the knob, turning Lid (not Head) where the knob ends up and right.
+# A fix following the knob, turning Lid and moving Head too where the knob ends up and right (played where the knob is,
+# which its keys alone move: what it adds to Head is kept as the sides' is).
 rig().select_bone("Knob")
 assert ops.armature.bone_fix_new(bones="Knob") == {'FINISHED'}
 doc.frame_current = 20
 rig().bone_set("Knob", knob=(24.0, 24.0))
 rig().bone_set("Lid", angle=bone("Lid")["angle"] + 0.5)
+p = bone("Head")["position"]
+rig().bone_set("Head", position=(p[0], p[1] - 0.2))
 settle()
 mainline()
 assert rig().bone_fixes, "a fix follows the knob"

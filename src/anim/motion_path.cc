@@ -260,8 +260,36 @@ static bool action_played_apart(const Layer &owner, const std::string &name, con
   };
   const Bone *holder = nullptr;
   switch (action_frame_by(owner, name, &holder)) {
-    case ActionFrameBy::Fix:
-      return false;
+    case ActionFrameBy::Fix: {
+      /* Played where the bones it follows are: each moved by nothing but its keys (a knob's own sides' actions, fix
+       * lines, which never play onto it), neither `bone` nor hanging from it. */
+      const BoneFix *fix = bone_fix_find(owner, name);
+      if (!fix || fix->follows.empty()) {
+        return false;
+      }
+      for (const uint64_t id : fix->follows) {
+        const Bone *f = bone_find(owner, id);
+        if (!f || hangs_from_bone(f) ||
+            (bone_is_controller(*f) &&
+             (f->controller_knob_independent || controller_constrained(*f) || f->controller_knob_parent != 0)))
+        {
+          return false;
+        }
+        const auto own_keys_only = [&](const auto &ch, bool sides) {
+          return std::all_of(ch.actions.begin(), ch.actions.end(), [&](const auto &action) {
+            return (sides && std::find(f->controller_actions.begin(), f->controller_actions.end(), action.first) !=
+                                 f->controller_actions.end()) ||
+                   bone_fix_line_of(owner, action.first, *f, &ch);
+          });
+        };
+        if (!own_keys_only(f->position_keys, bone_is_controller(*f)) || !own_keys_only(f->angle_keys, false) ||
+            !own_keys_only(f->scale_keys, false))
+        {
+          return false;
+        }
+      }
+      return true;
+    }
     case ActionFrameBy::Knob:
       if (!holder || holder->controller_knob_independent || controller_constrained(*holder) ||
           holder->controller_knob_parent != 0 || hangs_from_bone(holder))
