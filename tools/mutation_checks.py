@@ -49,6 +49,20 @@ PENDING = [
      'Kept action offsets: a fix played by a knob its keys alone move', 'tests/test_motion_path_knob_fix_offsets.py'),
     ('src/anim/motion_path.cc', '    if ((i >= 2 && !fits(i - 2)) || (i + 1 < n && !fits(i + 1))) {', '    if (false) {',
      'Path line: the keys curve shapes it only where the dots go as the keys do', 'tests/test_motion_path_line_actions.py'),
+    ('src/anim/animation.cc', '        if (channel_on_path_at(ch, frame) && !(ch.from_action_bones == float2{0.0f, 0.0f})) {',
+     '        if (false) {', 'On Path: what the actions add left out between the keys', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/animation.cc', '            b.position = bone_position_from_transform(b, b.transform);', '            ;',
+     'On Path: the bone position follows what is left out', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/channel.cc', '    const float2 p1 = p0 + r_out, p2 = p3 + r_in;', '    const float2 p1 = r_out, p2 = r_in;',
+     'Path fit: the handles solved as offsets from their ends', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/motion_path.cc', '    if (channel_on_path_at(ch, frame)) {\n      added.transform = float2{0.0f, 0.0f};',
+     '    if (false) {\n      added.transform = float2{0.0f, 0.0f};', 'On Path: Own Motion dots add nothing kept between the keys',
+     'tests/test_motion_path_on_path.py'),
+    ('src/ops/motion_path_ops.cc', '      path_edit_prepare(doc, targets);\n      const MotionPathTarget t = targets.front();',
+     '      const MotionPathTarget t = targets.front();', 'A dot moved on a path without keys gives it keys On Path first',
+     'tests/test_motion_path_on_path.py'),
+    ('src/anim/channel.cc', '    if (on_path && frame > keys.back().frame) {', '    if (false) {',
+     'On Path: past the last key the actions add again', 'tests/test_motion_path_on_path.py'),
 ]
 
 def build(root):

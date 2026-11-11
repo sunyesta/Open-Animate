@@ -95,6 +95,8 @@ assert doc.path_own_motion
 layers.active = rig()
 rig().select_bone("Head")
 args = dict(bone="Head", head="1", layer=str(rig_id))
+# Follow Action: its keys what is added to the actions (an edit would put it On Path, its keys the path as seen).
+assert ops.anim.motion_path_on_path(on="0", **args) == {'FINISHED'}
 assert ops.anim.motion_path_select(frame="40", **args) == {'FINISHED'}
 assert "Head head" in [p["label"] for p in wm.motion_paths()], [p["label"] for p in wm.motion_paths()]
 doc.frame_current = 25

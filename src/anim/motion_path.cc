@@ -202,6 +202,8 @@ thread_local Document *g_shown_own = nullptr;
 struct ActionOffsets {
   float2 transform{0.0f, 0.0f}, scale{0.0f, 0.0f};
   float turn = 0.0f;
+  /* Worked out where its position was On Path (Channel::on_path): what they add to it left out, so not known. */
+  bool left_out = false;
 };
 struct KeptActionOffsets {
   uint64_t layer = 0, bone = 0;
@@ -1196,7 +1198,7 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
             if (b >= 0) {
               const Bone &bone = rig->bones[size_t(b)];
               offsets[i][k] = {f, {bone.position_keys.from_action_bones, bone.scale_keys.from_action_bones,
-                                   bone.angle_keys.from_action_bones}};
+                                   bone.angle_keys.from_action_bones, channel_on_path_at(bone.position_keys, f)}};
             }
           }
         }
@@ -1757,6 +1759,14 @@ bool own_values_from_keys(const Document &doc, const MotionPathTarget &t, const 
       }
       added = *kept;
     }
+    /* On Path: from its first key to its last its keys hold where it is, nothing added. Past them, what was kept on a
+     * frame then between them left that out: worked out again. */
+    if (channel_on_path_at(ch, frame)) {
+      added.transform = float2{0.0f, 0.0f};
+    }
+    else if (added.left_out) {
+      return false;
+    }
     float2 at_position = bone_position_from_transform(b, at(ch, b.transform) + added.transform);
     /* Frame 0 is the rig at rest: a knob with no keys back on its rest point (controllers_rest). */
     if (frame == 0 && bone_is_controller(b) && !ch.animated()) {
@@ -2029,7 +2039,8 @@ static void held_places(const Document &copy, const MotionPathTarget &t, std::ve
           if (b >= 0) {
             const Bone &bone = l->bones[size_t(b)];
             added[i] = {p.frame, {bone.position_keys.from_action_bones, bone.scale_keys.from_action_bones,
-                                    bone.angle_keys.from_action_bones}};
+                                    bone.angle_keys.from_action_bones,
+                                    channel_on_path_at(bone.position_keys, p.frame)}};
             offsets_got[i] = 1;
           }
         }
@@ -5422,6 +5433,156 @@ bool motion_path_position_at(const Document &doc, const MotionPathTarget &target
   Document copy = doc;
   copy.frame_current = frame;
   return path_position(copy, target, frame, r_at);
+}
+
+/* --- On Path (Channel::on_path) ------------------------------------------------------------------------------------ */
+
+/* The bone a path's position is, where actions move it on the mainline (On Path can be set): its owner too. */
+static Bone *on_path_bone(Document &doc, const MotionPathTarget &t, Layer **r_owner = nullptr)
+{
+  Layer *owner = t.bone && t.head ? layer_find(doc, t.layer) : nullptr;
+  if (!owner || (!doc.action.empty() && doc.action_layer == owner->id) || !handle_channel(doc, t)) {
+    return nullptr;
+  }
+  Bone &b = owner->bones[size_t(bone_index(*owner, t.bone))];
+  const bool moved = std::any_of(b.position_keys.actions.begin(), b.position_keys.actions.end(), [&](const auto &a) {
+    return !a.first.empty() && !bone_fix_line_of(*owner, a.first, b, &b.position_keys);
+  });
+  if (!moved && !b.position_keys.on_path) {
+    return nullptr;
+  }
+  if (r_owner) {
+    *r_owner = owner;
+  }
+  return &b;
+}
+
+bool motion_path_on_path_allowed(const Document &doc, const MotionPathTarget &target)
+{
+  return on_path_bone(const_cast<Document &>(doc), target) != nullptr;
+}
+
+bool motion_path_on_path(const Document &doc, const MotionPathTarget &target)
+{
+  const Bone *b = on_path_bone(const_cast<Document &>(doc), target);
+  return b && b->position_keys.on_path;
+}
+
+std::vector<int> motion_path_driver_frames(const Document &doc, const MotionPathTarget &target)
+{
+  Layer *owner = nullptr;
+  const Bone *b = on_path_bone(const_cast<Document &>(doc), target, &owner);
+  std::set<int> frames;
+  if (!b) {
+    return {};
+  }
+  const auto add = [&](const auto &ch) {
+    for (const auto &k : ch.keys) {
+      frames.insert(k.frame);
+    }
+  };
+  for (const auto &[name, keys] : b->position_keys.actions) {
+    if (name.empty() || bone_fix_line_of(*owner, name, *b, &b->position_keys)) {
+      continue;
+    }
+    if (const Bone *by = action_bone_of(*owner, name)) {
+      add(by->angle_keys);
+    }
+    if (const Bone *knob = controller_of_action(*owner, name)) {
+      add(knob->position_keys);
+    }
+    if (const BoneFix *fix = bone_fix_find(*owner, name)) {
+      for (const uint64_t id : fix->follows) {
+        if (const Bone *f = bone_find(*owner, id)) {
+          add(f->position_keys);
+          add(f->angle_keys);
+        }
+      }
+    }
+  }
+  frames.insert(0);
+  return frames.size() >= 2 ? std::vector<int>(frames.begin(), frames.end()) : std::vector<int>();
+}
+
+/* Where the bone's position is (its channel's value, actions' moves in) on each frame from `first` to `last`, and what
+ * the actions add then, worked out on a copy of the document. */
+static void on_path_frames(const Document &doc, const MotionPathTarget &t, int first, int last, bool on_path,
+                           std::map<int, float2> &r_at, std::map<int, float2> &r_added)
+{
+  Document copy = doc;
+  g_doc_copies++;
+  if (Bone *b = on_path_bone(copy, t)) {
+    b->position_keys.on_path = on_path;
+  }
+  for (int f = first; f <= last; f++) {
+    animation_evaluate(copy, f);
+    if (const Bone *b = on_path_bone(copy, t)) {
+      r_at[f] = b->transform;
+      r_added[f] = b->position_keys.from_action_bones;
+    }
+  }
+}
+
+bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool on)
+{
+  Bone *b = on_path_bone(doc, target);
+  if (!b || (on && b->position_keys.on_path)) {
+    return false;
+  }
+  Channel<float2> &ch = b->position_keys;
+  /* Off is a choice that stays: edits to the path keep to Follow Action (motion_path_edit_prepare). */
+  if (!on && !ch.on_path) {
+    const bool was = ch.follow_action;
+    ch.follow_action = true;
+    return !was;
+  }
+  ch.follow_action = !on;
+  if (ch.keys.size() < 2) {
+    if (!on) {
+      ch.on_path = false;
+      return true;
+    }
+    /* No keys yet: keys where what moves it has them (the knob's of a head turn), holding it as it is. */
+    const std::vector<int> frames = motion_path_driver_frames(doc, target);
+    if (frames.empty()) {
+      return false;
+    }
+    const float2 own = ch.animated() ? ch.evaluate(0) : b->transform - ch.from_action_bones;
+    for (const int f : frames) {
+      if (!ch.key_at(f)) {
+        ch.set_key(f, own);
+      }
+    }
+  }
+  const int first = ch.keys.front().frame, last = ch.keys.back().frame;
+  std::map<int, float2> at, added;
+  /* Where it is now, as the keys and the actions put it, made the keys' path: On Path, where it is with the actions'
+   * moves in; back off it, where it is less what the actions add (worked out with it off, so they add it). */
+  on_path_frames(doc, target, first, last, ch.on_path, at, added);
+  if (!on) {
+    std::map<int, float2> real_at;
+    added.clear();
+    on_path_frames(doc, target, first, last, false, real_at, added);
+    for (auto &[f, v] : at) {
+      v -= added[f];
+    }
+  }
+  if (int(at.size()) != last - first + 1) {
+    return false;
+  }
+  keys_fit_path(ch.keys, at);
+  for (Key<float2> &k : ch.keys) {
+    k.path_offset = on ? added[k.frame] : float2{0.0f, 0.0f};
+  }
+  ch.on_path = on;
+  animation_evaluate(doc, doc.frame_current);
+  return true;
+}
+
+bool motion_path_edit_prepare(Document &doc, const MotionPathTarget &target)
+{
+  const Bone *b = on_path_bone(doc, target);
+  return b && !b->position_keys.on_path && !b->position_keys.follow_action && motion_path_on_path_set(doc, target, true);
 }
 
 bool motion_path_place(Document &doc, const MotionPathTarget &target, float2 at)

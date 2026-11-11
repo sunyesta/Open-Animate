@@ -507,8 +507,25 @@ static bool record_with(Channel<T> &ch, const T &value, int frame, bool auto_key
     }
     fillers_hold_around(ch, frame);
     hold_apply(ch, plan);
+    /* On Path: a key past its first or last holds where it is, as they do, with what the actions added there; one
+     * between, what they added there as its neighbours had it. */
+    T put = base;
+    [[maybe_unused]] T offset{};
+    if constexpr (std::is_same_v<T, float2>) {
+      if (ch.on_path && ch.animated()) {
+        offset = channel_on_path_at(ch, frame) ? channel_path_offset_at(ch, frame) : ch.from_action_bones;
+        if (!channel_on_path_at(ch, frame)) {
+          put = value;
+        }
+      }
+    }
     /* The channel's own, even over a filler not taken yet (just opened: fillers_check can't tell it was edited). */
-    Key<T> &k = key_put(ch, frame, base);
+    Key<T> &k = key_put(ch, frame, put);
+    if constexpr (std::is_same_v<T, float2>) {
+      if (ch.on_path) {
+        k.path_offset = offset;
+      }
+    }
     k.filler = false;
     k.filler_inside = false;
     if (!plan.all.empty()) {
@@ -4079,6 +4096,24 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
         }
       }
     });
+    /* A bone's position On Path (Channel::on_path) is where its keys hold from its first to its last: what the
+     * actions added is left out there (its value and what it was recorded as alike, so an edit stays an edit). Not
+     * while the layer's action is edited: its keys are the action's then. */
+    if (!(owner.id == doc.action_layer && !doc.action.empty())) {
+      for (Bone &b : owner.bones) {
+        Channel<float2> &ch = b.position_keys;
+        if (channel_on_path_at(ch, frame) && !(ch.from_action_bones == float2{0.0f, 0.0f})) {
+          /* Its position with it, where that was taken from its Transform: else that reads as an edit. */
+          const bool derived = b.position == bone_position_from_transform(b, b.transform);
+          b.transform -= ch.from_action_bones;
+          if (derived) {
+            b.position = bone_position_from_transform(b, b.transform);
+          }
+          ch.last -= ch.from_action_bones;
+          ch.from_action_bones = float2{0.0f, 0.0f};
+        }
+      }
+    }
   }
 }
 

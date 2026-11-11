@@ -239,6 +239,10 @@ template<typename T> static json keys_to_json(const Channel<T> &ch)
         }
         key["path_control_handles"] = std::move(handles);
       }
+      if (!(k.path_offset == float2{0.0f, 0.0f})) {
+        /* On Path: what the actions added there (Key::path_offset). */
+        key["path_offset"] = float2_to_json(k.path_offset);
+      }
     }
     if (k.selected) {
       key["selected"] = true;
@@ -267,6 +271,13 @@ template<typename T> static void put_keys(json &j, const char *name, const Chann
   /* Pinned to the timeline: kept even without keys. */
   if (ch.pinned) {
     j[std::string(name) + "_pinned"] = true;
+  }
+  /* A bone's position On Path (Channel::on_path). */
+  if (ch.on_path) {
+    j[std::string(name) + "_on_path"] = true;
+  }
+  if (ch.follow_action) {
+    j[std::string(name) + "_follow_action"] = true;
   }
   /* Other timelines' keys: actions by name, and "" for the mainline while an action is edited. */
   if (!ch.actions.empty()) {
@@ -1843,6 +1854,9 @@ template<typename T> static void get_key_list(const json &j, const char *name, C
         }
         key.path_control_handles.push_back(h);
       }
+      if (const auto off = k.find("path_offset"); off != k.end()) {
+        value_from_json(*off, &key.path_offset);
+      }
     }
     key.selected = get_bool(k, "selected", false);
     key.filler = get_bool(k, "filler", false);
@@ -1869,6 +1883,12 @@ template<typename T> static void get_keys(const json &j, const char *name, Chann
   get_key_list(j, name, r_ch);
   if (auto it = j.find(std::string(name) + "_pinned"); it != j.end() && it->is_boolean()) {
     r_ch.pinned = it->get<bool>();
+  }
+  if (auto it = j.find(std::string(name) + "_on_path"); it != j.end() && it->is_boolean()) {
+    r_ch.on_path = it->get<bool>();
+  }
+  if (auto it = j.find(std::string(name) + "_follow_action"); it != j.end() && it->is_boolean()) {
+    r_ch.follow_action = it->get<bool>();
   }
   if (auto s = j.find(std::string(name) + "_action_setup"); s != j.end() && s->is_object()) {
     for (const auto &[action, list] : s->items()) {

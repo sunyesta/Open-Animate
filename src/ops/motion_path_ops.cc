@@ -188,6 +188,15 @@ namespace {
  * path). Their poll needs one or the other, so off a path the keys go on to the viewport's own. */
 bool op_targets(Context &C, std::vector<MotionPathTarget> &r_targets);
 
+/* Before an edit to their paths' shape: paths an action moves put On Path, edited as they show, keys added where
+ * they have none (motion_path_edit_prepare). */
+static void path_edit_prepare(Document &doc, const std::vector<MotionPathTarget> &targets)
+{
+  for (const MotionPathTarget &t : targets) {
+    motion_path_edit_prepare(doc, t);
+  }
+}
+
 static bool op_path_target(Context &C, std::vector<MotionPathTarget> &r_targets)
 {
   if (op_has_arg(C, "layer")) {
@@ -529,6 +538,39 @@ static void timing_select_apply(WindowManager &wm, const MotionPathTarget &t, in
 
 void motion_path_operators_register()
 {
+  {
+    OperatorType ot;
+    ot.idname = "anim.motion_path_on_path";
+    ot.name = "On Path";
+    ot.description = "For the paths traced now (layer=id with bone=name: that one) whose bone's head an action moves "
+                     "on the mainline: on=1 puts them On Path, their keys holding the path as it shows (what the "
+                     "actions add left out between the first key and the last), on=0 back to Follow Action, the keys "
+                     "what is added to the actions; either way it looks as it did, the keys' shape and timing "
+                     "refitted. Without on= each one is toggled. Keys are added where a path has none";
+    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+    ot.poll = [](Context &C) { return C.document != nullptr; };
+    ot.exec = [](Context &C) {
+      Document &doc = *C.document;
+      std::vector<MotionPathTarget> targets;
+      if (!op_targets(C, targets)) {
+        return OpStatus::Cancelled;
+      }
+      animation_sync(doc);
+      int changed = 0;
+      for (const MotionPathTarget &t : targets) {
+        if (motion_path_on_path_allowed(doc, t)) {
+          const bool on = op_has_arg(C, "on") ? op_arg_bool(C, "on") : !motion_path_on_path(doc, t);
+          changed += motion_path_on_path_set(doc, t, on) ? 1 : 0;
+        }
+      }
+      if (changed == 0) {
+        report(ReportType::Info, "No bone head path an action moves (on the mainline) to change");
+        return OpStatus::Cancelled;
+      }
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
   {
     OperatorType ot;
     ot.idname = "anim.motion_path_pin";
@@ -951,6 +993,7 @@ void motion_path_operators_register()
       if (!op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
+      path_edit_prepare(doc, targets);
       animation_sync(doc);
       int end = 0, index = 0;
       if (!motion_path_control_add(doc, targets.front(), op_arg_int(C, "frame", doc.frame_current), &end, &index)) {
@@ -1080,6 +1123,7 @@ void motion_path_operators_register()
       if (!op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
+      path_edit_prepare(doc, targets);
       const MotionPathTarget t = targets.front();
       const MotionPathOnFrame on(doc, std::max(1, op_arg_int(C, "frame", doc.frame_current)));
       float2 at = {op_arg_float(C, "x", 0.0f), op_arg_float(C, "y", 0.0f)};
@@ -1111,6 +1155,7 @@ void motion_path_operators_register()
       if (!op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
+      path_edit_prepare(doc, targets);
       const MotionPathOnFrame on(doc, std::max(1, op_arg_int(C, "frame", doc.frame_current)));
       if (!motion_path_breakdown(doc, targets.front(), op_arg_float(C, "factor", 0.5f))) {
         report(ReportType::Warning, "A breakdown goes between two keys");
@@ -1258,6 +1303,7 @@ void motion_path_operators_register()
       if (!op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
+      path_edit_prepare(doc, targets);
       int first = 0, last = 0;
       if (!motion_path_range(doc, motion_path_targets(C), first, last)) {
         motion_path_range(doc, targets, first, last);
@@ -1291,6 +1337,7 @@ void motion_path_operators_register()
       if (!op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
+      path_edit_prepare(doc, targets);
       animation_sync(doc);
       const int frame = op_arg_int(C, "frame", doc.frame_current);
       const float2 at = {op_arg_float(C, "x", 0.0f), op_arg_float(C, "y", 0.0f)};
@@ -1318,6 +1365,7 @@ void motion_path_operators_register()
       if (!op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
+      path_edit_prepare(doc, targets);
       animation_sync(doc);
       int changed = 0;
       for (const MotionPathTarget &t : targets) {
@@ -1466,6 +1514,9 @@ void motion_path_operators_register()
       if (points.empty() || !op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
+      if (!path_brush_is_timing(brush)) {
+        path_edit_prepare(doc, targets);
+      }
       if (path_brush_is_sculpt(brush)) {
         /* A drawing's path is its points' timing, not a place of its own: there is nothing there to reshape. */
         std::erase_if(targets, [](const MotionPathTarget &t) { return t.drawing; });
@@ -1569,6 +1620,7 @@ void motion_path_operators_register()
       if (!op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
+      path_edit_prepare(doc, targets);
       PathSlide slide;
       slide.proportional = op_has_arg(C, "proportional") ? op_arg_bool(C, "proportional") : ts.proportional;
       slide.size = std::max(op_arg_float(C, "size", ts.path_proportional_size), 1.0f);
@@ -2556,6 +2608,7 @@ void motion_path_operators_register()
         return OpStatus::Cancelled;
       }
       animation_sync(doc);
+      path_edit_prepare(doc, motion_path_targets(C));
       const float2 offset{op_arg_float(C, "x", 0.0f), op_arg_float(C, "y", 0.0f)};
       /* Path handles picked: they alone, each about its key; control points picked with keys: together, about the
        * middle of them all. */
@@ -2647,6 +2700,7 @@ void motion_path_operators_register()
       if (!op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
+      path_edit_prepare(doc, targets);
       int frame = op_arg_int(C, "frame", doc.frame_current);
       animation_sync(doc);
       KeyType type = KeyType::Breakdown;

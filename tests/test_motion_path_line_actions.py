@@ -61,6 +61,8 @@ assert doc.path_own_motion
 layers.active = rig()
 rig().select_bone("Ear")
 args = dict(bone="Ear", head="1", layer=str(rig_id))
+# Follow Action: the ear's keys what is added to the action (an edit would put it On Path, its keys the path as seen).
+assert ops.anim.motion_path_on_path(on="0", **args) == {'FINISHED'}
 assert ops.anim.motion_path_select(frame="30", **args) == {'FINISHED'}
 doc.frame_current = 18
 

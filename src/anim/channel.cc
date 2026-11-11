@@ -558,6 +558,163 @@ static float2 bezier_along(const float2 p[4], float u)
   return bezier(p, 0.5f * (lo + hi));
 }
 
+/* How far along a stretch's Bezier by length (as bezier_along measures it) its parameter `t` is. */
+static float bezier_progress(const float2 p[4], float t)
+{
+  constexpr int PIECES = 32;
+  float lengths[PIECES + 1] = {0.0f};
+  float2 prev = p[0];
+  for (int j = 1; j <= PIECES; j++) {
+    const float2 q = bezier(p, float(j) / PIECES);
+    lengths[j] = lengths[j - 1] + length(q - prev);
+    prev = q;
+  }
+  const float total = lengths[PIECES];
+  if (total < 1e-9f) {
+    return t;
+  }
+  t = std::clamp(t, 0.0f, 1.0f);
+  const int j = std::min(int(t * PIECES) + 1, PIECES);
+  return (lengths[j - 1] + length(bezier(p, t) - bezier(p, float(j - 1) / PIECES))) / total;
+}
+
+bool channel_on_path_at(const Channel<float2> &ch, int frame)
+{
+  return ch.on_path && !ch.keys.empty() && frame >= ch.keys.front().frame && frame <= ch.keys.back().frame;
+}
+
+float2 channel_path_offset_at(const Channel<float2> &ch, int frame)
+{
+  if (ch.keys.empty()) {
+    return float2{0.0f, 0.0f};
+  }
+  if (frame <= ch.keys.front().frame) {
+    return ch.keys.front().path_offset;
+  }
+  for (size_t i = 1; i < ch.keys.size(); i++) {
+    const Key<float2> &a = ch.keys[i - 1], &b = ch.keys[i];
+    if (frame <= b.frame) {
+      const float w = b.frame > a.frame ? float(frame - a.frame) / float(b.frame - a.frame) : 1.0f;
+      return a.path_offset + (b.path_offset - a.path_offset) * w;
+    }
+  }
+  return ch.keys.back().path_offset;
+}
+
+/* The Bezier from `q.front()` to `q.back()` nearest the points between, by least squares (Schneider's: parameters by
+ * the length along the points, then each moved to its nearest place on the curve and fitted again). The handles as
+ * offsets from the ends; `r_t` each point's parameter. */
+static void bezier_fit(const std::vector<float2> &q, float2 &r_out, float2 &r_in, std::vector<float> &r_t)
+{
+  const size_t n = q.size();
+  const float2 p0 = q.front(), p3 = q.back();
+  r_out = (p3 - p0) / 3.0f;
+  r_in = (p0 - p3) / 3.0f;
+  r_t.assign(n, 0.0f);
+  float total = 0.0f;
+  for (size_t j = 1; j < n; j++) {
+    total += length(q[j] - q[j - 1]);
+    r_t[j] = total;
+  }
+  if (total < 1e-9f) {
+    r_out = r_in = float2{0.0f, 0.0f};
+    for (size_t j = 0; j < n; j++) {
+      r_t[j] = n > 1 ? float(j) / float(n - 1) : 0.0f;
+    }
+    return;
+  }
+  for (float &t : r_t) {
+    t /= total;
+  }
+  if (n < 4) {
+    return;
+  }
+  for (int round = 0; round < 6; round++) {
+    float c11 = 0.0f, c12 = 0.0f, c22 = 0.0f;
+    float2 x1{0.0f, 0.0f}, x2{0.0f, 0.0f};
+    for (size_t j = 1; j + 1 < n; j++) {
+      const float t = r_t[j], s = 1.0f - t;
+      const float a1 = 3.0f * s * s * t, a2 = 3.0f * s * t * t;
+      const float2 rest = q[j] - (p0 * (s * s * s + 3.0f * s * s * t) + p3 * (3.0f * s * t * t + t * t * t));
+      c11 += a1 * a1;
+      c12 += a1 * a2;
+      c22 += a2 * a2;
+      x1 += rest * a1;
+      x2 += rest * a2;
+    }
+    const float det = c11 * c22 - c12 * c12;
+    if (std::abs(det) < 1e-12f) {
+      return;
+    }
+    /* Solved for the handles as offsets from their ends (the rest above takes each end with its handle's weight). */
+    r_out = (x1 * c22 - x2 * c12) / det;
+    r_in = (x2 * c11 - x1 * c12) / det;
+    const float2 p1 = p0 + r_out, p2 = p3 + r_in;
+    /* Each point's parameter moved to its nearest place (a Newton step), kept in order. */
+    const float2 p[4] = {p0, p1, p2, p3};
+    for (size_t j = 1; j + 1 < n; j++) {
+      const float t = r_t[j], s = 1.0f - t;
+      const float2 d1 = (p1 - p0) * (3.0f * s * s) + (p2 - p1) * (6.0f * s * t) + (p3 - p2) * (3.0f * t * t);
+      const float2 d2 = (p2 - p1 * 2.0f + p0) * (6.0f * s) + (p3 - p2 * 2.0f + p1) * (6.0f * t);
+      const float2 off = bezier(p, t) - q[j];
+      const float den = dot(d1, d1) + dot(off, d2);
+      if (std::abs(den) > 1e-12f) {
+        r_t[j] = std::clamp(t - dot(off, d1) / den, r_t[j - 1], 1.0f);
+      }
+    }
+  }
+}
+
+void keys_fit_path(std::vector<Key<float2>> &keys, const std::map<int, float2> &want)
+{
+  const auto at = [&](int f) {
+    const auto it = want.find(f);
+    return it != want.end() ? it->second : float2{0.0f, 0.0f};
+  };
+  for (Key<float2> &k : keys) {
+    k.value = at(k.frame);
+    k.path_handles = PathHandles::Broken;
+    k.path_in = k.path_out = float2{0.0f, 0.0f};
+  }
+  for (size_t i = 1; i < keys.size(); i++) {
+    Key<float2> &a = keys[i - 1], &b = keys[i];
+    b.path_controls.clear();
+    b.path_control_handles.clear();
+    const Interp interp = stretch_interp(b.interp);
+    if (interp == Interp::Step || interp == Interp::Pose) {
+      continue;
+    }
+    /* From the end of the key before's hold, the way the stretch moves (held there till then). */
+    const int start = std::min(a.frame + std::max(a.hold, 0), b.frame);
+    std::vector<float2> q;
+    for (int f = start; f <= b.frame; f++) {
+      q.push_back(f == start ? a.value : at(f));
+    }
+    std::vector<float> t;
+    bezier_fit(q, a.path_out, b.path_in, t);
+    const float2 p[4] = {a.value, a.value + a.path_out, b.value + b.path_in, b.value};
+    std::vector<float> progress;
+    for (const float x : t) {
+      progress.push_back(bezier_progress(p, x));
+    }
+    if (progress.size() >= 2) {
+      progress.front() = 0.0f;
+      progress.back() = 1.0f;
+      b.interp = Interp::Custom;
+      b.timing = timing_fit(progress);
+    }
+  }
+  /* In line through a key: Aligned, so dragging one handle keeps the path smooth there. */
+  for (size_t i = 1; i + 1 < keys.size(); i++) {
+    Key<float2> &k = keys[i];
+    const float li = length(k.path_in), lo = length(k.path_out);
+    if (li > 1e-9f && lo > 1e-9f && dot(k.path_in, k.path_out) < -0.995f * li * lo) {
+      k.path_handles = PathHandles::Aligned;
+    }
+  }
+  keys_changed();
+}
+
 /* Stored where they are (in the keys' own space): moving a key leaves them, only the curve's shape changing toward
  * them, as a vector point's neighbours stay when it moves. (The keys are still asked for, so a way of keeping them
  * can change in one place.) */
@@ -1413,6 +1570,8 @@ template<typename T> T Channel<T>::evaluate(int frame) const
     if (quiet) {
       Channel<T> real;
       real.last = last;
+      real.on_path = on_path;
+      real.follow_action = follow_action;
       own_after = false;
       for (size_t i = keys.size(); i-- > 0;) {
         if (!filler_quiet(keys[i], own_after)) {
@@ -1422,6 +1581,16 @@ template<typename T> T Channel<T>::evaluate(int frame) const
       }
       std::reverse(real.keys.begin(), real.keys.end());
       return real.evaluate(frame);
+    }
+  }
+  if constexpr (std::is_same_v<T, float2>) {
+    /* On Path: past its first and last keys the actions move it again (they add to its own value then), from the key
+     * less what they added there. */
+    if (on_path && frame < keys.front().frame) {
+      return keys.front().value - keys.front().path_offset;
+    }
+    if (on_path && frame > keys.back().frame) {
+      return keys.back().value - keys.back().path_offset;
     }
   }
   if (frame <= keys.front().frame) {

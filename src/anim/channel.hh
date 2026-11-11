@@ -141,6 +141,9 @@ template<typename T> struct Key {
   std::vector<T> path_controls;
   /* Their handles, one for each (any missing: not set yet). */
   std::vector<PathControlHandles> path_control_handles;
+  /* A bone's position On Path (Channel::on_path): what the actions added here when it was put on the path, for the
+   * frames past its first and last keys, where they move it again. */
+  T path_offset{};
   /* Picked in the timeline. Not saved. */
   bool selected = false;
   /* Key Together (a group's): added only to hold this channel where it was while another layer of the group was
@@ -249,6 +252,13 @@ template<typename T> struct Channel {
   /* An action bone action is playing into it now (its bone turned into it, the offset maybe 0 at this turn):
    * its field shows pink. Worked out with `from_action_bones`, never saved. */
   bool action_bone_live = false;
+  /* A bone's position On Path (the Motion Path tool's: edited on its path while actions move it): from its first key
+   * to its last on the mainline its keys hold where it is, the path as seen, and what the actions would add is left
+   * out there, so its handles, control points and brushes shape the path itself. Before its first key and after its
+   * last, the actions move it again from its key less what they added there (Key::path_offset). */
+  bool on_path = false;
+  /* Turned off On Path (Follow Action): an edit to the path leaves it so, its keys what is added to the actions. */
+  bool follow_action = false;
   /* Key Whole Drawing and Key Together: it was there when its keys were last made to agree with the rest's; one of
    * that time's frames it misses now had its key deleted (a channel new since, like an eraser's cut end, says
    * nothing). Not saved. Each its own: a drawing's channel is its drawing's (`synced`) and its Key Together group's
@@ -306,6 +316,17 @@ void key_path_handles_freeze(std::vector<Key<float2>> &keys, size_t i);
 template<typename T> void key_speeds_set(std::vector<Key<T>> &keys, size_t i, const std::vector<float> &speeds);
 /* Makes it Custom with the timing `curve`, as it is. */
 template<typename T> void key_timing_set(std::vector<Key<T>> &keys, size_t i, TimingCurve curve);
+/* On Path (Channel::on_path): whether `frame` is from its first key to its last, where its keys hold where it is and
+ * actions add nothing. */
+bool channel_on_path_at(const Channel<float2> &ch, int frame);
+/* What the actions added on `frame` as its keys have it (Key::path_offset): between two keys, as far from each as the
+ * frame is; past the ends, the end's. */
+float2 channel_path_offset_at(const Channel<float2> &ch, int frame);
+/* Every key of `keys` given the value `want` has on its frame, and each stretch between (but Step and Pose) the
+ * handles and Custom timing that run it through `want` on each of its frames as near as one Bezier can: a path traced
+ * frame by frame (where actions moved a bone) made keys of, looking as it did. Control points go. `want` holds every
+ * frame from the first key to the last. */
+void keys_fit_path(std::vector<Key<float2>> &keys, const std::map<int, float2> &want);
 /* Where the stretch arriving at key `i` is `u` (0-1) of the way along its path by length, as Custom goes along it (in
  * the keys' own space); past either end (an overshoot), on along the end's direction. */
 float2 stretch_path_point(const std::vector<Key<float2>> &keys, size_t i, float u);

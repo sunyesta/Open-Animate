@@ -191,6 +191,17 @@ std::vector<int> motion_path_lit_dots(const Document &doc, const MotionPathTarge
 
 /* --- Editing, the Motion Path tool's: every edit lands on keys (motion_path_record keys it whatever auto-key says). */
 
+/* On Path (Channel::on_path): a bone head's path, where actions move it on the mainline, edited as it shows. Allowed
+ * where they do; set keeps it showing as it did, refitting the keys' shape and timing (and adds keys, where it has
+ * none, where what moves it has them); set off, it stays off (Channel::follow_action). Edit prepare puts it On Path
+ * before an edit to its path, unless turned off. */
+bool motion_path_on_path_allowed(const Document &doc, const MotionPathTarget &target);
+bool motion_path_on_path(const Document &doc, const MotionPathTarget &target);
+bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool on);
+bool motion_path_edit_prepare(Document &doc, const MotionPathTarget &target);
+/* The frames keys go on when a path without keys is edited: the keys of what moves it, and the setup frame. */
+std::vector<int> motion_path_driver_frames(const Document &doc, const MotionPathTarget &target);
+
 /* Where `target` shows now, and on `frame` (from its keys alone), in document space. */
 bool motion_path_position(const Document &doc, const MotionPathTarget &target, float2 &r_at);
 bool motion_path_position_at(const Document &doc, const MotionPathTarget &target, int frame, float2 &r_at);

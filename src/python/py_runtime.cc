@@ -1553,6 +1553,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["color"] = py::make_tuple(p.color.r, p.color.g, p.color.b);
       d["first"] = p.first;
       d["own_motion"] = p.own_motion;
+      /* None where On Path can't be set (motion_path_on_path_allowed). */
+      d["on_path"] = motion_path_on_path_allowed(doc, p.target) ? py::object(py::bool_(motion_path_on_path(doc, p.target)))
+                                                                 : py::object(py::none());
       py::list pts, speed;
       for (size_t i = 0; i < p.points.size(); i++) {
         pts.append(py::make_tuple(p.points[i].x, p.points[i].y));
@@ -2884,6 +2887,8 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
             }
           }
           d["path_control_handles"] = control_handles;
+          /* On Path: what the actions added there (Key::path_offset). */
+          d["path_offset"] = py::make_tuple(k.path_offset.x, k.path_offset.y);
         }
         d["interp"] = interp_identifier(k.interp);
         if (!k.timing.empty()) {

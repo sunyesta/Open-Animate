@@ -786,6 +786,8 @@ static struct {
   /* From document space on the dot's frame to where it is drawn. */
   Transform2D drawn;
   Document snapshot;
+  /* Put On Path (or given keys) as the drag began: a change even where the dot comes back. */
+  bool prepared = false;
 } g_path_slide;
 
 /* Ends a drag, a slide or a modal: the paths may take a new range again. */
@@ -842,6 +844,10 @@ static void motion_path_slide_update(Context &C, const ViewMapping &view)
     return;
   }
   if (!g.dragging || io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f || g.again) {
+    if (!g.dragging) {
+      /* A path an action moves edited as it shows, keys added where it has none (motion_path_edit_prepare). */
+      g.prepared = motion_path_edit_prepare(g.snapshot, g.target);
+    }
     g.dragging = true;
     g.again = false;
     PathSlide slide;
@@ -849,7 +855,8 @@ static void motion_path_slide_update(Context &C, const ViewMapping &view)
     slide.size = ts.path_proportional_size;
     slide.falloff = ts.proportional_falloff;
     doc = g.snapshot;
-    g.changed = motion_path_slide(doc, g.target, g.frame, g.drawn.inverted().apply(view.to_document(io.MousePos)), slide);
+    g.changed = motion_path_slide(doc, g.target, g.frame, g.drawn.inverted().apply(view.to_document(io.MousePos)), slide) ||
+                g.prepared;
     g_path_drag.serial++;
   }
 }
@@ -1029,6 +1036,7 @@ static void motion_path_tool_input(Context &C, Area &area, const ViewMapping &vi
         sl.press = io.MousePos;
         sl.drawn = drawn;
         sl.snapshot = doc;
+        sl.prepared = false;
         /* The paths keep the range they had while the drag goes on. */
         g.active = true;
         g.first = first;
@@ -1131,6 +1139,10 @@ static void motion_path_tool_input(Context &C, Area &area, const ViewMapping &vi
   const float dx = io.MousePos.x - g.press.x, dy = io.MousePos.y - g.press.y;
   if (!g.dragging && dx * dx + dy * dy < 4.0f * 4.0f) {
     return;
+  }
+  if (!g.dragging && g.control < 0) {
+    /* A path an action moves edited as it shows (motion_path_edit_prepare); Esc goes back to the snapshot, before. */
+    motion_path_edit_prepare(doc, g.target);
   }
   g.dragging = true;
   float2 at = view.to_document(io.MousePos);
@@ -1289,6 +1301,16 @@ static bool motion_path_edit_modals(Context &C, const ViewMapping &view, ImDrawL
       }
     }
     if (idle && !sc.active && !keys.empty()) {
+      /* Paths an action moves edited as they show (motion_path_edit_prepare): the same keys, refitted. */
+      std::vector<MotionPathTarget> prepared;
+      for (const auto &[t, f] : keys) {
+        if (std::find(prepared.begin(), prepared.end(), t) == prepared.end()) {
+          prepared.push_back(t);
+          if (motion_path_edit_prepare(doc, t) && C.undo) {
+            C.undo->mark_changed();
+          }
+        }
+      }
       gk.active = true;
       gk.kind = kind;
       gk.together = together;
@@ -1720,6 +1742,12 @@ static void motion_path_brush_input(Context &C, Area &area, const ViewMapping &v
     g_path_drag.last = last;
     if (g.pending) {
       return;
+    }
+    if (!path_brush_is_timing(brush)) {
+      /* Paths an action moves edited as they show (motion_path_edit_prepare); Esc goes back to the snapshot. */
+      for (const MotionPathTarget &t : motion_path_targets(C)) {
+        g.changed |= motion_path_edit_prepare(doc, t);
+      }
     }
     if (path_brush_is_sculpt(brush)) {
       std::vector<MotionPathTarget> own;
@@ -5726,6 +5754,26 @@ static void motion_path_header(Context &C)
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip("Every path shows only its own motion: whatever else moves it "
                         "(a bone, a parent, a group, its own constraints) held as on this frame. Off: the real path");
+    }
+    /* On Path, where a path traced is a bone head's an action moves (motion_path_on_path_allowed). */
+    bool any = false, all = true;
+    for (const MotionPathTarget &t : motion_path_targets(C)) {
+      if (motion_path_on_path_allowed(doc, t)) {
+        any = true;
+        all = all && motion_path_on_path(doc, t);
+      }
+    }
+    if (any) {
+      ImGui::SameLine();
+      bool on = all;
+      if (ImGui::Checkbox("On Path", &on)) {
+        operator_call(C, "anim.motion_path_on_path", {{"on", on ? "1" : "0"}});
+      }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip("The keys hold the path as it shows, an action's moves in, so editing it is as anywhere "
+                          "(an edit to the path turns this on). Off: Follow Action, the keys what is added to the "
+                          "action's moves. Either way it looks the same");
+      }
     }
     ImGui::SameLine();
     bool edit_layer = C.wm->tool_settings.path_edit_layer;
