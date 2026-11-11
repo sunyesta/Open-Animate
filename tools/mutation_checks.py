@@ -43,6 +43,8 @@ PENDING = [
      'A control point dragged past a contained knob box edge stops there', 'tests/test_motion_path_control_edge.py'),
     ('src/anim/motion_path.cc', 'edge = dot(got, rate) / dot(rate, rate);', 'edge = edge;',
      'The box edge found from the rate measured inside, not the rough slopes', 'tests/test_motion_path_control_edge.py'),
+    ('src/anim/motion_path.cc', '!bone_fix_line_of(owner, by, *holder, &holder->position_keys))', 'true)',
+     'Kept action offsets: a fix line in a knob keys moves nothing', 'tests/test_motion_path_knob_fix_offsets.py'),
 ]
 
 def build(root):

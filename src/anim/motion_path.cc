@@ -268,10 +268,12 @@ static bool action_played_apart(const Layer &owner, const std::string &name, con
       {
         return false;
       }
-      /* Moved by nothing but its keys (its own sides' actions key its timing). */
+      /* Moved by nothing but its keys (its own sides' actions key its timing; a fix following it keeps its line in
+       * them, never played onto it). */
       for (const auto &[by, keys] : holder->position_keys.actions) {
         if (std::find(holder->controller_actions.begin(), holder->controller_actions.end(), by) ==
-            holder->controller_actions.end())
+                holder->controller_actions.end() &&
+            !bone_fix_line_of(owner, by, *holder, &holder->position_keys))
         {
           return false;
         }
@@ -395,6 +397,7 @@ struct ActionOffsetsScope {
     if (!animation_inputs_only(inputs)) {
       return;
     }
+    inputs.frame_current = 0;
     found = {&doc, document, g_offsets_kept_count, {}};
     for (const std::shared_ptr<KeptActionOffsets> &k : g_offsets) {
       if (offsets_inputs_same(*k, inputs)) {
@@ -413,6 +416,7 @@ struct ActionOffsetsScope {
 static const ActionOffsets *action_offsets_kept(const Layer &owner, const Bone &b, const Channel<float2> &position,
                                                 int frame)
 {
+  /* (Several may be good for the bone, each with frames of its own.) */
   for (const std::shared_ptr<const KeptActionOffsets> &k : t_offsets) {
     if (k->layer != owner.id || k->bone != b.id) {
       continue;
@@ -421,7 +425,7 @@ static const ActionOffsets *action_offsets_kept(const Layer &owner, const Bone &
     if (it == k->frames.end() || !(setup_of(position, b.transform) == k->setup_transform) ||
         setup_of(b.angle_keys, b.turn) != k->setup_turn || !(setup_of(b.scale_keys, b.scale) == k->setup_scale))
     {
-      return nullptr;
+      continue;
     }
     return &it->second;
   }
@@ -443,6 +447,8 @@ static void action_offsets_keep(const Document &doc, uint64_t layer, uint64_t bo
   if (!animation_inputs_only(*inputs)) {
     return;
   }
+  /* (Kept by frame: the frame shown, which a place's copy moves to, isn't what they come from.) */
+  inputs->frame_current = 0;
   auto keep = std::make_shared<KeptActionOffsets>();
   keep->layer = layer;
   keep->bone = bone;
@@ -452,13 +458,16 @@ static void action_offsets_keep(const Document &doc, uint64_t layer, uint64_t bo
   std::lock_guard lock(g_offsets_mutex);
   for (std::shared_ptr<KeptActionOffsets> &k : g_offsets) {
     if (k->layer == layer && k->bone == bone) {
-      /* The same document, keys and all: more frames of it. (A scope may be reading the one kept: made anew.) */
+      /* The same document but for the bone's own keys (what the actions add doesn't come from them, as with kept
+       * offsets found good): more frames of it, made anew (a scope may be reading the one kept). Another (the
+       * document a control point's handles are worked out on, held as shown) is kept beside it, so neither loses the
+       * other's frames: each is checked against the document before it is used. */
       if (k->setup_transform == keep->setup_transform && k->setup_turn == keep->setup_turn &&
-          k->setup_scale == keep->setup_scale && *k->from == *inputs)
+          k->setup_scale == keep->setup_scale && offsets_inputs_same(*k, *inputs))
       {
         keep->frames = k->frames;
+        k = nullptr;
       }
-      k = nullptr;
     }
   }
   g_offsets.erase(std::remove(g_offsets.begin(), g_offsets.end(), nullptr), g_offsets.end());
@@ -466,8 +475,8 @@ static void action_offsets_keep(const Document &doc, uint64_t layer, uint64_t bo
   for (const auto &[f, o] : added) {
     keep->frames[f] = o;
   }
-  /* A few bones' at most. */
-  if (g_offsets.size() >= 4) {
+  /* A few at most. */
+  if (g_offsets.size() >= 8) {
     g_offsets.erase(g_offsets.begin());
   }
   g_offsets.push_back(std::move(keep));
@@ -1960,6 +1969,14 @@ static void held_places(const Document &copy, const MotionPathTarget &t, std::ve
       known[i] = 2;
     }
   }
+  /* A bone actions move whose actions' part can be kept (as the paths keep it): what they add on the frames worked out
+   * here kept too, so its control points' and handles' frames off the path's are had from its keys from then on. */
+  const Layer *owner = own && t.bone && g_own_from_keys ? layer_find(copy, t.layer) : nullptr;
+  const int bone_i = owner ? bone_index(*owner, t.bone) : -1;
+  const bool keep_offsets = bone_i >= 0 && bone_played(owner->bones[size_t(bone_i)]) && !dynamics_in(copy) &&
+                            action_offsets_apart(copy, *owner, owner->bones[size_t(bone_i)]);
+  std::vector<std::pair<int, ActionOffsets>> added(keep_offsets ? places.size() : 0);
+  std::vector<char> offsets_got(added.size(), 0);
   places_side_by_side(copy, places.size(), [&](size_t i, Document &mine) {
     HeldPlace &p = places[i];
     Entry &w = worked[i];
@@ -1979,6 +1996,14 @@ static void held_places(const Document &copy, const MotionPathTarget &t, std::ve
           w.own_scale = v.scale;
           w.own_angle = v.angle;
           w.ok = true;
+          const Layer *l = keep_offsets ? layer_find(mine, t.layer) : nullptr;
+          const int b = l ? bone_index(*l, t.bone) : -1;
+          if (b >= 0) {
+            const Bone &bone = l->bones[size_t(b)];
+            added[i] = {p.frame, {bone.position_keys.from_action_bones, bone.scale_keys.from_action_bones,
+                                    bone.angle_keys.from_action_bones}};
+            offsets_got[i] = 1;
+          }
         }
         else {
           w.ok = target_position(mine, t, w.at);
@@ -1986,6 +2011,15 @@ static void held_places(const Document &copy, const MotionPathTarget &t, std::ve
       }
     }
   });
+  if (keep_offsets) {
+    std::vector<std::pair<int, ActionOffsets>> got;
+    for (size_t i = 0; i < added.size(); i++) {
+      if (offsets_got[i]) {
+        got.push_back(added[i]);
+      }
+    }
+    action_offsets_keep(copy, t.layer, t.bone, got);
+  }
   /* Then placed: Own Motion's own values put on the document as shown, its own constraints off. A bone posed with the
    * rest of its bones as shown, with no copy of the document; a point or a layer on a copy of it, one a thread. */
   const Document &shown = held ? *held : copy;

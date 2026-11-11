@@ -560,6 +560,8 @@ add_test(NAME motion_path_control_handles
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_control_handles.py)
 add_test(NAME motion_path_control_edge
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_control_edge.py)
+add_test(NAME motion_path_knob_fix_offsets
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_knob_fix_offsets.py)
 add_test(NAME motion_path_smooth_line
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_smooth_line.py)
 add_test(NAME timeline_summary_merge
