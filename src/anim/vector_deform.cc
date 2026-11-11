@@ -291,6 +291,11 @@ struct DeformShape {
   /* Its Method's Blended (Harmony's Weighted Deform), with Pre-Blend as the length added to every distance and
    * Post-Blend. */
   bool env_weighted = false;
+  /* Its Method's Seamless (envelope_seamless_map), the shape's size at rest, for its least blend, and how far each
+   * sampled piece's frames stray from its chord at rest. */
+  bool env_seamless = false;
+  float env_size = 0.0f;
+  std::vector<float> env_piece_slack;
   float env_pre = 0.0f;
   float env_post = 0.0f;
   std::shared_ptr<struct WeightedSolver> env_solver;
@@ -964,6 +969,32 @@ static void envelope_influence_build(DeformShape &r, const Modifier &m);
 static void envelope_settings_apply(const Modifier &m, DeformShape &r)
 {
   r.env_weighted = m.deform_envelope_method == EnvelopeMethod::Blended;
+  r.env_seamless = m.deform_envelope_method == EnvelopeMethod::Seamless;
+  if (r.env_seamless) {
+    float2 lo(FLT_MAX, FLT_MAX), hi(-FLT_MAX, -FLT_MAX);
+    for (const float2 q : r.env_frame_rest) {
+      lo = float2(std::min(lo.x, q.x), std::min(lo.y, q.y));
+      hi = float2(std::max(hi.x, q.x), std::max(hi.y, q.y));
+    }
+    r.env_size = r.env_frame_rest.empty() ? 0.0f : length(hi - lo);
+    const size_t segs = r.env_rest.size(), samples = ENVELOPE_STEPS + 1, per = ENVELOPE_FRAMES + 1;
+    r.env_piece_slack.assign(segs * size_t(ENVELOPE_STEPS), 0.0f);
+    if (r.env_frame_rest.size() == segs * per && r.env_samples.size() == segs * samples) {
+      for (size_t s = 0; s < segs; s++) {
+        for (size_t i = 0; i < size_t(ENVELOPE_STEPS); i++) {
+          const float2 a = r.env_samples[s * samples + i], e = r.env_samples[s * samples + i + 1] - a;
+          const float ee = dot(e, e);
+          float far = 0.0f;
+          for (size_t f = 0; f <= size_t(ENVELOPE_FRAMES / ENVELOPE_STEPS); f++) {
+            const float2 q = r.env_frame_rest[s * per + i * size_t(ENVELOPE_FRAMES / ENVELOPE_STEPS) + f];
+            const float h = ee > 1e-20f ? std::clamp(dot(q - a, e) / ee, 0.0f, 1.0f) : 0.0f;
+            far = std::max(far, length(a + e * h - q));
+          }
+          r.env_piece_slack[s * size_t(ENVELOPE_STEPS) + i] = far * 1.01f + 1e-7f;
+        }
+      }
+    }
+  }
   r.env_pre = m.deform_pre_blend > 0.0f ? std::log1p(m.deform_pre_blend) : 0.0f;
   r.env_post = m.deform_post_blend;
   if (r.env_weighted) {
@@ -4001,6 +4032,65 @@ static void cage_method_build(DeformShape &r)
   }
 }
 
+/* Which of Envelope Deform's frames are looked at: those of segments lo / per to hi / per (all, or Influence's one). */
+struct EnvFrames {
+  size_t lo = 0, hi = 0, count = 0, per = 0;
+  /* Frame `i`'s next frame: the next one along, across a join the next segment's first; the last has none (count). */
+  size_t next_of(size_t i) const
+  {
+    return i + 1 < hi ? i + 1 : count;
+  }
+};
+
+/* Whether frame `i`'s slab holds `p` (between its normal line and the next frame's; the first frame's also holds what is
+ * behind it, the last's what is ahead), and how near it is (to the chord on to the next frame). */
+static bool envelope_holds(const DeformShape &d, const EnvFrames &g, float2 p, size_t i, float &r_dist)
+{
+  const std::vector<float2> &at = d.env_frame_rest, &way = d.env_way_rest;
+  const float2 off = p - at[i];
+  const float u = dot(off, way[i]);
+  const size_t n = g.next_of(i);
+  bool ok;
+  if (n == g.count) {
+    ok = u >= 0.0f;
+  }
+  else {
+    ok = u >= 0.0f && dot(p - at[n], way[n]) < 0.0f;
+  }
+  if (i == g.lo && u < 0.0f) {
+    ok = true;
+  }
+  if (!ok) {
+    return false;
+  }
+  const float2 e = n == g.count ? float2(0.0f, 0.0f) : at[n] - at[i];
+  const float ee = dot(e, e);
+  const float h = ee > 1e-20f ? std::clamp(dot(off, e) / ee, 0.0f, 1.0f) : 0.0f;
+  r_dist = length(off - e * h);
+  return true;
+}
+
+/* `p` rebuilt from frame `bound` now: as far out from it, and as far along, stretched as the chord to the next frame
+ * stretched (not across a join, nor behind the first frame). */
+static float2 envelope_rebuild(const DeformShape &d, const EnvFrames &g, float2 p, size_t bound)
+{
+  const std::vector<float2> &at = d.env_frame_rest, &way = d.env_way_rest;
+  const float2 off = p - at[bound];
+  const float2 w = way[bound];
+  const float along = dot(off, w), out = dot(off, float2(-w.y, w.x));
+  const size_t n = g.next_of(bound);
+  const bool joined = n < g.count && n % g.per != 0;
+  float stretch = 1.0f;
+  if (joined && !(bound == g.lo && along < 0.0f)) {
+    const float was = length(at[n] - at[bound]);
+    if (was > 1e-12f) {
+      stretch = length(d.env_frame_now[n] - d.env_frame_now[bound]) / was;
+    }
+  }
+  const float2 now_at = d.env_frame_now[bound], now_way = d.env_way_now[bound];
+  return now_at + now_way * (along * stretch) + float2(-now_way.y, now_way.x) * out;
+}
+
 /* Envelope Deform, as Toon Boom Harmony's envelope deformer (its GR_Deform engine, fitted to Harmony 24 on 10,140
  * points to its own rounding): the line is a row of frames (envelope_frames_make), and each point binds to one, the
  * nearest of those whose slab holds it (between the frame's normal line and the next frame's). It keeps how far out it
@@ -4009,7 +4099,7 @@ static void cage_method_build(DeformShape &r)
  * end the end frame, neither stretched. A loop's closing corner is two free ends too: its first frame holds what is
  * behind it and its last what is ahead, and on a tie the first wins. No blending: where two places are about equally
  * near the drawing tears, as Harmony's does. */
-static float2 envelope_deform_map(const DeformShape &d, float2 p, int only = -1)
+static float2 envelope_standard_map(const DeformShape &d, float2 p, int only)
 {
   const size_t segs = d.env_rest.size(), per = ENVELOPE_FRAMES + 1, count = segs * per;
   if (segs == 0 || d.env_frame_rest.size() != count || d.env_frame_now.size() != count || only >= int(segs)) {
@@ -4018,33 +4108,8 @@ static float2 envelope_deform_map(const DeformShape &d, float2 p, int only = -1)
   /* `only` (Influence's Capsule): that segment's frames alone, its ends free ends, as one Harmony Curve node's. */
   const size_t seg_lo = only < 0 ? 0 : size_t(only), seg_hi = only < 0 ? segs : size_t(only) + 1;
   const size_t lo = seg_lo * per, hi = seg_hi * per;
-  const std::vector<float2> &at = d.env_frame_rest, &way = d.env_way_rest;
-  /* Frame `i`'s next frame: the next one along, across a join the next segment's first; the last has none. */
-  const auto next_of = [&](size_t i) { return i + 1 < hi ? i + 1 : count; };
-  /* Whether frame `i`'s slab holds `p`, and how near it is (to the chord on to the next frame). */
-  const auto holds = [&](size_t i, float &r_dist) {
-    const float2 off = p - at[i];
-    const float u = dot(off, way[i]);
-    const size_t n = next_of(i);
-    bool ok;
-    if (n == count) {
-      ok = u >= 0.0f;
-    }
-    else {
-      ok = u >= 0.0f && dot(p - at[n], way[n]) < 0.0f;
-    }
-    if (i == lo && u < 0.0f) {
-      ok = true;
-    }
-    if (!ok) {
-      return false;
-    }
-    const float2 e = n == count ? float2(0.0f, 0.0f) : at[n] - at[i];
-    const float ee = dot(e, e);
-    const float h = ee > 1e-20f ? std::clamp(dot(off, e) / ee, 0.0f, 1.0f) : 0.0f;
-    r_dist = length(off - e * h);
-    return true;
-  };
+  const EnvFrames g{lo, hi, count, per};
+  const auto holds = [&](size_t i, float &r_dist) { return envelope_holds(d, g, p, i, r_dist); };
 
   /* Near which samples to look: each segment's nearest of its ENVELOPE_STEPS pieces, by squared distance. */
   const size_t samples = ENVELOPE_STEPS + 1;
@@ -4121,20 +4186,263 @@ static float2 envelope_deform_map(const DeformShape &d, float2 p, int only = -1)
   if (bound == count) {
     return p;
   }
-  const float2 off = p - at[bound];
-  const float2 w = way[bound];
-  const float along = dot(off, w), out = dot(off, float2(-w.y, w.x));
-  const size_t n = next_of(bound);
-  const bool joined = n < count && n % per != 0;
-  float stretch = 1.0f;
-  if (joined && !(bound == lo && along < 0.0f)) {
-    const float was = length(at[n] - at[bound]);
-    if (was > 1e-12f) {
-      stretch = length(d.env_frame_now[n] - d.env_frame_now[bound]) / was;
+  return envelope_rebuild(d, g, p, bound);
+}
+
+/* Envelope's Seamless (Open Animate's own, 2026-11-03): Standard without its tears. Standard binds a point to its single
+ * nearest place on the line; where two places are about as near (inside a bend, or across a line that comes back near
+ * itself) the drawing tears along the line where they tie. Seamless finds each place that is nearest along its own
+ * stretch of the line (a branch: a dip in the distance from the point along the frames), rebuilds the point from each
+ * as Standard would from there alone, and blends them: the nearest leads, one SEAMLESS_FAR times as far off has no
+ * say (by the ratio, so the blend spreads evenly between them), and a shallow dip (one about to merge into its
+ * neighbour) has less, so a branch's say grows from nothing as it appears. Each say eases in and out with a
+ * smootherstep, so where the blend ends the drawing doesn't bend sharply. Where one place is nearest by far it is Standard exactly. And past a corner
+ * (where two segments meet at an angle, or a loop's ends), where Standard's wedge follows the first segment's end and
+ * tears where it meets the next one's slab, the wedge turns from the one's turn to the other's, the way across it. */
+static constexpr float SEAMLESS_FAR = 2.0f;
+static constexpr float SEAMLESS_SPREAD = 0.5f;
+
+/* 0 to 1 over 0 to 1, flat at both ends to its second derivative. */
+static float smoother01(float x)
+{
+  x = std::clamp(x, 0.0f, 1.0f);
+  return x * x * x * (x * (x * 6.0f - 15.0f) + 10.0f);
+}
+static constexpr int SEAMLESS_PIECE_FRAMES = ENVELOPE_FRAMES / ENVELOPE_STEPS;
+static_assert(ENVELOPE_FRAMES % ENVELOPE_STEPS == 0, "each sampled piece spans whole frames");
+
+/* The turn from the way frame `i` ran at rest to the way it runs now, in radians. */
+static float envelope_frame_turn(const DeformShape &d, size_t i)
+{
+  const float2 a = d.env_way_rest[i], b = d.env_way_now[i];
+  return std::atan2(cross(a, b), dot(a, b));
+}
+
+/* One branch: `p` as Standard rebuilds it from the frames around frame `k` alone, the wedge past a corner turned across. */
+static float2 envelope_seamless_branch(const DeformShape &d, const EnvFrames &g, float2 p, size_t k, bool loop)
+{
+  constexpr size_t AROUND = 4;
+  size_t bound = g.count;
+  float bound_dist = FLT_MAX;
+  const size_t from = k > g.lo + AROUND ? k - AROUND : g.lo, to = std::min(k + AROUND + 1, g.hi);
+  for (size_t i = from; i < to; i++) {
+    float dist;
+    if (envelope_holds(d, g, p, i, dist) && dist < bound_dist) {
+      bound_dist = dist;
+      bound = i;
     }
   }
-  const float2 now_at = d.env_frame_now[bound], now_way = d.env_way_now[bound];
-  return now_at + now_way * (along * stretch) + float2(-now_way.y, now_way.x) * out;
+  if (bound == g.count) {
+    bound = k;
+  }
+  /* A corner's wedge: the frame before it (a segment's last, or a loop's last) holds what is ahead of it, the frame
+   * after it (the next segment's first, or the loop's first) doesn't hold what is behind it. Across the wedge the turn
+   * goes from the one's to the other's. */
+  size_t before = g.count, after = g.count;
+  const size_t n = g.next_of(bound);
+  if (n < g.count && n % g.per == 0) {
+    before = bound;
+    after = n;
+  }
+  else if (loop && (bound == g.hi - 1 || bound == g.lo)) {
+    before = g.hi - 1;
+    after = g.lo;
+  }
+  if (before != g.count) {
+    const float2 corner = d.env_frame_rest[before];
+    const float ua = dot(p - corner, d.env_way_rest[before]), ub = dot(p - corner, d.env_way_rest[after]);
+    if (ua >= 0.0f && ub < 0.0f) {
+      const float across = ua / (ua - ub);
+      const float ta = envelope_frame_turn(d, before), tb = envelope_frame_turn(d, after);
+      float diff = tb - ta;
+      diff -= 2.0f * PI * std::round(diff / (2.0f * PI));
+      const float turn = ta + diff * across;
+      const float2 off = p - corner, r(std::cos(turn), std::sin(turn));
+      return d.env_frame_now[before] + float2(r.x * off.x - r.y * off.y, r.y * off.x + r.x * off.y);
+    }
+  }
+  return envelope_rebuild(d, g, p, bound);
+}
+
+static float2 envelope_seamless_map(const DeformShape &d, float2 p, int only)
+{
+  const size_t segs = d.env_rest.size(), per = ENVELOPE_FRAMES + 1, count = segs * per;
+  if (segs == 0 || d.env_frame_rest.size() != count || d.env_frame_now.size() != count || only >= int(segs)) {
+    return p;
+  }
+  const size_t seg_lo = only < 0 ? 0 : size_t(only), seg_hi = only < 0 ? segs : size_t(only) + 1;
+  const EnvFrames g{seg_lo * per, seg_hi * per, count, per};
+  const bool loop = d.env_closed && only < 0;
+  const std::vector<float2> &at = d.env_frame_rest;
+  const size_t samples = ENVELOPE_STEPS + 1;
+
+  if (d.env_piece_slack.size() != segs * size_t(ENVELOPE_STEPS)) {
+    return envelope_standard_map(d, p, only);
+  }
+  /* Each sampled piece's distance (squared), and the nearest. */
+  thread_local std::vector<float> piece_dd;
+  piece_dd.assign(segs * size_t(ENVELOPE_STEPS), FLT_MAX);
+  float best_dd = FLT_MAX;
+  for (size_t s = seg_lo; s < seg_hi; s++) {
+    for (size_t i = 0; i < size_t(ENVELOPE_STEPS); i++) {
+      const float2 a = d.env_samples[s * samples + i], e = d.env_samples[s * samples + i + 1] - a;
+      const float ee = dot(e, e);
+      const float h = ee > 1e-20f ? std::clamp(dot(p - a, e) / ee, 0.0f, 1.0f) : 0.0f;
+      const size_t k = s * size_t(ENVELOPE_STEPS) + i;
+      piece_dd[k] = dot(a + e * h - p, a + e * h - p);
+      best_dd = std::min(best_dd, piece_dd[k]);
+    }
+  }
+  const float least = std::max(d.env_size * 1e-4f, 1e-7f);
+  /* The frames of the pieces that may hold a place within the blend's reach, or the rise to it (a piece's frames stray
+   * from its chord by its slack): past it every frame is far enough to say nothing and stop every dip's rise. */
+  float best_slack = 0.0f;
+  for (size_t k = seg_lo * size_t(ENVELOPE_STEPS); k < seg_hi * size_t(ENVELOPE_STEPS); k++) {
+    best_slack = piece_dd[k] == best_dd ? std::max(best_slack, d.env_piece_slack[k]) : best_slack;
+  }
+  const float best = std::sqrt(best_dd) + best_slack;
+  const float reach = best * (SEAMLESS_FAR + SEAMLESS_SPREAD) + 2.0f * least;
+  thread_local std::vector<size_t> frame;
+  thread_local std::vector<float> dist;
+  frame.clear();
+  dist.clear();
+  for (size_t s = seg_lo; s < seg_hi; s++) {
+    for (size_t i = 0; i < size_t(ENVELOPE_STEPS); i++) {
+      const size_t k = s * size_t(ENVELOPE_STEPS) + i;
+      const float near = reach + d.env_piece_slack[k];
+      if (piece_dd[k] > near * near) {
+        continue;
+      }
+      const size_t first = s * per + i * size_t(SEAMLESS_PIECE_FRAMES);
+      for (size_t f = first; f <= first + size_t(SEAMLESS_PIECE_FRAMES); f++) {
+        if (frame.empty() || frame.back() < f) {
+          frame.push_back(f);
+        }
+      }
+    }
+  }
+  if (frame.empty()) {
+    return envelope_standard_map(d, p, only);
+  }
+  /* Each frame's distance from its chord on to the next, squared (as it orders the same). */
+  float nearest_dd = FLT_MAX;
+  for (const size_t i : frame) {
+    const size_t n = g.next_of(i);
+    const float2 off = p - at[i];
+    const float2 e = n == count ? float2(0.0f, 0.0f) : at[n] - at[i];
+    const float ee = dot(e, e);
+    const float h = ee > 1e-20f ? std::clamp(dot(off, e) / ee, 0.0f, 1.0f) : 0.0f;
+    dist.push_back(dot(off - e * h, off - e * h));
+    nearest_dd = std::min(nearest_dd, dist.back());
+  }
+  const float nearest = std::sqrt(nearest_dd);
+  const float spread = SEAMLESS_SPREAD * nearest + least;
+  /* Neighbours among the frames looked at: the next one along (a loop's last and first too), else none (m). */
+  const size_t m = frame.size();
+  const auto step = [&](size_t j, int way) -> size_t {
+    if (way > 0) {
+      if (j + 1 < m && frame[j + 1] == frame[j] + 1) {
+        return j + 1;
+      }
+      return loop && j + 1 == m && frame[j] == g.hi - 1 && frame[0] == g.lo ? 0 : m;
+    }
+    if (j > 0 && frame[j - 1] + 1 == frame[j]) {
+      return j - 1;
+    }
+    return loop && j == 0 && frame[0] == g.lo && frame[m - 1] == g.hi - 1 ? m - 1 : m;
+  };
+  /* The dips (a frame no nearer than the one before it and nearer than the one after), and from each the highest the
+   * distance rises on to the next dip along (none: a gap in the frames looked at, or an end), so a dip's rise walks dip
+   * to dip. */
+  thread_local std::vector<size_t> dip, dip_next, dip_prev;
+  thread_local std::vector<float> dip_top;
+  dip.clear();
+  for (size_t j = 0; j < m; j++) {
+    const size_t a = step(j, -1), b = step(j, 1);
+    if ((a == m || dist[a] >= dist[j]) && (b == m || dist[b] > dist[j])) {
+      dip.push_back(j);
+    }
+  }
+  const size_t dips = dip.size();
+  dip_next.assign(dips, dips);
+  dip_prev.assign(dips, dips);
+  dip_top.assign(dips, 0.0f);
+  for (size_t i = 0; i < dips; i++) {
+    /* The next dip along is the next one looked at, or round a loop the first. */
+    const size_t n = i + 1 < dips ? i + 1 : 0;
+    float top = dist[dip[i]];
+    size_t q = dip[i];
+    for (size_t steps = 0; steps < m; steps++) {
+      q = step(q, 1);
+      if (q == m) {
+        break;
+      }
+      top = std::max(top, dist[q]);
+      if (q == dip[n]) {
+        dip_next[i] = n;
+        dip_prev[n] = i;
+        break;
+      }
+    }
+    dip_top[i] = top;
+  }
+
+  float2 sum(0.0f, 0.0f);
+  float total = 0.0f;
+  const float no_say = SEAMLESS_FAR * nearest + least;
+  for (size_t i = 0; i < dips; i++) {
+    const size_t j = dip[i];
+    if (dist[j] >= no_say * no_say) {
+      continue;
+    }
+    /* How deep the dip is: how far the distance rises either way before it falls into a lower dip (past the frames
+     * looked at it rises far enough), grown the nearer this one is to that dip's bottom, without end as they tie. Every
+     * lower dip along counts, not just the first: where two dips about tie with a low ridge between, each then rises
+     * as far as the pair does, so the two say the same as they swap. */
+    const float dist_j = std::sqrt(dist[j]);
+    /* Once it has risen a spread, nothing further lowers its say (a rise of a spread already says all). */
+    const float risen = (dist_j + spread) * (dist_j + spread);
+    float rise = FLT_MAX;
+    for (const int way : {-1, 1}) {
+      float top = dist[j];
+      size_t from = i;
+      for (size_t steps = 0; steps < dips; steps++) {
+        const size_t q = way > 0 ? dip_next[from] : dip_prev[from];
+        if (q == dips || q == i) {
+          break;
+        }
+        top = std::max(top, dip_top[way > 0 ? from : q]);
+        if (top >= risen) {
+          break;
+        }
+        from = q;
+        if (dist[dip[q]] < dist[j]) {
+          const float tie = smoother01((dist_j - std::sqrt(dist[dip[q]])) / spread);
+          if (tie > 0.0f) {
+            rise = std::min(rise, (std::sqrt(top) - dist_j) / tie);
+          }
+        }
+      }
+    }
+    /* (no say from SEAMLESS_FAR times the nearest, and least further) */
+    const float ratio = (dist_j - nearest) / ((dist_j + least) * (1.0f - 1.0f / SEAMLESS_FAR));
+    const float w = (1.0f - smoother01(ratio)) * smoother01(rise / spread);
+    if (w <= 0.0f) {
+      continue;
+    }
+    sum = sum + envelope_seamless_branch(d, g, p, frame[j], loop) * w;
+    total += w;
+  }
+  if (total < 1e-6f) {
+    return envelope_standard_map(d, p, only);
+  }
+  return sum / total;
+}
+
+/* Envelope Deform's Standard or Seamless (`only`: Influence's Capsule's one segment, -1 all). */
+static float2 envelope_deform_map(const DeformShape &d, float2 p, int only = -1)
+{
+  return d.env_seamless ? envelope_seamless_map(d, p, only) : envelope_standard_map(d, p, only);
 }
 
 /* Influence's Capsule, as Harmony's Elliptic region of influence (measured on Harmony 24, 2026-11-03; see

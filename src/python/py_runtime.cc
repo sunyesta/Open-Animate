@@ -4761,7 +4761,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
       else if (modifier_is_deform(mod.type) && key == "envelope_method") {
         if (!envelope_method_from_id(value.cast<std::string>(), mod.deform_envelope_method)) {
-          throw py::value_error("envelope_method is STANDARD or BLENDED");
+          throw py::value_error("envelope_method is STANDARD, BLENDED or SEAMLESS");
         }
       }
       else if (modifier_is_deform(mod.type) && key == "pre_blend") {
