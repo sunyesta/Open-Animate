@@ -64,6 +64,12 @@ stroke off the curve) is CANCELLED with no undo step and nothing changed, not ev
 "make it so" op pressed twice (Aligned, Flat, a handle type) changes nothing the second time. Picks or selections
 stored as bare indexes or frames go stale when the thing they index moves: move the key under them, then edit.
 
+Edges and limits, which the eye file's probes reached only by reading the code: a move held at an edge (frame 1, a
+knob's box) must hold the whole selection together, so count the keys after every move left past frame 1, scale and
+copy; settings set with no undo step (the timeline's filters and Lock, overlays) stay through an undo of something
+else; a step pushed on another frame than the last compares that frame's pose, so an edit that changes nothing there
+pushes none; and every number an operator takes (a frame, a timing y, a handle) is tried at 1e6, INT_MAX and 1e30.
+
 For keying features (Auto-Freeze Keys, Key Together, Key Whole Drawing) one more: what every channel of the layer
 shows on each of its poses (frames keyed anywhere on it) is the same before and after an edit on another frame, with
 Smooth keys too (they lean on their neighbours, so a key bends the stretches past it), and right after opening a file
@@ -95,7 +101,8 @@ while probes keep reporting:
   a stretch shaped on the path, not every key) and the plain cases as they were.
 - The frozen app in `<sweep>/bin/` is the build before the fixes: write the new test as `# --- ` sections that each
   build their own scene (shared helpers in the header), then run each section on its own against both builds (exec
-  the header, then the section). Every section should fail on the frozen copy and pass on the new build, which proves
+  the header, then the section: `set OA_TEST=<test.py> & set OA_SEC=<n> & <exe> --background --python
+  scripts/section.py` prints `SECTION n PASS`). Every section should fail on the frozen copy and pass on the new build, which proves
   the tests without touching the source.
 - A test that passes with its fix undone tests nothing: undo the fix by hand once (`if (false && ...)`), rebuild and
   see the test fail before relying on it. Build its scene like the repro's (the eye file's Look At had an Eye Shape;
@@ -148,7 +155,7 @@ and the power cut zeroed a source file a mutation check had open (the runner now
 crash, check every folder for files of zero bytes and broken .pdb/.obj files before building).
 A power cut mid-run leaves each fuzz lane a "crash-or-hang" log with an empty hang dump, stopped at the same minute:
 not a bug, check the times against the shutdown before shrinking.
-`tests/test_motion_path_places.py` fails on a saturated CPU (its work never spreads over threads): rerun it quiet.
+`tests/test_motion_path_places.py` and `test_motion_path_on_path_fast.py` fail on a saturated CPU (their work never spreads over threads, "threads" 1): rerun them quiet.
 
 ## Pitfalls (harness mistakes that look like bugs)
 
