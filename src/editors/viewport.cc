@@ -790,6 +790,50 @@ static struct {
   bool prepared = false;
 } g_path_slide;
 
+/* Edit Timing's box, dragged from empty space: the dots inside picked (Ctrl takes them out); let go without moving,
+ * nothing picked. */
+static struct {
+  bool active = false;
+  bool box = false;
+  ImVec2 start;
+} g_path_dot_box;
+
+static void motion_path_dot_box_update(Context &C, const ViewMapping &view, ImDrawList *dl)
+{
+  auto &b = g_path_dot_box;
+  const ImGuiIO &io = ImGui::GetIO();
+  if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+    g_right_click_spent |= ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+    b = {};
+    return;
+  }
+  b.box |= ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f);
+  if (b.box) {
+    dl->AddRectFilled(b.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 20));
+    dl->AddRect(b.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 160));
+  }
+  if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+    return;
+  }
+  if (b.box) {
+    const float2 a = view.to_document(b.start), z = view.to_document(io.MousePos);
+    char text[128];
+    std::snprintf(text, sizeof(text), "%.9g,%.9g,%.9g,%.9g", a.x, a.y, z.x, z.y);
+    OpArgs args = {{"box", text}};
+    if (io.KeyCtrl) {
+      args["deselect"] = "1";
+    }
+    else if (io.KeyShift) {
+      args["extend"] = "1";
+    }
+    operator_call(C, "anim.motion_path_select_box", args);
+  }
+  else if (!io.KeyShift && !io.KeyCtrl) {
+    operator_call(C, "anim.motion_path_select", {{"none", "1"}});
+  }
+  b = {};
+}
+
 /* Ends a drag, a slide or a modal: the paths may take a new range again. */
 static void path_drag_finish()
 {
@@ -902,6 +946,10 @@ static void motion_path_tool_input(Context &C, Area &area, const ViewMapping &vi
     motion_path_slide_update(C, view);
     return;
   }
+  if (g_path_dot_box.active) {
+    motion_path_dot_box_update(C, view, dl);
+    return;
+  }
   if (!g.active && g_path_control_hover && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     const PathControlHover hc = *g_path_control_hover;
     OpArgs pick = motion_path_target_args(doc, hc.target);
@@ -989,6 +1037,13 @@ static void motion_path_tool_input(Context &C, Area &area, const ViewMapping &vi
     /* A bone or point under the press (of the active bone layer and its family, or the drawings being edited). */
     const bool thing_under = !io.KeyAlt && hovered && motion_path_pick_click(C, view, io.MousePos, false, false);
     const PathPress kind = motion_path_press_kind(false, hover_path != nullptr, thing_under);
+    if (timing && kind == PathPress::Deselect && hovered && !io.KeyAlt) {
+      /* Edit Timing: a box from empty space picks dots. */
+      g_path_dot_box = {};
+      g_path_dot_box.active = true;
+      g_path_dot_box.start = io.MousePos;
+      return;
+    }
     /* Off the paths the drawing is edited as with the Select tool: a point or handle clicked or dragged, a line
      * clicked, a box dragged from empty space. */
     if ((kind == PathPress::Pick || kind == PathPress::Deselect) && hovered && !io.KeyAlt &&
@@ -1249,6 +1304,28 @@ static struct {
   Document snapshot;
 } g_path_keys;
 
+/* G with Edit Timing: the dots picked, each slid along its path toward where the mouse's move would take it (with
+ * proportional editing when O is on; Shift finer); a click or Enter keeps it, Esc or a right click cancels. */
+struct PathDotGrab {
+  MotionPathTarget target;
+  int frame = 0;
+  /* Where it was drawn (document space), and from there to its own frame's place. */
+  float2 start;
+  Transform2D drawn;
+};
+static struct {
+  bool active = false;
+  bool again = false;
+  bool changed = false;
+  bool prepared = false;
+  std::vector<PathDotGrab> dots;
+  ImVec2 press;
+  float2 offset;
+  PreciseMouse precise;
+  /* As it was, for Esc; and put On Path (motion_path_edit_prepare), slid from each move. */
+  Document snapshot, base;
+} g_path_dots;
+
 /* A dashed line from `from` to `to` and `text` by the mouse, as the modals show. */
 static void path_modal_overlay(ImDrawList *dl, ImVec2 from, ImVec2 to, const std::string &text)
 {
@@ -1272,7 +1349,9 @@ static bool motion_path_edit_modals(Context &C, const ViewMapping &view, ImDrawL
   const ImGuiIO &io = ImGui::GetIO();
   auto &sc = g_path_scale;
   auto &gk = g_path_keys;
-  const bool idle = !sc.active && !gk.active && !g_path_drag.active && !g_path_slide.active;
+  auto &gd = g_path_dots;
+  const bool idle = !sc.active && !gk.active && !gd.active && !g_path_drag.active && !g_path_slide.active &&
+                    !g_path_dot_box.active;
   const auto start = [&]() {
     C.wm->modal_running = true;
     C.wm->modal_keys.clear();
@@ -1355,6 +1434,94 @@ static bool motion_path_edit_modals(Context &C, const ViewMapping &view, ImDrawL
       gk.snapshot = doc;
       start();
     }
+  }
+  if (hovered && wm.path_dots_request) {
+    wm.path_dots_request = false;
+    if (idle && !wm.path_dots.empty()) {
+      gd.dots.clear();
+      gd.snapshot = doc;
+      gd.base = doc;
+      gd.prepared = false;
+      std::vector<MotionPathTarget> prepared;
+      for (const auto &[t, f] : wm.path_dots) {
+        if (std::none_of(prepared.begin(), prepared.end(), [&](const MotionPathTarget &o) { return o.same(t); })) {
+          prepared.push_back(t);
+          gd.prepared |= motion_path_edit_prepare(gd.base, t);
+        }
+        PathDotGrab d;
+        d.target = t;
+        d.frame = f;
+        d.start = view.to_document(path_dot_screen(doc, view, paths, t, f));
+        float2 own;
+        for (const MotionPath &p : paths) {
+          if (p.target.same(t) && f != doc.frame_current && f >= p.first && f - p.first < int(p.points.size()) &&
+              motion_path_position_at(doc, t, f, own))
+          {
+            d.drawn = motion_path_drawn(p, f, own);
+          }
+        }
+        gd.dots.push_back(d);
+      }
+      gd.press = io.MousePos;
+      gd.offset = float2{0.0f, 0.0f};
+      gd.precise.reset(float2{io.MousePos.x, io.MousePos.y});
+      gd.changed = false;
+      gd.again = gd.prepared;
+      gd.active = true;
+      start();
+    }
+  }
+  if (gd.active) {
+    const auto end = [&](bool keep) {
+      if (keep && gd.changed) {
+        push_undo(C, "Slide Path Dots");
+      }
+      else if (!keep) {
+        doc = std::move(gd.snapshot);
+      }
+      gd.active = false;
+      gd.dots.clear();
+      gd.snapshot = Document();
+      gd.base = Document();
+      stop();
+    };
+    if (modal_key_take(C, "ESC", true) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+      g_right_click_spent |= ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+      end(false);
+      return true;
+    }
+    const bool confirm = modal_key_take(C, "RET", true) || modal_key_take(C, "KEYPAD_ENTER", true) ||
+                         ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    if (ts.proportional && (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_PageDown))) {
+      ts.path_proportional_size = std::clamp(
+          ts.path_proportional_size + (ImGui::IsKeyPressed(ImGuiKey_PageUp) ? 1.0f : -1.0f), 1.0f, 500.0f);
+      gd.again = true;
+    }
+    const float2 m = gd.precise.update(float2{io.MousePos.x, io.MousePos.y}, io.KeyShift);
+    const float2 offset = view.to_document(ImVec2(m.x, m.y)) - view.to_document(gd.press);
+    if (offset.x != gd.offset.x || offset.y != gd.offset.y || gd.again) {
+      gd.offset = offset;
+      gd.again = false;
+      PathSlide slide;
+      slide.proportional = ts.proportional;
+      slide.size = ts.path_proportional_size;
+      slide.falloff = ts.proportional_falloff;
+      std::vector<PathDotTo> to;
+      for (const PathDotGrab &d : gd.dots) {
+        to.push_back({d.target, d.frame, d.drawn.inverted().apply(d.start + offset)});
+      }
+      doc = gd.base;
+      gd.changed = motion_path_dots_slide(doc, to, slide) > 0 || gd.prepared;
+      g_path_drag.serial++;
+    }
+    for (const PathDotGrab &d : gd.dots) {
+      dl->AddCircle(path_dot_screen(doc, view, paths, d.target, d.frame), 6.5f, IM_COL32(255, 160, 40, 255), 0, 2.0f);
+    }
+    path_modal_overlay(dl, gd.press, io.MousePos, gd.dots.size() == 1 ? "Slide Dot" : "Slide Dots");
+    if (confirm) {
+      end(true);
+    }
+    return true;
   }
   if (sc.active) {
     const auto end = [&](bool keep) {
@@ -2209,7 +2376,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
   const bool timing_edit = tool && wm.tool_settings.path_brush == PathBrush::EditTiming;
   const bool path_edit = tool && wm.tool_settings.path_brush == PathBrush::Edit;
   const bool moving = path_hover_quiet_update(wm.modal_running || g_path_brush.active || motion_path_vector_active() ||
-                                              g_path_drag.active || g_path_slide.active);
+                                              g_path_drag.active || g_path_slide.active || g_path_dot_box.active);
   const bool hovering = hovered && editing && !moving &&
                         (!ImGui::IsAnyMouseDown() || (tool && ImGui::IsMouseClicked(ImGuiMouseButton_Left)));
   float best = pick_path_pixels() * pick_path_pixels();
@@ -2738,7 +2905,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
       return;
     }
   }
-  if (tool && (hovered || g_path_drag.active || motion_path_vector_active())) {
+  if (tool && (hovered || g_path_drag.active || motion_path_vector_active() || g_path_dot_box.active)) {
     /* A copy: a double click goes to the dot's frame, which can make the paths again. */
     const std::optional<MotionPath> pressed = hover_path ? std::optional<MotionPath>(*hover_path) : std::nullopt;
     const std::optional<PathHandlesShown> pressed_handle =
@@ -5929,8 +6096,9 @@ static const char *tool_hint(const ToolSettings &ts)
                  "F: radius  |  Esc: cancel";
       }
       if (ts.path_brush == PathBrush::EditTiming) {
-        return "Click a dot: select  |  Shift: add  |  Shift drag: Blend Speed  |  Double click: its frame  |  Drag a "
-               "dot: slide it (O: proportional)  |  Alt S: timing";
+        return "Click a dot: select  |  Shift: add  |  Drag empty space: box (Ctrl: take out)  |  Shift drag: Blend "
+               "Speed  |  Double click: its frame  |  Drag a dot: slide it (O: proportional)  |  G: slide the dots  |  "
+               "Alt S: timing";
       }
       return "Click a key: select  |  Shift: add  |  Double click: its frame  |  Drag a key: move it  |  Alt click: "
              "add a control point  |  Alt Shift: breakdown on the arc  |  G R S  |  V: handles  |  X: delete";

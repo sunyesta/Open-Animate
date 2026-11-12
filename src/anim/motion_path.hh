@@ -255,6 +255,19 @@ struct PathSlide {
   bool keep_order = true;
 };
 bool motion_path_slide(Document &doc, const MotionPathTarget &target, int frame, float2 at, const PathSlide &slide);
+/* G with Edit Timing: each dot (between keys) slid to the place on its path nearest its own `at` (document space on its
+ * frame), as motion_path_slide; with proportional editing the others around go by the falloff, each picked dot still
+ * landing where it is taken. Returns how many slid. */
+struct PathDotTo {
+  MotionPathTarget target;
+  int frame = 0;
+  float2 at;
+};
+int motion_path_dots_slide(Document &doc, const std::vector<PathDotTo> &dots, const PathSlide &slide);
+/* Edit Timing's box: the dots between keys (never a key, nor frame 0) of `paths` drawn inside the box from `a` to `b`
+ * (document space, as drawn). */
+std::vector<std::pair<MotionPathTarget, int>> motion_path_dots_in_box(const std::vector<MotionPath> &paths, float2 a,
+                                                                      float2 b);
 /* Alt S with Edit: the dots around the one on `frame` brought `factor` as far from it along the path (under 1
  * closer, so slower there; over 1 further, faster), the keys staying on their frames. On a key, the dots either
  * side of it: under 1 it eases into and out of that pose. The dots within `slide.size` frames scale, by the falloff

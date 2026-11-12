@@ -1664,6 +1664,157 @@ void motion_path_operators_register()
   }
   {
     OperatorType ot;
+    ot.idname = "anim.motion_path_dots_slide";
+    ot.name = "Slide Path Dots";
+    ot.description = "G with Edit Timing, kept: each dot picked (between keys) slid along its path to the place nearest "
+                     "where x=, y= (document space) would move it, the keys staying on their frames; proportional=1 "
+                     "slides the dots within size= frames too, by falloff= (the tool's settings when left out); the "
+                     "frame shown stays";
+    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_TIMING;
+    ot.poll = [](Context &C) { return C.document != nullptr && C.wm != nullptr && !C.wm->path_dots.empty(); };
+    ot.exec = [](Context &C) {
+      Document &doc = *C.document;
+      const ToolSettings &ts = C.wm->tool_settings;
+      PathSlide slide;
+      slide.proportional = op_has_arg(C, "proportional") ? op_arg_bool(C, "proportional") : ts.proportional;
+      slide.size = std::max(op_arg_float(C, "size", ts.path_proportional_size), 1.0f);
+      slide.falloff = ts.proportional_falloff;
+      if (op_has_arg(C, "falloff") && !proportional_falloff_from_identifier(op_arg(C, "falloff"), &slide.falloff)) {
+        report(ReportType::Error, "Unknown falloff '" + op_arg(C, "falloff") + "'");
+        return OpStatus::Cancelled;
+      }
+      animation_sync(doc);
+      std::vector<MotionPathTarget> targets;
+      for (const auto &[t, f] : C.wm->path_dots) {
+        if (std::none_of(targets.begin(), targets.end(), [&](const MotionPathTarget &o) { return o.same(t); })) {
+          targets.push_back(t);
+        }
+      }
+      path_edit_prepare(doc, targets);
+      const float2 offset{op_arg_float(C, "x", 0.0f), op_arg_float(C, "y", 0.0f)};
+      std::vector<PathDotTo> to;
+      for (const auto &[t, f] : C.wm->path_dots) {
+        float2 own;
+        if (layer_find(doc, t.layer) && motion_path_position_at(doc, t, f, own)) {
+          to.push_back({t, f, own + offset});
+        }
+      }
+      if (motion_path_dots_slide(doc, to, slide) == 0) {
+        report(ReportType::Warning, "Only dots between keys slide (not a key, a held frame or a stepped stretch)");
+        return OpStatus::Cancelled;
+      }
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
+  {
+    OperatorType ot;
+    ot.idname = "anim.motion_path_dots_grab";
+    ot.name = "Slide Path Dots";
+    ot.description = "G with the Motion Path tool's Edit Timing: slide the dots picked along their paths with the "
+                     "mouse (with proportional editing when O is on; Shift is finer; click or Enter keeps it, Esc or a "
+                     "right click cancels)";
+    ot.flag = 0;
+    ot.poll = [](Context &C) {
+      return path_edit_poll(C) && C.wm->tool_settings.path_brush == PathBrush::EditTiming && !C.wm->path_dots.empty();
+    };
+    ot.exec = [](Context &C) {
+      C.wm->path_dots_request = true;
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
+  {
+    OperatorType ot;
+    ot.idname = "anim.motion_path_select_box";
+    ot.name = "Box Select Path Dots";
+    ot.description = "Edit Timing's box: pick the dots between keys of the paths traced that are drawn inside "
+                     "box=\"x0,y0,x1,y1\" (document space); extend=1 (Shift) adds them, deselect=1 (Ctrl) takes them "
+                     "out; else they alone are picked (keys, other dots and path handles let go)";
+    ot.flag = OPTYPE_REGISTER;
+    ot.poll = [](Context &C) { return C.document != nullptr && C.wm != nullptr; };
+    ot.exec = [](Context &C) {
+      Document &doc = *C.document;
+      float box[4];
+      const std::string text = op_arg(C, "box");
+      const char *at = text.data(), *end = text.data() + text.size();
+      int read = 0;
+      for (; read < 4; read++) {
+        const std::from_chars_result r = std::from_chars(at, end, box[read]);
+        if (r.ec != std::errc()) {
+          break;
+        }
+        at = r.ptr;
+        if (read < 3) {
+          if (at == end || *at != ',') {
+            break;
+          }
+          at++;
+        }
+      }
+      if (read != 4 || at != end) {
+        report(ReportType::Warning, "box= is \"x0,y0,x1,y1\"");
+        return OpStatus::Cancelled;
+      }
+      PathToolSync sync{C};
+      const std::vector<MotionPathTarget> targets = motion_path_targets(C);
+      std::vector<std::pair<MotionPathTarget, int>> inside;
+      int first = 0, last = 0;
+      if (motion_path_range(doc, targets, first, last)) {
+        for (const auto &[t, f] : motion_path_dots_in_box(motion_paths_make(doc, targets, first, last),
+                                                          float2{box[0], box[1]}, float2{box[2], box[3]}))
+        {
+          int s = 0, e = 0;
+          if (motion_path_stretch_at(doc, t, f, s, e)) {
+            inside.push_back({t, f});
+          }
+        }
+      }
+      std::vector<std::pair<MotionPathTarget, int>> &dots = C.wm->path_dots;
+      const bool extend = op_arg_bool(C, "extend"), deselect = op_arg_bool(C, "deselect");
+      const auto has = [&](const MotionPathTarget &t, int f) {
+        return std::find_if(dots.begin(), dots.end(), [&](const auto &d) { return d.first.same(t) && d.second == f; });
+      };
+      /* Dots are never picked with path handles. */
+      C.wm->path_handle_picks.clear();
+      if (!extend && !deselect) {
+        std::vector<Layer *> all;
+        for (const Layer *l : document_layers_flat(doc)) {
+          all.push_back(layer_find(doc, l->id));
+        }
+        layers_deselect_keys(all);
+        dots.clear();
+      }
+      for (const auto &[t, f] : inside) {
+        const auto it = has(t, f);
+        if (deselect) {
+          if (it != dots.end()) {
+            dots.erase(it);
+          }
+          continue;
+        }
+        if (it == dots.end()) {
+          dots.push_back({t, f});
+        }
+      }
+      if (!deselect && !inside.empty()) {
+        /* The Path Timing panel shows the stretch of the first. */
+        const MotionPathTarget owner = motion_path_timing_owner(doc, inside.front().first);
+        C.wm->path_timing_target = owner;
+        C.wm->path_timing_frame = doc.frame_current;
+        for (const MotionPathStretch &s : motion_path_stretches(doc, owner)) {
+          if (inside.front().second > s.start && inside.front().second < s.end) {
+            C.wm->path_timing_end = s.end;
+          }
+        }
+      }
+      C.undo->mark_selection_changed();
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
+  {
+    OperatorType ot;
     ot.idname = "anim.motion_path_even_spacing";
     ot.name = "Even Spacing";
     ot.description = "The stretch frame=N is in (else each selected dot's) goes along its path at an even speed, the "

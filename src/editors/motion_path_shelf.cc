@@ -170,9 +170,10 @@ static const char *brush_tip(PathBrush brush)
              "on the selected keys, V their handle types, X deletes them. The dots take no clicks here (a double "
              "click goes to a dot's frame): Edit Timing edits them";
     case PathBrush::EditTiming:
-      return "When the path gets there: click a dot to select it (Shift drag: Blend Speed; double click: go to its "
-             "frame), drag a dot along its path (proportional editing: O). Alt S scales the timing around the dots "
-             "selected. Keys and handles show but take no clicks here: Edit Path edits them";
+      return "When the path gets there: click a dot to select it, or drag a box from empty space (Ctrl takes "
+             "away; Shift drag: Blend Speed; double click: go to its frame); drag a dot along its path, or G to "
+             "slide the dots selected (proportional editing: O). Alt S scales the timing around the dots selected. "
+             "Keys and handles show but take no clicks here: Edit Path edits them";
     case PathBrush::Grab:
       return "The Sculpt tool's Grab on the path: the path under the brush follows the mouse, the middle most, its "
              "keys, control points and handles fitted to it; each stretch keeps its timing. Shift: Smooth";

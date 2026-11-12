@@ -570,6 +570,8 @@ add_test(NAME motion_path_key_ends
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_key_ends.py)
 add_test(NAME motion_path_edit_split
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_edit_split.py)
+add_test(NAME motion_path_dots_grab
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_dots_grab.py)
 add_test(NAME motion_path_smooth_line
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_smooth_line.py)
 add_test(NAME timeline_summary_merge

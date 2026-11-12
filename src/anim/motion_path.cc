@@ -3320,6 +3320,48 @@ bool motion_path_slide(Document &doc, const MotionPathTarget &target, int frame,
   return true;
 }
 
+int motion_path_dots_slide(Document &doc, const std::vector<PathDotTo> &dots, const PathSlide &slide)
+{
+  OANIM_PROFILE("motion_path_dots_slide");
+  /* One after another (a dot slid pushes those in its way along, never past them). With proportional editing each
+   * slide moves the other dots picked too, by the falloff: once more without it, each picked dot lands where it is
+   * taken, the rest keeping what the soft slides gave them. */
+  std::vector<bool> slid(dots.size(), false);
+  for (size_t i = 0; i < dots.size(); i++) {
+    slid[i] = motion_path_slide(doc, dots[i].target, dots[i].frame, dots[i].at, slide);
+  }
+  if (slide.proportional && dots.size() > 1) {
+    PathSlide exact = slide;
+    exact.proportional = false;
+    for (size_t i = 0; i < dots.size(); i++) {
+      if (slid[i]) {
+        motion_path_slide(doc, dots[i].target, dots[i].frame, dots[i].at, exact);
+      }
+    }
+  }
+  return int(std::count(slid.begin(), slid.end(), true));
+}
+
+std::vector<std::pair<MotionPathTarget, int>> motion_path_dots_in_box(const std::vector<MotionPath> &paths, float2 a,
+                                                                      float2 b)
+{
+  const float2 lo{std::min(a.x, b.x), std::min(a.y, b.y)}, hi{std::max(a.x, b.x), std::max(a.y, b.y)};
+  std::vector<std::pair<MotionPathTarget, int>> dots;
+  for (const MotionPath &p : paths) {
+    for (size_t k = 0; k < p.points.size(); k++) {
+      const int f = p.first + int(k);
+      const float2 at = p.points[k];
+      if (f <= 0 || std::binary_search(p.keys.begin(), p.keys.end(), f) || at.x < lo.x || at.x > hi.x ||
+          at.y < lo.y || at.y > hi.y)
+      {
+        continue;
+      }
+      dots.push_back({p.target, f});
+    }
+  }
+  return dots;
+}
+
 bool motion_path_even_spacing(Document &doc, const MotionPathTarget &target, int frame)
 {
   bool done = false;

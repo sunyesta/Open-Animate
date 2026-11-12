@@ -199,6 +199,8 @@ KEYMAP = (
     ("Motion Path", "anim.motion_path_strength_adjust", "F", {"shift": True}),
     # The Edit brush: G R S on the selected keys, Alt S the timing around the selection, V handle types, X delete.
     ("Motion Path", "anim.motion_path_keys_grab", "G", {}),
+    # Edit Timing's G: the dots picked slid along their paths.
+    ("Motion Path", "anim.motion_path_dots_grab", "G", {}),
     ("Motion Path", "anim.motion_path_keys_rotate", "R", {}),
     ("Motion Path", "anim.motion_path_keys_scale", "S", {}),
     ("Motion Path", "anim.motion_path_scale_spacing_modal", "S", {"alt": True}),

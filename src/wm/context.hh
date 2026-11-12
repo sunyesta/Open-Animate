@@ -538,6 +538,8 @@ struct WindowManager {
   /* Alt S over the timeline: the timing chart scales the timing around the ticks and keys picked. */
   bool path_chart_scale_request = false;
   char path_keys_request = 0;
+  /* G with Edit Timing: the viewport slides the dots picked with the mouse. */
+  bool path_dots_request = false;
   char path_adjust_request = 0;
   /* The same for the Draw tool: the line's width ('R') or opacity ('S'). */
   char draw_adjust_request = 0;
