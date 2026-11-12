@@ -568,6 +568,8 @@ add_test(NAME motion_path_on_path
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_on_path.py)
 add_test(NAME motion_path_on_path_fast
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_on_path_fast.py)
+add_test(NAME motion_path_point_actions_fast
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_point_actions_fast.py)
 add_test(NAME motion_path_key_ends
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_key_ends.py)
 add_test(NAME motion_path_edit_split

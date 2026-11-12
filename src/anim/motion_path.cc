@@ -206,7 +206,9 @@ struct ActionOffsets {
   bool left_out = false;
 };
 struct KeptActionOffsets {
-  uint64_t layer = 0, bone = 0;
+  /* A bone's, or a point's (`point` set; `transform` what they add to its position, its setup its position change on
+   * frame 0). */
+  uint64_t layer = 0, bone = 0, point = 0;
   std::unique_ptr<Document> from;
   /* The bone's setup values as the actions took them: its keys on frame 0, else its plain values. */
   float2 setup_transform{0.0f, 0.0f}, setup_scale{1.0f, 1.0f};
@@ -224,6 +226,24 @@ template<typename T> static T setup_of(const Channel<T> &ch, const T &value)
   return ch.animated() ? ch.evaluate(0) : value - ch.from_action_bones;
 }
 
+/* A point's position change from its setup as evaluate leaves it (`ch` its position keys or a changed copy): its
+ * Transform as drawing_changes_from_values takes it. `r_setup`: where that is from. */
+static float2 point_change(const MeshPoint &p, const Channel<float2> &ch, float2 *r_setup = nullptr)
+{
+  float2 setup = p.setup_pos, change = p.transform;
+  if (!ch.has_last && !ch.animated()) {
+    setup = p.pos;
+    change = {};
+  }
+  else if (p.pos != setup + change) {
+    change = p.pos - setup;
+  }
+  if (r_setup) {
+    *r_setup = setup;
+  }
+  return change;
+}
+
 static bool bone_played(const Bone &b)
 {
   return !b.position_keys.actions.empty() || !b.angle_keys.actions.empty() || !b.scale_keys.actions.empty();
@@ -234,6 +254,13 @@ static bool bone_played_at(const Document &doc, const MotionPathTarget &t)
   const Layer *l = layer_find(doc, t.layer);
   const int i = l && t.bone ? bone_index(*l, t.bone) : -1;
   return i >= 0 && bone_played(l->bones[size_t(i)]);
+}
+
+static bool point_played_at(const Document &doc, const MotionPathTarget &t)
+{
+  const Layer *l = t.point && !t.bone ? layer_find(doc, t.layer) : nullptr;
+  const int i = l ? point_index(*l, t.point) : -1;
+  return i >= 0 && !l->drawing.points[size_t(i)].pos_keys.actions.empty();
 }
 
 /* Whether what plays `name` (its bone's turn, its knob's place, its own Frame, a fix's drivers) is had from that bone's
@@ -367,6 +394,43 @@ static bool offsets_inputs_same(KeptActionOffsets &kept, const Document &inputs)
 {
   Layer *fl = layer_find(*kept.from, kept.layer);
   const Layer *dl = layer_find(inputs, kept.layer);
+  if (kept.point) {
+    /* A point's: but for its position keys, in its layer and in the copies of it references hold (references_build
+     * copies an original's drawing, keys and all, into each reference of it, and of those). */
+    std::vector<uint64_t> holders = {kept.layer};
+    for (size_t n = 0; n < holders.size() && n < 64; n++) {
+      for (const Layer *l : document_layers_flat(inputs)) {
+        if (l->reference_source == holders[n] &&
+            std::find(holders.begin(), holders.end(), l->id) == holders.end())
+        {
+          holders.push_back(l->id);
+        }
+      }
+    }
+    struct Swapped {
+      std::vector<Key<float2>> *keys;
+      std::vector<Key<float2>> was;
+    };
+    std::vector<Swapped> swapped;
+    bool found = false;
+    for (const uint64_t id : holders) {
+      Layer *f = layer_find(*kept.from, id);
+      const Layer *d = layer_find(inputs, id);
+      const int fi = f ? point_index(*f, kept.point) : -1, di = d ? point_index(*d, kept.point) : -1;
+      if (fi < 0 || di < 0) {
+        continue;
+      }
+      found |= id == kept.layer;
+      std::vector<Key<float2>> &keys = f->drawing.points[size_t(fi)].pos_keys.keys;
+      swapped.push_back({&keys, std::move(keys)});
+      keys = d->drawing.points[size_t(di)].pos_keys.keys;
+    }
+    const bool same = found && *kept.from == inputs;
+    for (Swapped &s : swapped) {
+      *s.keys = std::move(s.was);
+    }
+    return same;
+  }
   const int fi = fl ? bone_index(*fl, kept.bone) : -1, di = dl ? bone_index(*dl, kept.bone) : -1;
   if (fi < 0 || di < 0) {
     return false;
@@ -409,7 +473,9 @@ struct ActionOffsetsScope {
     }
     const auto wanted = [&](const KeptActionOffsets &k) {
       return std::any_of(targets.begin(), targets.end(),
-                         [&](const MotionPathTarget &t) { return t.layer == k.layer && t.bone == k.bone; });
+                         [&](const MotionPathTarget &t) {
+                           return t.layer == k.layer && t.bone == k.bone && (t.bone || t.point == k.point);
+                         });
     };
     OffsetsFound &found = t_offsets_found;
     if (document != 0 && found.doc == &doc && found.document == document && found.kept == g_offsets_kept_count) {
@@ -450,7 +516,7 @@ static const ActionOffsets *action_offsets_kept(const Layer &owner, const Bone &
 {
   /* (Several may be good for the bone, each with frames of its own.) */
   for (const std::shared_ptr<const KeptActionOffsets> &k : t_offsets) {
-    if (k->layer != owner.id || k->bone != b.id) {
+    if (k->layer != owner.id || k->bone != b.id || k->point) {
       continue;
     }
     const auto it = k->frames.find(frame);
@@ -464,16 +530,34 @@ static const ActionOffsets *action_offsets_kept(const Layer &owner, const Bone &
   return nullptr;
 }
 
-/* Keeps what the actions added to `bone` of `layer` on frames of copies of `doc` worked out then (`added`). */
-static void action_offsets_keep(const Document &doc, uint64_t layer, uint64_t bone,
+/* What the actions add to point `p` of `layer` on `frame`, kept and good now, its setup (with `position` for its keys)
+ * as they took it. */
+static const ActionOffsets *point_offsets_kept(const Layer &layer, const MeshPoint &p, const Channel<float2> &position,
+                                               int frame)
+{
+  for (const std::shared_ptr<const KeptActionOffsets> &k : t_offsets) {
+    if (k->layer != layer.id || k->bone || k->point != p.id) {
+      continue;
+    }
+    const auto it = k->frames.find(frame);
+    if (it == k->frames.end() || !(setup_of(position, point_change(p, position)) == k->setup_transform)) {
+      continue;
+    }
+    return &it->second;
+  }
+  return nullptr;
+}
+
+/* Keeps what the actions added to `bone` of `layer` (or its point `point`) on frames of copies of `doc` worked out then
+ * (`added`). */
+static void action_offsets_keep(const Document &doc, uint64_t layer, uint64_t bone, uint64_t point,
                                 const std::vector<std::pair<int, ActionOffsets>> &added)
 {
   const Layer *l = layer_find(doc, layer);
-  const int i = l ? bone_index(*l, bone) : -1;
+  const int i = !l ? -1 : point ? point_index(*l, point) : bone_index(*l, bone);
   if (i < 0 || added.empty()) {
     return;
   }
-  const Bone &b = l->bones[size_t(i)];
   auto inputs = std::make_unique<Document>(doc);
   g_doc_copies++;
   if (!animation_inputs_only(*inputs)) {
@@ -483,13 +567,21 @@ static void action_offsets_keep(const Document &doc, uint64_t layer, uint64_t bo
   inputs->frame_current = 0;
   auto keep = std::make_shared<KeptActionOffsets>();
   keep->layer = layer;
-  keep->bone = bone;
-  keep->setup_transform = setup_of(b.position_keys, b.transform);
-  keep->setup_turn = setup_of(b.angle_keys, b.turn);
-  keep->setup_scale = setup_of(b.scale_keys, b.scale);
+  keep->bone = point ? 0 : bone;
+  keep->point = point;
+  if (point) {
+    const MeshPoint &p = l->drawing.points[size_t(i)];
+    keep->setup_transform = setup_of(p.pos_keys, point_change(p, p.pos_keys));
+  }
+  else {
+    const Bone &b = l->bones[size_t(i)];
+    keep->setup_transform = setup_of(b.position_keys, b.transform);
+    keep->setup_turn = setup_of(b.angle_keys, b.turn);
+    keep->setup_scale = setup_of(b.scale_keys, b.scale);
+  }
   std::lock_guard lock(g_offsets_mutex);
   for (std::shared_ptr<KeptActionOffsets> &k : g_offsets) {
-    if (k->layer == layer && k->bone == bone) {
+    if (k->layer == layer && k->bone == keep->bone && k->point == point) {
       /* The same document but for the bone's own keys (what the actions add doesn't come from them, as with kept
        * offsets found good): more frames of it, made anew (a scope may be reading the one kept). Another (the
        * document a control point's handles are worked out on, held as shown) is kept beside it, so neither loses the
@@ -1025,6 +1117,35 @@ static bool bone_values_apart(const Document &doc, const MotionPathTarget &t)
   return b >= 0 && !layer_driven(doc, t.layer) && action_offsets_apart(doc, *rig, rig->bones[size_t(b)], true);
 }
 
+/* As bone_values_apart, for point `t`: each action keying it played from bones' own values alone (a head turn's knob
+ * on its keys), no driver on its layer, not a reference, no detail levels (own_values_from_keys leaves those out too). */
+static bool point_values_apart(const Document &doc, const MotionPathTarget &t)
+{
+  const Layer *layer = t.point && !t.drawing ? layer_find(doc, t.layer) : nullptr;
+  const int i = layer ? point_index(*layer, t.point) : -1;
+  if (i < 0 || layer->is_reference() || layer_driven(doc, t.layer) || !doc.action.empty() ||
+      std::any_of(layer->drawing.points.begin(), layer->drawing.points.end(),
+                  [](const MeshPoint &p) { return p.detail.level > 0; }))
+  {
+    return false;
+  }
+  /* (Nothing in it is changed: action_owners only finds them.) */
+  const std::vector<Layer *> owners = action_owners(const_cast<Document &>(doc), t.layer);
+  const Bone none;
+  for (const auto &[name, keys] : layer->drawing.points[size_t(i)].pos_keys.actions) {
+    const Layer *owner = nullptr;
+    for (const Layer *o : owners) {
+      if (!owner && std::find(o->actions.begin(), o->actions.end(), name) != o->actions.end()) {
+        owner = o;
+      }
+    }
+    if (!owner || !action_played_apart(*owner, name, none, 0, true)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /* `fn(i, scratch)` for each i below `count`, side by side on the pool's threads (each works whole frames of a rig out on
  * a copy of `doc` in `scratch`, a document each thread keeps for its share: copied into again, it keeps what it has
  * room for). One at a time where bones have dynamics (see
@@ -1187,7 +1308,7 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
           q.own_scale = v.scale;
           q.own_angle = v.angle;
         }
-        else if (paths[i].target.bone) {
+        else if (paths[i].target.bone || paths[i].target.point) {
           /* (A frame whose actions' part isn't kept: every frame worked out.) */
           from_keys = false;
         }
@@ -1199,12 +1320,14 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
     else if (!t_offsets.empty()) {
       g_offsets_used += frames;
     }
-    /* Every path an Own Motion bone's whose own values nothing posing bones can change (bone_values_apart): the
-     * frames worked out values only, with dynamics left out, side by side. Where it really goes (and the space drawn
-     * relative to) is then wanted only where its own values aren't found, never for a bone that is there. */
+    /* Every path an Own Motion bone's or point's whose own values nothing posing bones can change (bone_values_apart,
+     * point_values_apart): the frames worked out values only, with dynamics left out, side by side. Where it really
+     * goes (and the space drawn relative to) is then wanted only where its own values aren't found, never for a bone
+     * or point that is there. */
     bool values_only = !from_keys && g_own_from_keys;
     for (size_t i = 0; values_only && i < paths.size(); i++) {
-      values_only = own[i] && bone_values_apart(doc, paths[i].target);
+      const MotionPathTarget &t = paths[i].target;
+      values_only = own[i] && (t.bone ? bone_values_apart(doc, t) : point_values_apart(doc, t));
     }
     std::optional<Document> calm;
     if (values_only && dynamics_in(doc)) {
@@ -1214,15 +1337,22 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
     }
     const Document &from = calm ? *calm : doc;
     const size_t runs = from_keys ? 0 : dynamics_in(from) ? 1 : place_lanes(frames);
-    /* Bones actions move, whose actions' part can be kept: what they add on each frame, from the frames worked out. */
+    /* Bones and points actions move, whose actions' part can be kept: what they add on each frame, from the frames
+     * worked out. */
     std::vector<char> keep_offsets(paths.size(), 0);
     std::vector<std::vector<std::pair<int, ActionOffsets>>> offsets(paths.size());
     for (size_t i = 0; !from_keys && g_own_from_keys && i < paths.size(); i++) {
       const MotionPathTarget &t = paths[i].target;
+      if (own[i] && !t.bone && t.point) {
+        const Layer *l = layer_find(doc, t.layer);
+        const int p = l ? point_index(*l, t.point) : -1;
+        keep_offsets[i] = p >= 0 && !l->drawing.points[size_t(p)].pos_keys.actions.empty() && !dynamics_in(doc) &&
+                          point_values_apart(doc, t);
+      }
       const Layer *rig = own[i] && t.bone ? layer_find(doc, t.layer) : nullptr;
       const int b = rig ? bone_index(*rig, t.bone) : -1;
-      keep_offsets[i] = b >= 0 && bone_played(rig->bones[size_t(b)]) && !dynamics_in(doc) &&
-                        action_offsets_apart(doc, *rig, rig->bones[size_t(b)]);
+      keep_offsets[i] |= b >= 0 && bone_played(rig->bones[size_t(b)]) && !dynamics_in(doc) &&
+                         action_offsets_apart(doc, *rig, rig->bones[size_t(b)]);
       if (keep_offsets[i]) {
         offsets[i].assign(frames, {});
       }
@@ -1251,7 +1381,14 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
             q.own_scale = v.scale;
             q.own_angle = v.angle;
           }
-          if (keep_offsets[i]) {
+          if (keep_offsets[i] && !paths[i].target.bone) {
+            const Layer *l = layer_find(copy, paths[i].target.layer);
+            const int p = l ? point_index(*l, paths[i].target.point) : -1;
+            if (p >= 0) {
+              offsets[i][k] = {f, {l->drawing.points[size_t(p)].pos_keys.from_action_bones}};
+            }
+          }
+          else if (keep_offsets[i]) {
             const Layer *rig = layer_find(copy, paths[i].target.layer);
             const int b = rig ? bone_index(*rig, paths[i].target.bone) : -1;
             if (b >= 0) {
@@ -1266,10 +1403,10 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
     for (size_t i = 0; i < paths.size(); i++) {
       const MotionPathTarget &t = paths[i].target;
       if (keep_offsets[i] && std::none_of(paths.begin(), paths.begin() + std::ptrdiff_t(i), [&](const MotionPath &o) {
-            return o.target.layer == t.layer && o.target.bone == t.bone;
+            return o.target.layer == t.layer && o.target.bone == t.bone && (t.bone || o.target.point == t.point);
           }))
       {
-        action_offsets_keep(doc, t.layer, t.bone, offsets[i]);
+        action_offsets_keep(doc, t.layer, t.bone, t.bone ? 0 : t.point, offsets[i]);
       }
     }
     f_kept.made = true;
@@ -1847,19 +1984,19 @@ bool own_values_from_keys(const Document &doc, const MotionPathTarget &t, const 
     }
     const MeshPoint &p = layer->drawing.points[size_t(i)];
     const Channel<float2> &ch = position ? *position : p.pos_keys;
-    if (!p.pos_keys.actions.empty() || !ch.actions.empty()) {
-      return false;
-    }
     /* Its Transform as drawing_changes_from_values takes it, then the position as drawing_values_from_changes. */
-    float2 setup = p.setup_pos, change = p.transform;
-    if (!ch.has_last && !ch.animated()) {
-      setup = p.pos;
-      change = {};
+    float2 setup;
+    const float2 change = point_change(p, ch, &setup);
+    /* What actions add (a head turn's keys on it), only as kept. */
+    float2 added{0.0f, 0.0f};
+    if (!p.pos_keys.actions.empty() || !ch.actions.empty()) {
+      const ActionOffsets *kept = point_offsets_kept(*layer, p, ch, frame);
+      if (!kept || kept->left_out) {
+        return false;
+      }
+      added = kept->transform;
     }
-    else if (p.pos != setup + change) {
-      change = p.pos - setup;
-    }
-    r = {setup + at(ch, change), {1.0f, 1.0f}, 0.0f};
+    r = {setup + at(ch, change) + added, {1.0f, 1.0f}, 0.0f};
     return true;
   }
   const Channel<float2> &ch = position ? *position : layer->position_keys;
@@ -2037,7 +2174,7 @@ static void held_places(const Document &copy, const MotionPathTarget &t, std::ve
   OwnValues probe;
   const bool own = motion_path_own_motion(copy, t);
   std::optional<ActionOffsetsScope> offsets;
-  if (own && t.bone && !places.empty()) {
+  if (own && (t.bone || t.point) && !places.empty()) {
     offsets.emplace(copy, std::vector<MotionPathTarget>{t}, kept ? kept->document : 0);
   }
   if (own && own_values_from_keys(copy, t, places.empty() ? 0 : places[0].frame, probe)) {
@@ -2053,8 +2190,8 @@ static void held_places(const Document &copy, const MotionPathTarget &t, std::ve
       bool got = false;
       if (made) {
         got = own_values_from_keys(copy, t, places[i].frame, v, &changed);
-        /* (A bone actions move, on a frame whose actions' part isn't kept: worked out below.) */
-        if (!got && t.bone && bone_played_at(copy, t)) {
+        /* (A bone or point actions move, on a frame whose actions' part isn't kept: worked out below.) */
+        if (!got && (t.bone ? bone_played_at(copy, t) : point_played_at(copy, t))) {
           continue;
         }
       }
@@ -2121,7 +2258,7 @@ static void held_places(const Document &copy, const MotionPathTarget &t, std::ve
         got.push_back(added[i]);
       }
     }
-    action_offsets_keep(copy, t.layer, t.bone, got);
+    action_offsets_keep(copy, t.layer, t.bone, 0, got);
   }
   /* Then placed: Own Motion's own values put on the document as shown, its own constraints off. A bone posed with the
    * rest of its bones as shown, with no copy of the document; a point or a layer on a copy of it, one a thread. */

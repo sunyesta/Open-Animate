@@ -121,6 +121,16 @@ PENDING = [
      'tests/test_motion_path_on_path_fast.py'),
     ('src/anim/motion_path.cc', '    kept.entries.clear();\n    kept.trials.clear();', '    kept.entries.clear();',
      'kept On Path trials let go when the document changes', 'tests/test_motion_path_on_path_fast.py'),
+    ('src/anim/motion_path.cc', '        if (l->reference_source == holders[n] &&',
+     '        if (false && l->reference_source == holders[n] &&',
+     'a point\'s kept action offsets: the copies of its keys references hold', 'tests/test_motion_path_point_actions_fast.py'),
+    ('src/anim/motion_path.cc', '      added = kept->transform;\n', '      return false;\n',
+     'a point\'s path from its keys and what its actions add, kept', 'tests/test_motion_path_point_actions_fast.py'),
+    ('src/anim/motion_path.cc',
+     '      values_only = own[i] && (t.bone ? bone_values_apart(doc, t) : point_values_apart(doc, t));',
+     '      values_only = own[i] && (t.bone ? bone_values_apart(doc, t) : true);',
+     'a point\'s path values only just where its actions play from bones\' own values',
+     'tests/test_motion_path_point_actions_fast.py'),
 ]
 
 def build(root):

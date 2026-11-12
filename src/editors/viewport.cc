@@ -633,6 +633,10 @@ static struct {
   Document snapshot;
   /* Each update changes what's drawn without an undo step: this tells the cache. */
   uint64_t serial = 0;
+  /* Where the mouse was, and Ctrl and Alt, when it last moved something: held still, nothing is done again (each move
+   * works the paths out again). */
+  ImVec2 moved_at;
+  int moved_keys = -1;
 } g_path_drag;
 
 /* The control point under the mouse (set as the paths draw): its stretch's end key, which one, its nearest frame and
@@ -1224,6 +1228,12 @@ static void motion_path_tool_input(Context &C, Area &area, const ViewMapping &vi
   if (!g.dragging && dx * dx + dy * dy < 4.0f * 4.0f) {
     return;
   }
+  const int keys = (io.KeyCtrl ? 1 : 0) | (io.KeyAlt ? 2 : 0);
+  if (g.dragging && io.MousePos.x == g.moved_at.x && io.MousePos.y == g.moved_at.y && keys == g.moved_keys) {
+    return;
+  }
+  g.moved_at = io.MousePos;
+  g.moved_keys = keys;
   if (!g.dragging && g.control < 0) {
     /* A path an action moves edited as it shows (motion_path_edit_prepare), a handle's key added where it has none;
      * Esc goes back to the snapshot, before. */
@@ -1306,6 +1316,10 @@ static struct {
   NumInput num;
   PreciseMouse precise;
   Document snapshot;
+  /* What was last applied: held still, nothing is done again (each change works the paths out again). */
+  bool applied = false;
+  float2 applied_offset;
+  float applied_angle = 0.0f, applied_factor = 0.0f;
 } g_path_keys;
 
 /* G with Edit Timing: the dots picked, each slid along its path toward where the mouse's move would take it (with
@@ -1421,6 +1435,7 @@ static bool motion_path_edit_modals(Context &C, const ViewMapping &view, ImDrawL
         }
       }
       gk.active = true;
+      gk.applied = false;
       gk.kind = kind;
       gk.together = together;
       gk.keys = std::move(keys);
@@ -1644,19 +1659,27 @@ static bool motion_path_edit_modals(Context &C, const ViewMapping &view, ImDrawL
       angle = gk.num.value(0, angle * 180.0f / 3.14159265f) * 3.14159265f / 180.0f;
       factor = gk.num.value(0, factor);
     }
-    doc = gk.snapshot;
-    if (gk.together) {
-      /* About the pivot drawn, as it was when it began. */
-      const float2 about = view.to_document(gk.pivot);
-      motion_path_picks_transform(doc, gk.keys, gk.handles, gk.kind, offset, angle, factor, &about);
+    if (!gk.applied || offset.x != gk.applied_offset.x || offset.y != gk.applied_offset.y ||
+        angle != gk.applied_angle || factor != gk.applied_factor)
+    {
+      gk.applied = true;
+      gk.applied_offset = offset;
+      gk.applied_angle = angle;
+      gk.applied_factor = factor;
+      doc = gk.snapshot;
+      if (gk.together) {
+        /* About the pivot drawn, as it was when it began. */
+        const float2 about = view.to_document(gk.pivot);
+        motion_path_picks_transform(doc, gk.keys, gk.handles, gk.kind, offset, angle, factor, &about);
+      }
+      else if (!gk.handles.empty()) {
+        motion_path_handles_transform(doc, gk.handles, gk.kind, offset, angle, factor);
+      }
+      else {
+        motion_path_keys_transform(doc, gk.keys, gk.kind, offset, angle, factor);
+      }
+      g_path_drag.serial++;
     }
-    else if (!gk.handles.empty()) {
-      motion_path_handles_transform(doc, gk.handles, gk.kind, offset, angle, factor);
-    }
-    else {
-      motion_path_keys_transform(doc, gk.keys, gk.kind, offset, angle, factor);
-    }
-    g_path_drag.serial++;
     std::string text;
     if (gk.kind == 'G') {
       text = "Move " + gk.num.shown(0, offset.x, "%.3f") + ", " + gk.num.shown(1, offset.y, "%.3f");
