@@ -574,6 +574,8 @@ add_test(NAME motion_path_sweep_guards
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_sweep_guards.py)
 add_test(NAME aligned_handle_keys
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_aligned_handle_keys.py)
+add_test(NAME sweep_rig_guards
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sweep_rig_guards.py)
 add_test(NAME timeline_key_moves
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_timeline_key_moves.py)
 add_test(NAME motion_path_offsets_other_paths

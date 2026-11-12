@@ -179,6 +179,15 @@ PENDING = [
     ('src/anim/motion_path.cc', '    if (ka != keys.end() && kb != keys.end() && kb == ka + 1) {',
      '    if (false && ka != keys.end() && kb != keys.end() && kb == ka + 1) {',
      'a breakdown on a curved path goes on the path', 'tests/test_motion_path_sweep_guards.py'),
+    ('src/anim/channel.cc', '    if (keys.size() < 2 && !actions.contains("")) {',
+     '    if (keys.size() < 2) {',
+     'keys put in an action leave the mainline On Path', 'tests/test_sweep_rig_guards.py'),
+    ('src/anim/animation.cc', '        (ch == &b.position_keys || ch == &b.angle_keys || ch == &b.scale_keys))',
+     '        bone_fix_traces(b, ch))',
+     'a fix leaves every channel of a bone it follows', 'tests/test_sweep_rig_guards.py'),
+    ('src/anim/deform.cc', '[&](uint64_t reader) { return reader_in(doc, reader, group->id); }) ||',
+     '[&](uint64_t reader) { return layer_inside(doc, reader, group->id); }) ||',
+     "a group's reference reads a deform's shape as its original does", 'tests/test_sweep_rig_guards.py'),
 
 ]
 

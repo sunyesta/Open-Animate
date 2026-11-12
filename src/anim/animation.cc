@@ -3344,11 +3344,14 @@ BoneFixPlay bone_fix_play(const Layer &owner, const BoneFix &fix, bool edited)
   });
 }
 
-/* Whether channel `ch` of `owner` traces one of `fix`'s bones' line. */
+/* Whether channel `ch` of `owner` moves one of the bones `fix` follows (its place, turn or size: the one tracing its
+ * line and the rest), which the fix never moves; keys of theirs in it play only where it is edited. */
 static bool bone_fix_tracing(const Layer &owner, const BoneFix &fix, const void *ch)
 {
   for (const Bone &b : owner.bones) {
-    if (std::find(fix.follows.begin(), fix.follows.end(), b.id) != fix.follows.end() && bone_fix_traces(b, ch)) {
+    if (std::find(fix.follows.begin(), fix.follows.end(), b.id) != fix.follows.end() &&
+        (ch == &b.position_keys || ch == &b.angle_keys || ch == &b.scale_keys))
+    {
       return true;
     }
   }
@@ -3791,7 +3794,9 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
           }
         }
       }
-      if (const auto it = src.scale_keys.actions.find(fix.name); it != src.scale_keys.actions.end()) {
+      if (const auto it = src.scale_keys.actions.find(fix.name);
+          it != src.scale_keys.actions.end() && !bone_fix_tracing(owner, fix, &src.scale_keys))
+      {
         float2 d;
         if (bone_fix_delta(it->second, setup_of(src.scale_keys, src.scale), at, false, d)) {
           b.scale += d;

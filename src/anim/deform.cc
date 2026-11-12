@@ -527,6 +527,18 @@ GroupDeformReading::~GroupDeformReading()
   g_group_readers.pop_back();
 }
 
+/* Whether a reader is in the group: or its original is, for a Match Original reference, which those groups bend as they
+ * bend the original (group_deforms). Reading its shape with them as well, the reference was bent by them twice. */
+static bool reader_in(const Document &doc, uint64_t reader, uint64_t group)
+{
+  if (layer_inside(doc, reader, group)) {
+    return true;
+  }
+  const Layer *layer = layer_find(doc, reader);
+  const Layer *original = layer ? matched_original(doc, *layer) : nullptr;
+  return original && layer_inside(doc, original->id, group);
+}
+
 struct GroupDeform {
   const Layer *group;
   const Modifier *modifier;
@@ -549,7 +561,7 @@ static std::vector<GroupDeform> group_deforms(const Document &doc, const Layer &
     {
       if (group->modifiers.empty() ||
           std::any_of(g_group_readers.begin(), g_group_readers.end(),
-                      [&](uint64_t reader) { return layer_inside(doc, reader, group->id); }) ||
+                      [&](uint64_t reader) { return reader_in(doc, reader, group->id); }) ||
           std::any_of(found.begin(), found.end(), [&](const GroupDeform &g) { return g.group == group; }))
       {
         continue;

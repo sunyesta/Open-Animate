@@ -21,6 +21,12 @@ save/open changes nothing, and a point weighted wholly to one plain bone moves r
 Python data edits (bone_set, set_point, frame changes) are not undo steps by design, so the undo checks wait until an
 operator has pushed after them.
 
+Also: mpath_edit (moves and handle drags on a path, undo and frame changes between, the kept offsets checked against
+working each frame out afresh), ref_op (references made of drawings and groups, Match Original and Follow Animation
+toggled) and ref_check (each reference's drawings shown where its original's are). OA_FUZZ_X_W weights the three (0
+leaves them out); OA_FUZZ_NO_PEEK=1 leaves fix_peek out; OA_FUZZ_SAVE_FAIL=<path> saves a copy of the document as it
+failed, to write a repro from. Both mpath ops put the layers' selection back after (a Grab acts on every selected layer).
+
 A watchdog (OA_FUZZ_HANG seconds per op, default 150) dumps every thread's stack to <OUT>/fuzz_hang_<seed>.txt and
 exits. The log is written before each op naming it as a "crash-or-hang" (removed once it finishes), so a crash or a
 hang leaves a log that shrink.py shrinks like any other failure.
@@ -1161,6 +1167,259 @@ def check_fixes():
                               f"{f['start']}-{f['end']} {f}")
 
 
+
+
+# --- Motion path edits against the kept offsets, references, a reference matching its original ----------------------
+X_W = float(os.environ.get("OA_FUZZ_X_W", "1"))
+if os.environ.get("OA_FUZZ_NO_PEEK") == "1":   # (fix_peek's known On Path failure masks everything else)
+    TABLE["fix_peek"] = (0.0,) + TABLE["fix_peek"][1:]
+ACTION_POINT_LAYERS = ("Lip_Line_X", "Top_Lip_X", "Bot_Lip_X", "Top_Teeth_X", "Bot_Teeth_X", "Tongue",
+                       "Side_Mouth_Cutter_L", "Mouth_Cage", "Front_Nose_L", "Front_Nose_R", "Hair_Head_X",
+                       "Eye_White_L", "Eye_Lash_L", "Pupil_Warp_L", "HeadBot_X", "Hair_Bun_X", "InsideMouth_X")
+
+
+@op("mpath_edit", 6 * X_W, "py")
+def _(rng):
+    if rng.random() < 0.7:
+        ds = [d for d in drawings() if d.name in ACTION_POINT_LAYERS] or drawings()
+        if not ds:
+            return None
+        d = rng.choice(ds)
+        t = {"layer": d.id, "i": rng.randrange(d.point_count)}
+    else:
+        rig = a_rig(rng)
+        if not rig or not rig.bones:
+            return None
+        t = {"rig": rig.id, "bone": rng.choice(bone_names(rig))}
+    other = None
+    if rng.random() < 0.5:
+        rig = a_rig(rng)
+        if rig and rig.bones:
+            other = {"rig": rig.id, "bone": rng.choice(bone_names(rig))}
+    edits_ = [{"kind": rng.choice(["move", "move", "move", "handle", "handle", "undo", "frame"]),
+               "f": rng.randint(1, FRAMES), "pick": rng.random(), "d": [rng.gauss(0, 0.03), rng.gauss(0, 0.03)],
+               "side": rng.choice(["IN", "OUT"]), "broken": rng.random() < 0.2} for _ in range(rng.randint(1, 4))]
+    return dict(t, other=other, own=rng.random() < 0.75, all=rng.random() < 0.6, at=rng.randint(1, FRAMES),
+                edits=edits_)
+
+
+def mp_grab_k(kept):
+    out = []
+    for p in wm.motion_paths(kept):
+        out.append((p["label"], p["first"], [tuple(q) for q in p["points"]],
+                    [(h["frame"], h["in"], h["out"]) for h in p["handles"]]))
+    return out
+
+
+def rng_pick(keyed, e):
+    return keyed[int(e["pick"] * len(keyed)) % len(keyed)] if e["pick"] < 0.7 else e["f"]
+
+
+def apply_mpath_edit(op):
+    if "rig" in op:
+        tl = find_layer(op["rig"])
+        if tl is None or op["bone"] not in bone_names(tl):
+            return "skip"
+        kw = {"layer": str(tl.id), "bone": op["bone"]}
+    else:
+        tl = find_layer(op["layer"])
+        if tl is None or op["i"] >= tl.point_count or not editable(tl):
+            return "skip"
+        kw = {"layer": str(tl.id), "point": str(tl.point_ids[op["i"]])}
+    keep = (doc.motion_paths, doc.path_all, doc.path_own_motion, wm.tool(), doc.frame_current)
+    log = []
+    try:
+        for other in L.all():
+            other.selected = False
+        o = op.get("other")
+        orig = find_layer(o["rig"]) if o else None
+        if orig is not None and o["bone"] in bone_names(orig) and orig.id != tl.id:
+            L.active = orig
+            ops.armature.select_none()
+            orig.select_bone(o["bone"])
+            orig.selected = True
+        L.active = tl
+        if "rig" in op:
+            ops.armature.select_none()
+            tl.select_bone(op["bone"])
+        else:
+            ops.mesh.select_none()
+            tl.select_points([op["i"]])
+        tl.selected = True
+        doc.motion_paths = True
+        doc.path_all = op["all"]
+        if wm.tool() != "MOTION_PATH":
+            ops.wm.tool_motion_path()
+        doc.path_own_motion = op["own"]
+        doc.frame_current = op["at"]
+        wm.motion_paths(True)   # what the viewport keeps, from here through the edits
+        for e in op["edits"]:
+            paths = wm.motion_paths(True)
+            if "rig" in op:
+                mine = [p for p in paths if p["layer"] == tl.id and p["label"].startswith(op["bone"] + " ")]
+            else:
+                mine = [p for p in paths if p["layer"] == tl.id]
+            if e["kind"] == "frame":
+                doc.frame_current = e["f"]
+                log.append(("frame", e["f"]))
+                continue
+            if e["kind"] == "undo":
+                ops.ed.undo()
+                log.append(("undo",))
+                continue
+            if not mine:
+                log.append(("no path",))
+                break
+            p = mine[0]
+            keyed = [h["frame"] for h in p["handles"]]
+            f = rng_pick(keyed, e) if keyed else e["f"]
+            if e["kind"] == "move":
+                if not (0 <= f - p["first"] < len(p["points"])):
+                    continue
+                x, y = p["points"][f - p["first"]]
+                r = ops.anim.motion_path_move(frame=str(f), x=str(x + e["d"][0]), y=str(y + e["d"][1]), **kw)
+                log.append(("move", f, r))
+            else:
+                h = next((h for h in p["handles"] if h["frame"] == f and h[e["side"].lower()]), None)
+                if h is None:
+                    continue
+                x, y = h[e["side"].lower()]
+                r = ops.anim.motion_path_handle(frame=str(f), side=e["side"], x=str(x + e["d"][0]),
+                                                y=str(y + e["d"][1]), broken="1" if e["broken"] else "0", **kw)
+                log.append(("handle", f, e["side"], r))
+        kept = mp_grab_k(True)
+        quick = mp_grab_k(False)
+        wm.motion_path_own_from_keys(False)
+        try:
+            worked = mp_grab_k(False)
+        finally:
+            wm.motion_path_own_from_keys(True)
+        d = mp_first_diff(kept, worked, 1e-4)
+        if d:
+            dq = mp_first_diff(quick, worked, 1e-4)
+            raise Failure(f"mpath-kept: on frame {doc.frame_current} (own {op['own']}, all {op['all']}) after {log}, "
+                          f"the paths {[p[0] for p in kept]} kept through the edits differ from working them out at {d}"
+                          f" (shortcuts not kept: {dq or 'same as worked out'})")
+        f0 = doc.frame_current
+        seen = pose()
+        doc.frame_current = f0 + 1
+        doc.frame_current = f0
+        w, k = pose_diff(seen, pose())
+        if w > 1e-4:
+            raise Failure(f"frame-shown: after the path edits {log}, frame {f0} shown differs from it left and reached "
+                          f"again by {w:.5f} at {k}")
+    finally:
+        doc.frame_current = keep[4]
+        if keep[3] != "MOTION_PATH":
+            getattr(ops.wm, "tool_" + keep[3].lower())()
+        doc.motion_paths, doc.path_all, doc.path_own_motion = keep[0], keep[1], keep[2]
+    return "py-done"
+
+
+def refs():
+    return [l for l in L.all() if l.reference_source is not None]
+
+
+@op("ref_op", 3 * X_W)
+def _(rng):
+    rs = refs()
+    x = rng.random()
+    if x < 0.25 or not rs:
+        ls = [l for l in L.all() if l.type in ("VECTOR", "GROUP") and l.reference_source is None]
+        return ls and {"what": "make", "layer": rng.choice(ls).id}
+    r = rng.choice(rs)
+    what = rng.choice(["edit_points", "edit_points", "edit_points", "follow_animation", "match_original",
+                       "revert", "apply", "sync", "remove_unused", "break"])
+    return {"what": what, "layer": r.id, "on": rng.random() < 0.6, "kind": rng.choice(["ALL", "POINTS", "POINTS"])}
+
+
+def apply_ref(op):
+    layer = find_layer(op["layer"])
+    if layer is None:
+        return "skip"
+    L.active = layer
+    w = op["what"]
+    if w == "make":
+        return ops.layer.make_reference()
+    if layer.reference_source is None:
+        return "skip"
+    if w in ("edit_points", "follow_animation", "match_original"):
+        return ops.layer.reference_set(**{w: "1" if op["on"] else "0"})
+    if w == "revert":
+        return ops.layer.reference_revert(kind=op["kind"])
+    if w == "apply":
+        return ops.layer.reference_apply(kind=op["kind"])
+    if w == "sync":
+        return ops.layer.reference_sync(layer=str(layer.id))
+    if w == "remove_unused":
+        return ops.layer.reference_remove_unused()
+    return ops.layer.break_reference()
+
+
+@op("ref_check", 2 * X_W, "meta")
+def _(rng):
+    return refs() and {"frames": [frame(rng) for _ in range(3)]}
+
+
+def apply_ref_check(op):
+    """A reference with no changes of its own, following its original's animation, posed as it: shows exactly as its
+    original on every frame."""
+    if doc.action:
+        return "skip"
+    plain = []
+    for r in refs():
+        s = r.reference_source
+        if s is None or r.type != "VECTOR" or s.type != "VECTOR":
+            continue
+        st = r.reference() if callable(r.reference) else r.reference
+        ov = r.reference_overrides() if callable(r.reference_overrides) else r.reference_overrides
+        if not st.get("follow_animation", True) or not st.get("match_original", True):
+            continue
+        if ov["points"] or ov["handles"] or ov["channels"] or ov["weights"]:
+            continue
+        plain.append((r, s))
+    if not plain:
+        return "skip"
+    f0 = doc.frame_current
+    try:
+        for f in op["frames"]:
+            doc.frame_current = f
+            for r, s in plain:
+                a, b = r.shown()[0], s.shown()[0]
+                if len(a) != len(b):
+                    raise Failure(f"ref-match: reference {r.name!r} of {s.name!r} shows {len(a)} points, its original "
+                                  f"{len(b)} on frame {f}")
+                w = max([math.hypot(p[0] - q[0], p[1] - q[1]) for p, q in zip(a, b)] + [0.0])
+                if w > 1e-4:
+                    raise Failure(f"ref-match: reference {r.name!r} (no changes of its own) of {s.name!r} shows off "
+                                  f"its original by {w:.5f} on frame {f}")
+    finally:
+        doc.frame_current = f0
+    return "py-done"
+
+
+def apply_extra(op):
+    o = op["op"]
+    if o in ("mpath", "mpath_edit"):   # (restores the layers' selection after: a Grab acts on every selected layer)
+        sel = {l.id: l.selected for l in L.all()}
+        act = L.active
+        try:
+            return apply_mpath(op) if o == "mpath" else apply_mpath_edit(op)
+        finally:
+            for l in L.all():
+                if l.id in sel:
+                    l.selected = sel[l.id]
+            if act is not None and find_layer(act.id) is not None:
+                L.active = find_layer(act.id)
+    if o == "mpath_edit":
+        return apply_mpath_edit(op)
+    if o == "ref_op":
+        return apply_ref(op)
+    if o == "ref_check":
+        return apply_ref_check(op)
+    return None
+
+
 ONLY = [n for n in os.environ.get("OA_FUZZ_ONLY", "").split(",") if n]   # e.g. sculpt,simplify,frame,undo,redo
 
 
@@ -1216,6 +1475,9 @@ def keep_bug(layer):
 
 def apply(op):
     o = op["op"]
+    ex = apply_extra(op)
+    if ex is not None:
+        return None if ex == "py-done" else ex
     if o == "mpath":
         r = apply_mpath(op)
         return None if r == "py-done" else r
@@ -1550,6 +1812,8 @@ def main():
     except Failure as f:
         faulthandler.cancel_dump_traceback_later()
         write_fail(str(f))
+        if os.environ.get('OA_FUZZ_SAVE_FAIL'):
+            ops.wm.save_copy(filepath=os.environ['OA_FUZZ_SAVE_FAIL'])
         print(f"!!! FUZZ FAIL after {len(log)} ops: {f}\n    log: {fail_path}", flush=True)
         sys.exit(1)
     if not REPLAY:

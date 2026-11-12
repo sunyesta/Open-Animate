@@ -23,7 +23,7 @@ def replay(exe, sweep_file, ops, work):
     path = os.path.join(work, "try.json")
     json.dump({"ops": ops}, open(path, "w", encoding="utf-8"))
     env = dict(os.environ, OA_SWEEP_FILE=sweep_file, OA_FUZZ_REPLAY=path, OA_FUZZ_OUT=work, OA_SWEEP_TMP=work)
-    r = subprocess.run([exe, "--background", "--python", os.path.join(HERE, "fuzz.py")], env=env,
+    r = subprocess.run([exe, "--background", "--python", os.path.join(HERE, os.environ.get("OA_FUZZ_SCRIPT", "fuzz.py"))], env=env,
                        capture_output=True, text=True, timeout=900)
     fail = os.path.join(work, "fuzz_replay_fail.json")
     if r.returncode == 0 or not os.path.exists(fail):

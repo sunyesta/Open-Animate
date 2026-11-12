@@ -33,7 +33,7 @@ entered, left and made; points moved, deleted, dissolved, subdivided, split, add
 removed, automatic, cleaned; Parent Bone with its deform modes; new drawings in the rig; insert/delete keys; Sculpt strokes with every brush (Dyntopo 40% of the time, at Resolution
 8-400 and each Refine Method) and Simplify; curvature, width, smooth, slide, merge, mirror, symmetrize, clear handles,
 unalign and handle moves; Auto-Freeze Keys on and off (on by default: `OA_FUZZ_FREEZE=0` leaves the file's setting), folding timeline rows (Key Together), Key Whole Drawing, layer move/turn/size/opacity; fix actions that follow bones (`fix_new`, `fix_follow`, `fix_set`,
-`fix_mute`, `fix_enter`, `fix_key`, `fix_peek`, `fix_still`, with `check_fixes` after every op), `freeze_check` (an edit between a layer's poses must leave them as they were), and `mpath` (motion paths drawn on a frame: the shortcuts, from keys and kept copies, must match working every frame out on copies, each dot must sit where that frame's pose puts it, and drawing them changes nothing; `OA_FUZZ_MPATH_W` weights it) (`OA_FUZZ_ONLY` limits a run to a list of op names; `OA_FUZZ_SAVE_END=<path>` saves the document at the end, to write a repro from a long log without shrinking). It checks
+`fix_mute`, `fix_enter`, `fix_key`, `fix_peek`, `fix_still`, with `check_fixes` after every op), `freeze_check` (an edit between a layer's poses must leave them as they were), and `mpath` (motion paths drawn on a frame: the shortcuts, from keys and kept copies, must match working every frame out on copies, each dot must sit where that frame's pose puts it, and drawing them changes nothing; `OA_FUZZ_MPATH_W` weights it) `mpath_edit` (moves and handle drags on a path, checked against working each frame out afresh), `ref_op` and `ref_check` (references of drawings and groups, each shown where its original is; `OA_FUZZ_X_W` weights the three, `OA_FUZZ_NO_PEEK=1` leaves `fix_peek` out, `OA_FUZZ_SAVE_FAIL=<path>` saves the document as it failed) (`OA_FUZZ_ONLY` limits a run to a list of op names; `OA_FUZZ_SAVE_END=<path>` saves the document at the end, to write a repro from a long log without shrinking). It checks
 every op (no exception, finite numbers, a change only with an undo step, CANCELLED changes nothing, entering an action
 and leaving changes nothing) and every few ops (undo then redo exact, frames in different orders give the same pose,
 save/open exact, a point weighted wholly to one plain bone turns rigidly with it). A watchdog (`OA_FUZZ_HANG`, default
@@ -119,6 +119,8 @@ while probes keep reporting:
 - A later fix can move or reword code an older entry names ("found 0 times" or "found 2 times": fix the entry to the code as it is now,
   and prove it by hand again), or make its test too loose to notice: a check that something is kept "as it was"
   compares the stored values exactly (read back after storing them), since a fit lands close enough to pass a tolerance.
+- Never stop a hand prover (undo, build, test, put back) mid-run: it leaves the undone fix in the source. If one was
+  stopped, diff the files it swaps and put the fix back before building. Prove by PENDING index (`scripts/prove.py 56 57`), not a list of its own.
 - A hang's test: `faulthandler.dump_traceback_later(20, exit=True)` before the op, cancelled after. Its watchdog runs
   outside Python's lock, so it fires while a C++ operator loops (a `threading.Timer` never gets to run).
 - Taking out a floor or clamp (a least speed, a least gap) can break code that counted on it: what was always slightly

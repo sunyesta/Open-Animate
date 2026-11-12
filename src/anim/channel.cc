@@ -441,7 +441,10 @@ void keys_ends_release(Channel<float2> &ch, const KeyEnds &was)
     return;
   }
   if (ch.keys.size() <= 1) {
-    ch.on_path = false;
+    /* (The mainline's: keys deleted in an action leave it be.) */
+    if (!ch.actions.contains("")) {
+      ch.on_path = false;
+    }
     if (ch.keys.empty()) {
       return;
     }
@@ -1832,8 +1835,9 @@ template<typename T> Key<T> &Channel<T>::set_key(int frame, const T &value)
   keys_changed();
   if constexpr (std::is_same_v<T, float2>) {
     /* On Path with its keys gone but one at most (the setup's): keys made again are made as any are, onto the actions,
-     * so it is On Path no more (else the actions' moves are left out with nothing in its keys to hold them). */
-    if (keys.size() < 2) {
+     * so it is On Path no more (else the actions' moves are left out with nothing in its keys to hold them). It is the
+     * mainline's: keys made in an action (the setup's, put in on entering one) leave it be. */
+    if (keys.size() < 2 && !actions.contains("")) {
       on_path = false;
     }
   }
