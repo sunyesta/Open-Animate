@@ -135,6 +135,15 @@ struct MotionPathPlacesKept {
     float own_angle = 0.0f;
   };
   std::vector<Entry> entries;
+  /* The keys On Path gives a bone with too few of its own, for the handles of a key it will have
+   * (motion_path_handles, on a copy), by target and frame: the frame shown doesn't change them. None where it can't. */
+  struct Trial {
+    MotionPathTarget target;
+    int frame = 0;
+    bool made = false;
+    Channel<float2> keys;
+  };
+  std::vector<Trial> trials;
 };
 class MotionPathPlacesScope {
  public:

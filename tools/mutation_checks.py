@@ -110,11 +110,17 @@ PENDING = [
     ('src/anim/motion_path.cc', '      calm.emplace(doc);\n      g_doc_copies++;\n      dynamics_off(*calm);',
      '      calm.emplace(doc);\n      g_doc_copies++;', 'paths drawn side by side, dynamics left out',
      'tests/test_motion_path_on_path_fast.py'),
-    ('src/anim/motion_path.cc', '    const ChannelKeysQuiet scratch;\n    Document copy = doc;', '    Document copy = doc;',
+    ('src/anim/motion_path.cc', '    const ChannelKeysQuiet scratch;\n    /* Its keys from On Path kept',
+     '    /* Its keys from On Path kept',
      'handles of keys not made yet change no keys (kept paths stay kept)', 'tests/test_motion_path_on_path_fast.py'),
     ('src/anim/motion_path.cc', '      if ((b->id == bone.id && !values) || b->outer_bone != 0) {',
      '      if (b->id == bone.id || b->outer_bone != 0) {', 'values only for a bone playing its own action',
      'tests/test_motion_path_on_path_fast.py'),
+    ('src/anim/motion_path.cc', '      if (kept->trials[i].target == target && kept->trials[i].frame == frame) {',
+     '      if (false) {', 'the keys On Path would give kept across frame changes',
+     'tests/test_motion_path_on_path_fast.py'),
+    ('src/anim/motion_path.cc', '    kept.entries.clear();\n    kept.trials.clear();', '    kept.entries.clear();',
+     'kept On Path trials let go when the document changes', 'tests/test_motion_path_on_path_fast.py'),
 ]
 
 def build(root):

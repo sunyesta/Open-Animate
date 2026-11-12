@@ -212,4 +212,29 @@ again = next(p for p in wm.motion_paths(True) if p["head"])
 assert wm.motion_path_places()["frames"] < made, ("kept: the path not worked out again", made, wm.motion_path_places())
 assert again["handles"] == first["handles"], (again["handles"], first["handles"])
 
+# A frame change doesn't change the keys On Path would give it: kept, only placed again, as working them out afresh.
+assert ops.screen.frame_offset_forward() == {'FINISHED'} and doc.frame_current == 19
+wm.motion_path_places_clear()
+stepped = next(p for p in wm.motion_paths(True) if p["head"])
+assert wm.motion_path_places()["frames"] == 0, ("the keys On Path gives kept", wm.motion_path_places())
+fresh = next(p for p in wm.motion_paths() if p["head"])
+assert stepped["handles"] == fresh["handles"], (stepped["handles"], fresh["handles"])
+
+# An edit (the knob's key moved further) changes them: worked out again, never the kept ones.
+rig = next(l for l in layers.all() if l.bones and any(b["name"] == "Knob" for b in l.bones))
+doc.auto_key = True
+ops.armature.select_none()
+rig.select_bone("Knob")
+doc.frame_current = 6
+rig.bone_set("Knob", knob=(16.0, 0.0))
+doc.frame_current = 18
+doc.auto_key = False
+ops.armature.select_none()
+rig.select_bone("Ear")
+ops.anim.keys_select_all()
+edited = next(p for p in wm.motion_paths(True) if p["head"])
+fresh = next(p for p in wm.motion_paths() if p["head"])
+assert edited["handles"] == fresh["handles"], (edited["handles"], fresh["handles"])
+assert edited["handles"] != stepped["handles"], ("the edit changes them", edited["handles"])
+
 print("test_motion_path_on_path_fast: ok")

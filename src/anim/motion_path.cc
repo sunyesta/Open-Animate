@@ -1964,6 +1964,7 @@ MotionPathPlacesScope::MotionPathPlacesScope(MotionPathPlacesKept &kept) : was_(
 {
   if (kept.made_for != kept.document) {
     kept.entries.clear();
+    kept.trials.clear();
     kept.made_for = kept.document;
   }
   t_places_kept = &kept;
@@ -4635,6 +4636,8 @@ int motion_path_keys_delete(Document &doc, const std::vector<MotionPathTarget> &
   return deleted;
 }
 
+static Bone *on_path_bone(Document &doc, const MotionPathTarget &t, Layer **r_owner = nullptr);
+
 bool motion_path_has_handles(const Document &doc, const MotionPathTarget &target)
 {
   /* (Or keys On Path will give it: a tip with no keys yet, its bone not turning of its own, on_path_bone.) */
@@ -4686,9 +4689,36 @@ bool motion_path_handles(const Document &doc, const MotionPathTarget &target, in
     /* (Keys made on the copy don't count as keys changed: they would have what is kept until keys change, these
      * handles among it, worked out again on every redraw.) */
     const ChannelKeysQuiet scratch;
+    /* Its keys from On Path kept while the document stays the same: a frame change only places them again. */
+    MotionPathPlacesKept *kept = t_places_kept;
+    const MotionPathPlacesKept::Trial *tried = nullptr;
+    for (size_t i = 0; kept && !tried && i < kept->trials.size(); i++) {
+      if (kept->trials[i].target == target && kept->trials[i].frame == frame) {
+        tried = &kept->trials[i];
+      }
+    }
+    if (tried && !tried->made) {
+      return false;
+    }
     Document copy = doc;
     g_doc_copies++;
-    const Channel<float2> *made = motion_path_edit_prepare(copy, target, frame) ? handle_channel(copy, target) : nullptr;
+    const Channel<float2> *made = nullptr;
+    if (tried) {
+      Bone *b = on_path_bone(copy, target);
+      if (!b) {
+        return false;
+      }
+      b->position_keys = tried->keys;
+      animation_evaluate(copy, copy.frame_current);
+      made = handle_channel(copy, target);
+    }
+    else {
+      made = motion_path_edit_prepare(copy, target, frame) ? handle_channel(copy, target) : nullptr;
+      if (kept) {
+        const Bone *b = on_path_bone(copy, target);
+        kept->trials.push_back({target, frame, made && b, made && b ? b->position_keys : Channel<float2>()});
+      }
+    }
     return made && made->key_at(frame) && motion_path_handles(copy, target, frame, r_key, r_in, r_out, r_mode);
   }
   float2 cx, cy;
@@ -5563,7 +5593,7 @@ bool motion_path_position_at(const Document &doc, const MotionPathTarget &target
 /* --- On Path (Channel::on_path) ------------------------------------------------------------------------------------ */
 
 /* The bone a path's position is, where actions move it on the mainline (On Path can be set): its owner too. */
-static Bone *on_path_bone(Document &doc, const MotionPathTarget &t, Layer **r_owner = nullptr)
+static Bone *on_path_bone(Document &doc, const MotionPathTarget &t, Layer **r_owner)
 {
   /* Its head's path, or its tip's where the bone doesn't turn of its own (no turn keys, not connected): its position
    * keys move the tip as they do the head, keys or none yet (a tip with none is taken as turned, tip_turns). */
