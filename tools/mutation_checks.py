@@ -69,6 +69,9 @@ PENDING = [
      'A path with no keys: the handles its keys will have on what moves it diamonds', 'tests/test_motion_path_on_path.py'),
     ('src/anim/motion_path.cc', '  return on_key && std::any_of(dots.begin(), dots.end(),', '  return false && std::any_of(dots.begin(), dots.end(),',
      'A diamond on a path with no keys, picked as a dot, shows its handles', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/motion_path.cc', '  return motion_path_is_key(doc, target, 0) || motion_path_edit_keys_at(doc, target, 0);',
+     '  return motion_path_is_key(doc, target, 0);',
+     'A path with no keys shows the setup diamond, its out handle', 'tests/test_motion_path_on_path.py'),
 ]
 
 def build(root):

@@ -1569,7 +1569,11 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         const std::map<int, KeyFrameSummary> picked =
             layers_key_summary(motion_path_key_layers(doc, p.target), motion_path_key_filter(doc, p.target));
         py::list keys_picked;
-        for (const int f : p.keys) {
+        std::vector<int> keys = p.keys;
+        if (p.first <= 0 && motion_path_setup_key(doc, p.target)) {
+          keys.insert(keys.begin(), 0);
+        }
+        for (const int f : keys) {
           if (motion_path_frame_picked(picked, C.wm->path_dots, p.target, f, true)) {
             keys_picked.append(f);
           }

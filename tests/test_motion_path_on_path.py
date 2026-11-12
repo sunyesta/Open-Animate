@@ -182,4 +182,19 @@ got = {h["frame"]: h for h in path()["handles"]}[30]["in"]
 assert math.dist(got, want_in) < 1e-3, ("the handle went where it was put", got, want_in)
 assert math.dist(dots_at()[30], k30) < 1e-4, "the key stays"
 
+# The path's start too: frame 0, the setup, shows a diamond (its out handle) with no key of the ear's there.
+rig_id, rig = build()
+args = dict(bone="Ear", head="1", layer=str(rig_id))
+assert ops.anim.motion_path_select(frame="0", **args) == {'FINISHED'}
+assert 0 in path()["keys_picked"], ("the setup's diamond picked", path()["keys_picked"])
+assert not rig().keyframes('bones["Ear"].position'), "picking it keys nothing"
+k0 = dots_at()[0]
+assert ops.anim.motion_path_handle(frame="0", side="OUT", x=str(k0[0]), y=str(k0[1] + 0.3), **args) == {'FINISHED'}
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 6, 30]
+assert path()["on_path"] is True
+d = dots_at()
+assert math.dist(d[0], k0) < 1e-4, ("the setup stays", d[0], k0)
+lead = (d[2][0] - d[0][0], d[2][1] - d[0][1])
+assert lead[1] > 0.0 and lead[1] > 2.0 * abs(lead[0]), ("the path leaves 0 the handle's way", lead)
+
 print("test_motion_path_on_path: ok")

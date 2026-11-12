@@ -986,7 +986,7 @@ static void motion_path_tool_input(Context &C, Area &area, const ViewMapping &vi
     }
     const MotionPathTarget target = hover_path->target;
     /* Frame 0's key, the setup pose: picked for its out handle, but never moved (nor a key added on it). */
-    const bool on_setup = hover_frame == 0 && motion_path_is_key(doc, target, 0);
+    const bool on_setup = hover_frame == 0 && motion_path_setup_key(doc, target);
     const bool on_key = on_setup ||
                         std::binary_search(hover_path->keys.begin(), hover_path->keys.end(), hover_frame);
     OpArgs args = motion_path_target_args(doc, target);
@@ -1945,7 +1945,7 @@ std::vector<PathQuietMark> motion_path_quiet_marks(const Document &doc, const Mo
     for (size_t k = i; k < run; k++) {
       const int f = p.first + int(k);
       const bool on_key = std::binary_search(p.keys.begin(), p.keys.end(), f) ||
-                          (f == 0 && motion_path_is_key(doc, p.target, 0));
+                          (f == 0 && motion_path_setup_key(doc, p.target));
       breakdown |= on_key && !key && motion_path_key_is_breakdown(doc, p.target, f);
       key |= on_key;
       shown |= on_key || (f - p.first) % step == 0;
@@ -2288,7 +2288,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
         const int f = p.first + int(k);
         /* Frame 0's key too (the setup's): it has an out handle. */
         const bool on_key = std::binary_search(p.keys.begin(), p.keys.end(), f) ||
-                            (f == 0 && motion_path_is_key(doc, p.target, 0));
+                            (f == 0 && motion_path_setup_key(doc, p.target));
         breakdown |= on_key && !key && motion_path_key_is_breakdown(doc, p.target, f);
         key |= on_key;
         shown |= on_key || (f - p.first) % step == 0;

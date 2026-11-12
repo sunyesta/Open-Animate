@@ -5589,6 +5589,11 @@ bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool
   return true;
 }
 
+bool motion_path_setup_key(const Document &doc, const MotionPathTarget &target)
+{
+  return motion_path_is_key(doc, target, 0) || motion_path_edit_keys_at(doc, target, 0);
+}
+
 bool motion_path_frame_picked(const std::map<int, KeyFrameSummary> &picked,
                               const std::vector<std::pair<MotionPathTarget, int>> &dots,
                               const MotionPathTarget &target, int frame, bool on_key)
