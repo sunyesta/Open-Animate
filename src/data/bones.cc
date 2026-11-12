@@ -465,6 +465,14 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
       knob_base = controller_knob_place(bone, rest_box);
       position = parent_pose.inverted().apply(controller_box_point(bone, rest_box, knob_base));
     }
+    /* Where Look At looks from, and how far the face it is on has turned: a pupil where it is rigged on its parent; a
+     * knob riding its Knob Parent where it rests on that, since the eye it moves in rides there, not with the box. */
+    float2 look_from = parent_pose.apply(setup_position);
+    float look_face = transform_angle(parent_pose) - transform_angle(parent_setup);
+    if (knob_pulled && bone.controller_knob_independent) {
+      look_from = p.knob_parent_skin.apply(rest_box.setup_head);
+      look_face = transform_angle(p.knob_parent_skin);
+    }
     if (!setup_frame && (!rests || knob_pulled)) {
       if (extras.ik_angle && !rests) {
         angle += (*extras.ik_angle)[i];
@@ -559,8 +567,8 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
               if (t && !bone_is_descendant_in(bones, index, bone.id, ti)) {
                 self(self, ti, depth + 1);
                 if (state[ti] == 2) {
-                  const float face = transform_angle(parent_pose) - transform_angle(parent_setup);
-                  const float2 gaze = bone_look_gaze(face, parent_pose.apply(setup_position), poses[ti].head, t->depth);
+                  const float face = look_face;
+                  const float2 gaze = bone_look_gaze(face, look_from, poses[ti].head, t->depth);
                   const float2 rest_gaze = bone_look_gaze(0.0f, parent_setup.apply(setup_position), poses[ti].setup_head,
                                                           value_at(t->depth_keys, t->depth, 0));
                   const float half_turn = 1.5707964f;
@@ -586,12 +594,12 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
                  * target has turned from its rest (target where it rests, at its setup Depth: the eye looks
                  * as drawn), never past the side of the ball. The pupil a disc on the ball where it points,
                  * seen from the front: slid across, as drawn. */
-                const float face = transform_angle(parent_pose) - transform_angle(parent_setup);
+                const float face = look_face;
                 /* The pupil where it is rigged, carried by the eye's parent, and its own keys' move on top:
                  * they move the pupil on the ball, not the ball. */
                 const float2 rigged = parent_pose.apply(bone.setup_position);
                 const float2 keyed = parent_pose.apply_vector(position - bone.setup_position);
-                const float2 gaze = bone_look_gaze(face, rigged, poses[ti].head, t->depth);
+                const float2 gaze = bone_look_gaze(face, look_from, poses[ti].head, t->depth);
                 const float2 rest_gaze = bone_look_gaze(0.0f, parent_setup.apply(bone.setup_position), poses[ti].setup_head,
                                                         value_at(t->depth_keys, t->depth, 0));
                 const float half_turn = 1.5707964f;

@@ -35,6 +35,8 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    ('src/data/bones.cc', 'if (knob_pulled && bone.controller_knob_independent) {', 'if (false) {',
+     'Look At on a knob riding a Knob Parent looks from where it rides, not from the box', 'tests/test_controller_look_from.py'),
 ]
 
 def build(root):
