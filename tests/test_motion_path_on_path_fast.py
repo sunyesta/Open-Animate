@@ -99,4 +99,37 @@ full, _ = on_path(True, False)
 assert counts["threads"] <= 1, ("dynamics can move the knob: one at a time", counts)
 assert worst(fast, full) < 1e-5, ("the same keys", fast, full)
 
+
+def drawn(knob_on_hair, shortcuts):
+    """The Ear's head path as drawn once On Path, Own Motion (worked out afresh), and the places' counts."""
+    rig_id, rig = build(knob_on_hair)
+    assert ops.anim.motion_path_on_path(on="1", bone="Ear", head="1", layer=str(rig_id)) == {'FINISHED'}
+    doc.frame_current = 18
+    wm.motion_path_own_from_keys(shortcuts)
+    wm.motion_path_places_clear()
+    path = next(p for p in wm.motion_paths() if p["head"])
+    counts = wm.motion_path_places()
+    wm.motion_path_own_from_keys(True)
+    return path["points"], counts
+
+
+def furthest(a, b):
+    assert len(a) == len(b), (len(a), len(b))
+    return max(math.dist(x, y) for x, y in zip(a, b))
+
+
+# Its path drawn the same way: side by side, values only, as working everything out has it.
+fast, counts = drawn(False, True)
+full, full_counts = drawn(False, False)
+assert counts["threads"] >= 2, ("the path side by side", counts)
+assert full_counts["threads"] <= 1, ("in full, one at a time with dynamics", full_counts)
+assert furthest(fast, full) < 1e-5, ("the same path", furthest(fast, full))
+assert max(math.dist(p, fast[0]) for p in fast) > 0.1, ("the path moves", fast)
+
+# Hanging from the swinging hair: in full, one frame at a time.
+fast, counts = drawn(True, True)
+full, _ = drawn(True, False)
+assert counts["threads"] <= 1, ("dynamics can move the knob: one at a time", counts)
+assert furthest(fast, full) < 1e-5, ("the same path", furthest(fast, full))
+
 print("test_motion_path_on_path_fast: ok")

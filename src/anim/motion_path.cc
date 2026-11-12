@@ -984,6 +984,45 @@ static size_t place_lanes(size_t count)
   return std::min(count, size_t(std::max(2, parallel_threads() / 2)));
 }
 
+/* `doc` with its bone dynamics left out: they move bones' poses only (Layer::dynamics_now), never their own values. */
+static void dynamics_off(Document &doc)
+{
+  for (const Layer *flat : document_layers_flat(doc)) {
+    if (!flat->is_bone_layer()) {
+      continue;
+    }
+    Layer &l = *layer_find(doc, flat->id);
+    l.dynamics_now.clear();
+    for (Bone &b : l.bones) {
+      for (BoneConstraint &c : b.constraints) {
+        if (c.type == BoneConstraintType::Dynamics) {
+          c.enabled = false;
+        }
+      }
+    }
+  }
+}
+
+/* Whether a driver drives anything on layer `layer`, or reads it both ways (2-Way Linked, written back to). */
+static bool layer_driven(const Document &doc, const uint64_t layer)
+{
+  return std::any_of(doc.drivers.begin(), doc.drivers.end(), [&](const Driver &d) {
+    return d.target.layer == layer || (d.two_way && std::any_of(d.vars.begin(), d.vars.end(), [&](const DriverVar &v) {
+                                         return v.source.layer == layer;
+                                       }));
+  });
+}
+
+/* Whether bone `t`'s own values on any frame come out of its channels and actions alone, nothing that poses bones able
+ * to change them: its actions played from bones' own values alone (action_offsets_apart) and no driver on its layer.
+ * Dynamics move only poses, as does everything evaluation does after the actions (AnimationValuesOnly). */
+static bool bone_values_apart(const Document &doc, const MotionPathTarget &t)
+{
+  const Layer *rig = t.bone ? layer_find(doc, t.layer) : nullptr;
+  const int b = rig ? bone_index(*rig, t.bone) : -1;
+  return b >= 0 && !layer_driven(doc, t.layer) && action_offsets_apart(doc, *rig, rig->bones[size_t(b)]);
+}
+
 /* `fn(i, scratch)` for each i below `count`, side by side on the pool's threads (each works whole frames of a rig out on
  * a copy of `doc` in `scratch`, a document each thread keeps for its share: copied into again, it keeps what it has
  * room for). One at a time where bones have dynamics (see
@@ -1158,7 +1197,21 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
     else if (!t_offsets.empty()) {
       g_offsets_used += frames;
     }
-    const size_t runs = from_keys ? 0 : dynamics_in(doc) ? 1 : place_lanes(frames);
+    /* Every path an Own Motion bone's whose own values nothing posing bones can change (bone_values_apart): the
+     * frames worked out values only, with dynamics left out, side by side. Where it really goes (and the space drawn
+     * relative to) is then wanted only where its own values aren't found, never for a bone that is there. */
+    bool values_only = !from_keys && g_own_from_keys;
+    for (size_t i = 0; values_only && i < paths.size(); i++) {
+      values_only = own[i] && bone_values_apart(doc, paths[i].target);
+    }
+    std::optional<Document> calm;
+    if (values_only && dynamics_in(doc)) {
+      calm.emplace(doc);
+      g_doc_copies++;
+      dynamics_off(*calm);
+    }
+    const Document &from = calm ? *calm : doc;
+    const size_t runs = from_keys ? 0 : dynamics_in(from) ? 1 : place_lanes(frames);
     /* Bones actions move, whose actions' part can be kept: what they add on each frame, from the frames worked out. */
     std::vector<char> keep_offsets(paths.size(), 0);
     std::vector<std::vector<std::pair<int, ActionOffsets>>> offsets(paths.size());
@@ -1172,9 +1225,13 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
         offsets[i].assign(frames, {});
       }
     }
-    places_side_by_side(doc, runs, [&](size_t run, Document &copy) {
-      copy = doc;
+    places_side_by_side(from, runs, [&](size_t run, Document &copy) {
+      copy = from;
       g_doc_copies++;
+      std::optional<AnimationValuesOnly> plain;
+      if (values_only) {
+        plain.emplace();
+      }
       for (size_t k = frames * run / runs; k < frames * (run + 1) / runs; k++) {
         const int f = first + int(k);
         copy.frame_current = f;
@@ -5574,25 +5631,6 @@ std::vector<int> motion_path_driver_frames(const Document &doc, const MotionPath
   return frames.size() >= 2 ? std::vector<int>(frames.begin(), frames.end()) : std::vector<int>();
 }
 
-/* `doc` with its bone dynamics left out: they move bones' poses only (Layer::dynamics_now), never their own values. */
-static void dynamics_off(Document &doc)
-{
-  for (const Layer *flat : document_layers_flat(doc)) {
-    if (!flat->is_bone_layer()) {
-      continue;
-    }
-    Layer &l = *layer_find(doc, flat->id);
-    l.dynamics_now.clear();
-    for (Bone &b : l.bones) {
-      for (BoneConstraint &c : b.constraints) {
-        if (c.type == BoneConstraintType::Dynamics) {
-          c.enabled = false;
-        }
-      }
-    }
-  }
-}
-
 /* Where the bone's position is (its channel's value, actions' moves in) on each frame from `first` to `last`, and what
  * the actions add then, worked out on copies of the document, side by side. Dynamics elsewhere in the rig would have
  * them worked out one at a time: they are left out where they can't change these, the bone's actions played from
@@ -5609,12 +5647,7 @@ static void on_path_frames(const Document &doc, const MotionPathTarget &t, int f
     return;
   }
   bone->position_keys.on_path = on_path;
-  const bool driven = std::any_of(base.drivers.begin(), base.drivers.end(), [&](const Driver &d) {
-    return d.target.layer == t.layer || (d.two_way && std::any_of(d.vars.begin(), d.vars.end(), [&](const DriverVar &v) {
-                                           return v.source.layer == t.layer;
-                                         }));
-  });
-  const bool values_only = g_own_from_keys && !driven && action_offsets_apart(base, *owner, *bone);
+  const bool values_only = g_own_from_keys && !layer_driven(base, t.layer) && action_offsets_apart(base, *owner, *bone);
   if (values_only) {
     dynamics_off(base);
   }

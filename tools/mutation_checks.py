@@ -99,11 +99,17 @@ PENDING = [
      'Edit Path\'s dots are the path\'s own colour', 'tests/test_motion_path_edit_split.py'),
     ('src/anim/motion_path.cc', '        r.frame = f;\n        r.key = true;', '        r.key = true;',
      'a held dot holding a key is the key\'s to click', 'tests/test_motion_path_edit_split.py'),
-    ('src/anim/motion_path.cc', 'g_own_from_keys && !driven && action_offsets_apart(base, *owner, *bone);',
-     'g_own_from_keys && !driven;', 'On Path: values only just where poses cannot change the bone',
+    ('src/anim/motion_path.cc', '!layer_driven(base, t.layer) && action_offsets_apart(base, *owner, *bone);',
+     '!layer_driven(base, t.layer);', 'On Path: values only just where poses cannot change the bone',
      'tests/test_motion_path_on_path_fast.py'),
     ('src/anim/motion_path.cc', '  if (values_only) {\n    dynamics_off(base);\n  }\n', '',
      'On Path: its frames side by side, dynamics left out', 'tests/test_motion_path_on_path_fast.py'),
+    ('src/anim/motion_path.cc', '      values_only = own[i] && bone_values_apart(doc, paths[i].target);',
+     '      values_only = own[i];', 'paths drawn values only just where poses cannot change the bone',
+     'tests/test_motion_path_on_path_fast.py'),
+    ('src/anim/motion_path.cc', '      calm.emplace(doc);\n      g_doc_copies++;\n      dynamics_off(*calm);',
+     '      calm.emplace(doc);\n      g_doc_copies++;', 'paths drawn side by side, dynamics left out',
+     'tests/test_motion_path_on_path_fast.py'),
 ]
 
 def build(root):
