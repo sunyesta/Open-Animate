@@ -561,6 +561,9 @@ int timeline_clear(Document &doc, bool count_only = false);
 std::string timeline_edited_name(const Document &doc);
 /* Copies the selected keys `offset` frames later (never below 1); the copies become the
  * selection and replace keys where they land (Blender's Duplicate, then moving the copies). */
+/* The offset copies of the selected keys go by: `offset`, or as far short of it as keeps every copy past the setup
+ * frame, their spacing kept. */
+int keys_duplicate_offset(const std::vector<Layer *> &layers, int offset);
 void layers_duplicate_selected_keys(const std::vector<Layer *> &layers, int offset);
 /* Neighbouring keyed frames (a, b) across which nothing changes: every channel keyed at either
  * has a key at both with the same value. Blender draws a hold bar between such keys. */

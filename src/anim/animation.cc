@@ -295,8 +295,17 @@ static void find_still_drawings(const Document &doc, std::unordered_set<uint64_t
   walk(walk, doc.layers);
 }
 
+/* Whether the stretch from `a` to `b` is shaped on its motion path in a way no key put inside would make: control
+ * points, Custom speeds, or path handles of their own at either end (dragged or set by type: Auto ones would take
+ * new slopes from a new neighbour). */
+template<typename K> static bool stretch_on_path(const K &a, const K &b)
+{
+  return !b.path_controls.empty() || b.interp == Interp::Custom || a.path_handles != PathHandles::Auto ||
+         b.path_handles != PathHandles::Auto;
+}
+
 /* `ch`'s key on `frame` holding `base`. A new one inside a position's stretch shaped on its motion path (control
- * points or Custom speeds, which no key would make) goes in where its dot is first, the stretch keeping its way,
+ * points, Custom speeds or path handles, which no key would make) goes in where its dot is first, the stretch keeping its way,
  * control points and timing (key_add_in_place), then takes the value, as a key moved there: so keying a frame
  * doesn't reshape the rest of the stretch. Elsewhere it is a key as any other, its neighbours' Auto handles taking
  * it in as Moho's do. */
@@ -305,7 +314,7 @@ template<typename T> static Key<T> &key_put(Channel<T> &ch, int frame, const T &
   if constexpr (std::is_same_v<T, float2>) {
     if (frame > 0 && ch.keys.size() >= 2 && !ch.key_at(frame)) {
       const auto b = std::find_if(ch.keys.begin(), ch.keys.end(), [&](const auto &k) { return k.frame > frame; });
-      if (b != ch.keys.begin() && b != ch.keys.end() && (!b->path_controls.empty() || b->interp == Interp::Custom)) {
+      if (b != ch.keys.begin() && b != ch.keys.end() && stretch_on_path(*(b - 1), *b)) {
         key_add_in_place(ch, frame);
       }
     }
@@ -353,7 +362,7 @@ template<typename T> static void hold_key_put(Channel<T> &ch, int frame, const T
     return;
   }
   if constexpr (std::is_same_v<T, float2>) {
-    if (!b->path_controls.empty() || b->interp == Interp::Custom) {
+    if (stretch_on_path(*(b - 1), *b)) {
       key_add_in_place(ch, frame);
       return;
     }
@@ -906,8 +915,8 @@ static int keys_together_sync(Layer &owner, Visit &&visit, Changes &&changes, bo
         }
         continue;
       }
-      /* Inside a stretch shaped on its motion path (Custom timing, control points: no other key's timing would make
-       * it), a key of its own (Key Whole Drawing's) goes in where its dot is, the stretch keeping its way and timing
+      /* Inside a stretch shaped on its motion path (Custom timing, control points, path handles: no other key's
+       * timing would make it), a key of its own (Key Whole Drawing's) goes in where its dot is, the stretch keeping its way and timing
        * (key_add_in_place), so nothing the channel does changes. A filler doesn't split it: inside motion the channel
        * already has, it is worked out without (Key::filler_inside), so the stretch stays whole, and letting it go
        * leaves nothing to join. */
@@ -915,7 +924,8 @@ static int keys_together_sync(Layer &owner, Visit &&visit, Changes &&changes, bo
       if constexpr (std::is_same_v<T, float2> || std::is_same_v<T, float>) {
         const auto b = std::find_if(ch.keys.begin(), ch.keys.end(), [&](const auto &k) { return k.frame > frame; });
         if (!fillers && was_animated && b != ch.keys.begin() && b != ch.keys.end() &&
-            (b->interp == Interp::Custom || !b->path_controls.empty()))
+            (b->interp == Interp::Custom || !b->path_controls.empty() ||
+             (std::is_same_v<T, float2> && stretch_on_path(*(b - 1), *b))))
         {
           if constexpr (std::is_same_v<T, float2>) {
             key_add_in_place(ch, frame);
@@ -6335,10 +6345,35 @@ static std::vector<Layer *> together_picks_widen(Document &doc, const std::vecto
   return out;
 }
 
-int keys_move_selected(Document &doc, const std::vector<Layer *> &layers_picked, const std::function<int(int)> &to,
+/* How far a move must go back the other way for no selected key to land on or before the setup frame: the keys
+ * then stop there together, their spacing kept. (Each held at frame 1 on its own, two landed on one frame and one
+ * was lost.) `setup`: the setup frame's own selected keys count (copies of them move; the keys themselves never). */
+static int keys_lift(const std::vector<Layer *> &layers, const std::function<int(int)> &to, bool setup)
+{
+  int lift = 0;
+  for (Layer *layer : layers) {
+    layer_for_each_channel<false>(*layer, [&](auto &ch, auto & /*value*/) {
+      for (const auto &k : ch.keys) {
+        if (k.selected && (setup || k.frame != 0)) {
+          lift = std::max(lift, 1 - to(k.frame));
+        }
+      }
+    });
+  }
+  return lift;
+}
+
+int keys_duplicate_offset(const std::vector<Layer *> &layers, int offset)
+{
+  return offset + keys_lift(layers, [offset](int f) { return f + offset; }, true);
+}
+
+int keys_move_selected(Document &doc, const std::vector<Layer *> &layers_picked, const std::function<int(int)> &to_asked,
                        bool ripple, bool together)
 {
   const std::vector<Layer *> layers = together_picks_widen(doc, layers_picked);
+  const int lift = keys_lift(layers, to_asked, false);
+  const std::function<int(int)> to = lift == 0 ? to_asked : [&to_asked, lift](int f) { return to_asked(f) + lift; };
   std::vector<Stretch> sts;
   std::vector<AnyChannel> linked;
   if (together && doc.time_together) {
@@ -6723,8 +6758,9 @@ int layers_delete_selected_keys(const std::vector<Layer *> &layers)
   return removed;
 }
 
-void layers_duplicate_selected_keys(const std::vector<Layer *> &layers, int offset)
+void layers_duplicate_selected_keys(const std::vector<Layer *> &layers, int offset_asked)
 {
+  const int offset = keys_duplicate_offset(layers, offset_asked);
   for (Layer *layer : layers) {
     layer_for_each_channel(*layer, [&](auto &ch, auto & /*value*/) {
       using KeyT = std::decay_t<decltype(ch.keys.front())>;

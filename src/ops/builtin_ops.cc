@@ -63,12 +63,21 @@ struct ViewState {
   bool auto_key;
   AutoKeyMode auto_key_mode;
   bool time_together;
+  /* The timeline's filters and Lock: what it shows, set with no undo step. */
+  bool timeline_only_selected;
+  bool timeline_lock;
+  std::vector<uint64_t> timeline_locked;
+  int timeline_show;
+  uint32_t timeline_kinds;
+  std::string timeline_search;
 };
 
 static ViewState view_state_get(const Document &doc)
 {
   return {doc.frame_current, doc.texts,     doc.overlays,      doc.ui_open,
-          doc.view,          doc.motion_paths, doc.auto_key, doc.auto_key_mode, doc.time_together};
+          doc.view,          doc.motion_paths, doc.auto_key, doc.auto_key_mode, doc.time_together,
+          doc.timeline_only_selected, doc.timeline_lock, doc.timeline_locked, doc.timeline_show,
+          doc.timeline_kinds, doc.timeline_search};
 }
 
 static void view_state_restore(Document &doc, ViewState &view)
@@ -82,6 +91,12 @@ static void view_state_restore(Document &doc, ViewState &view)
   doc.auto_key = view.auto_key;
   doc.auto_key_mode = view.auto_key_mode;
   doc.time_together = view.time_together;
+  doc.timeline_only_selected = view.timeline_only_selected;
+  doc.timeline_lock = view.timeline_lock;
+  doc.timeline_locked = std::move(view.timeline_locked);
+  doc.timeline_show = view.timeline_show;
+  doc.timeline_kinds = view.timeline_kinds;
+  doc.timeline_search = std::move(view.timeline_search);
 }
 
 static void ed_undo_register()

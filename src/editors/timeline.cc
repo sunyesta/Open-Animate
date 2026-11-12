@@ -3337,8 +3337,10 @@ bool timeline_key_press_simulate(Context &C, int row, int frame, int to_frame, b
   Document &doc = *C.document;
   const int followed = keys_move_selected(doc, timeline_layers(C), [offset](int f) { return f + offset; }, ripple, !alt);
   keys_moved_report(followed);
-  C.undo->push("Move Keys", doc);
+  /* The frame shown as its keys now have it (as Move Keys does). */
   channel_keys_changed();
+  animation_evaluate(doc, doc.frame_current);
+  C.undo->push("Move Keys", doc);
   return true;
 }
 

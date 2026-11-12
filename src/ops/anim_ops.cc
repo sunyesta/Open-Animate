@@ -1438,7 +1438,7 @@ void anim_operators_register()
             return OpStatus::Cancelled;
           }
           animation_record(doc);
-          const int offset = op_arg_int(C, "frames", 1);
+          const int offset = keys_duplicate_offset(layers, op_arg_int(C, "frames", 1));
           const bool ignore = ignore_bones_arg(C);
           const bool keep_place = keep_place_arg(C);
           /* What the copies come from, for Ignore Bones and Keep Place: the frames and the document as

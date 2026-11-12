@@ -15,6 +15,9 @@ namespace oanim {
 namespace {
 
 constexpr float GAP = 1e-4f;
+/* How far past either end of the stretch a point or a handle may take the timing (an overshoot): ten stretches' way.
+ * Further is a number typed by mistake, and a huge one put the dots out past what a float holds. */
+constexpr float REACH = 10.0f;
 
 /* A handle pointing the way it should (`out` right, in left) and reaching at most `dx` across. */
 float2 handle_within(float2 h, bool out, float dx)
@@ -478,11 +481,24 @@ int timing_decimate(TimingCurve &curve, int n, float ratio)
     TimingPoint p = curve.points[kept[i]];
     /* A piece between two points that were already neighbours keeps its handles; one across points taken out takes
      * the fitted ones. */
-    if (i > 0 && kept[i - 1] + 1 != kept[i]) {
+    const bool fit_in = i > 0 && kept[i - 1] + 1 != kept[i];
+    const bool fit_out = i + 1 < kept.size() && kept[i] + 1 != kept[i + 1];
+    if (fit_in) {
       p.in = {-fits[i - 1].beta, -knots[kept[i]].slope_in * fits[i - 1].beta};
     }
-    if (i + 1 < kept.size() && kept[i] + 1 != kept[i + 1]) {
+    if (fit_out) {
       p.out = {fits[i].alpha, knots[kept[i]].slope_out * fits[i].alpha};
+    }
+    /* Aligned, its handles stay in line: a side fitted again turns to the other's way, its length kept. (A handle
+     * standing straight up has no slope to fit by: the curve's way there, close to it, left them apart.) */
+    const float in_len = length(p.in), out_len = length(p.out);
+    if (p.aligned && (fit_in || fit_out) && in_len > 1e-6f && out_len > 1e-6f) {
+      if (fit_out) {
+        p.out = handle_within(-p.in * (out_len / in_len), true, curve.points[kept[i + 1]].co.x - p.co.x);
+      }
+      else {
+        p.in = handle_within(-p.out * (in_len / out_len), false, p.co.x - curve.points[kept[i - 1]].co.x);
+      }
     }
     out.points.push_back(p);
   }
@@ -618,6 +634,7 @@ void timing_point_move(TimingCurve &curve, size_t i, float2 co)
     return;
   }
   co.x = std::clamp(co.x, curve.points[i - 1].co.x + GAP, curve.points[i + 1].co.x - GAP);
+  co.y = std::clamp(co.y, -REACH, 1.0f + REACH);
   curve.points[i].co = co;
 }
 
@@ -629,6 +646,7 @@ void timing_handle_set(TimingCurve &curve, size_t i, bool out, float2 h, bool fr
   TimingPoint &p = curve.points[i];
   const float dx = out ? curve.points[i + 1].co.x - p.co.x : p.co.x - curve.points[i - 1].co.x;
   h = handle_within(h, out, dx);
+  h.y = std::clamp(h.y, -REACH - p.co.y, 1.0f + REACH - p.co.y);
   (out ? p.out : p.in) = h;
   /* An end point has one handle: nothing to turn. */
   const bool has_other = out ? i > 0 : i + 1 < curve.points.size();

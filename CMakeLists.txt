@@ -570,6 +570,10 @@ add_test(NAME motion_path_on_path_fast
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_on_path_fast.py)
 add_test(NAME motion_path_point_actions_fast
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_point_actions_fast.py)
+add_test(NAME motion_path_sweep_guards
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_sweep_guards.py)
+add_test(NAME timeline_key_moves
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_timeline_key_moves.py)
 add_test(NAME motion_path_offsets_other_paths
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_offsets_other_paths.py)
 add_test(NAME motion_path_key_ends

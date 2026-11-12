@@ -23,7 +23,7 @@ def go(frame):
     doc.frame_current = frame
 
 
-def build(reference=False, knob_on_hair=False):
+def build(reference=False, knob_on_hair=False, kept_inside=False):
     ops.wm.read_homefile()
     doc.auto_key = True
     go(0)
@@ -76,6 +76,18 @@ def build(reference=False, knob_on_hair=False):
     if reference:
         assert ops.layer.make_reference() == {'FINISHED'}
         assert layers.active.reference_source is not None
+        copy = layers.active
+        if kept_inside:
+            # A bone kept inside the reference (Limit Shape): the point's keys, and the reference's copies of them,
+            # then count.
+            go(0)
+            layers.active = rig
+            ops.armature.select_none()
+            assert ops.armature.bone_add(name="lid", head_x="2.2", head_y="2.2", tail_x="2.3",
+                                         tail_y="2.2") == {'FINISHED'}
+            assert ops.armature.constraint_add(type="LIMIT_SHAPE", bone="lid") == {'FINISHED'}
+            rig.bone_constraint_set("lid", len(rig.bone_constraints("lid")) - 1, shape_layer=copy.name, fit="CENTER")
+            go(20)
         layers.active = art
     doc.auto_key = False
     doc.motion_paths = True
@@ -124,9 +136,9 @@ def moved(path):
     return max(math.dist(p, path["points"][0]) for p in path["points"])
 
 
-for reference in (False, True):
-    fast, counts = edit(True, reference=reference)
-    full, full_counts = edit(False, reference=reference)
+for reference, kept_inside in ((False, False), (True, False), (True, True)):
+    fast, counts = edit(True, reference=reference, kept_inside=kept_inside)
+    full, full_counts = edit(False, reference=reference, kept_inside=kept_inside)
     assert moved(full) > 0.3, ("the knob's action moves the point", moved(full))
     gap = worst(fast, full)
     assert gap < 1e-4, ("as working everything out", reference, gap)

@@ -2877,6 +2877,11 @@ void motion_path_operators_register()
       }
       path_edit_prepare(doc, targets);
       int frame = op_arg_int(C, "frame", doc.frame_current);
+      /* Never past the last frame a scene can have (frame_end's most): the path would run on to it. */
+      if (frame < 1 || frame > 1048574) {
+        report(ReportType::Error, "frame is 1 to 1048574 (the setup frame has its own key)");
+        return OpStatus::Cancelled;
+      }
       animation_sync(doc);
       KeyType type = KeyType::Breakdown;
       if (op_has_arg(C, "type") && !key_type_from_identifier(op_arg(C, "type"), &type)) {

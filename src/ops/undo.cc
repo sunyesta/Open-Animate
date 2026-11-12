@@ -140,6 +140,7 @@ void UndoStack::reset(const Document &doc)
  * view_state_restore in builtin_ops.cc), which `before`, a copy, takes from it. */
 static bool unchanged_since(Document &before, const Document &doc)
 {
+  const int frame = before.frame_current;
   before.frame_current = doc.frame_current;
   before.texts = doc.texts;
   before.overlays = doc.overlays;
@@ -149,6 +150,20 @@ static bool unchanged_since(Document &before, const Document &doc)
   before.auto_key = doc.auto_key;
   before.auto_key_mode = doc.auto_key_mode;
   before.time_together = doc.time_together;
+  before.timeline_only_selected = doc.timeline_only_selected;
+  before.timeline_lock = doc.timeline_lock;
+  before.timeline_locked = doc.timeline_locked;
+  before.timeline_show = doc.timeline_show;
+  before.timeline_kinds = doc.timeline_kinds;
+  before.timeline_search = doc.timeline_search;
+  if (before == doc) {
+    return true;
+  }
+  /* Pushed on another frame, the step shows that frame's pose: shown on this one, is it the same? */
+  if (frame == doc.frame_current) {
+    return false;
+  }
+  animation_evaluate(before, doc.frame_current);
   return before == doc;
 }
 

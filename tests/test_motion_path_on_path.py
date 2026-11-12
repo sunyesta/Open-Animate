@@ -8,7 +8,11 @@ and back to Follow Action it still looks the same. An edit to a path without key
 Run with:  OpenAnimate --background --python tests/test_motion_path_on_path.py
 """
 
+import json
 import math
+import os
+import shutil
+import zipfile
 import pathlib
 import tempfile
 
@@ -75,6 +79,10 @@ frames = range(0, 31)
 travel = math.dist(before[6], before[30])
 assert travel > 0.3, ("the action carries the ear across", before[6], before[30])
 
+doc.frame_current = 40
+past_before = tuple(next(b for b in rig().bones if b["name"] == "Ear")["position"])
+doc.frame_current = 18
+
 # On Path: keys where the knob has them, the path as it was.
 assert ops.anim.motion_path_on_path(on="1", **args) == {'FINISHED'}
 keys = rig().keyframes('bones["Ear"].position')
@@ -85,6 +93,7 @@ assert worst(before, on, frames) < 0.01 * travel, ("On Path moved the path", wor
 # Past the last key the actions still add what they do (only what they added there is left out).
 doc.frame_current = 40
 past = tuple(next(b for b in rig().bones if b["name"] == "Ear")["position"])
+assert math.dist(past, past_before) < 1e-4, ("past the last key the actions add again, as before", past, past_before)
 doc.frame_current = 18
 
 # A handle shapes the path as it shows: out of 6 straight up, the dots leave 6 going up (the action goes across).
@@ -149,6 +158,39 @@ for k in keys[1:]:
 # (Frame 0's key, the setup, stays: a path can't delete it.)
 assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0]
 assert path()["on_path"] is False, "one key holds no path: not On Path"
+# A file with On Path left on over one key (saved before a delete let go of it): opened, still not On Path.
+folder = tempfile.mkdtemp(prefix="oanim_onpath_")
+saved = os.path.join(folder, "one_key.oanim")
+assert ops.wm.save_as_mainfile(filepath=saved) == {'FINISHED'}
+with zipfile.ZipFile(saved) as z:
+    data = json.loads(z.read("document.json"))
+ears = []
+
+
+def find_ear(node):
+    if isinstance(node, dict):
+        if node.get("name") == "Ear" and "position_keys" in node:
+            ears.append(node)
+        for v in node.values():
+            find_ear(v)
+    elif isinstance(node, list):
+        for v in node:
+            find_ear(v)
+
+
+find_ear(data)
+assert len(ears) == 1, len(ears)
+ears[0]["position_keys_on_path"] = True
+old = os.path.join(folder, "old.oanim")
+with zipfile.ZipFile(old, "w") as z:
+    z.writestr("document.json", json.dumps(data))
+assert ops.wm.open_mainfile(filepath=old, confirmed="1") == {'FINISHED'}
+doc, layers = oanim.data.document, oanim.data.layers
+layers.active = rig()
+rig().select_bone("Ear")
+assert ops.wm.tool_motion_path() == {'FINISHED'}
+assert path()["on_path"] is False, "On Path over one key left on in a file: not On Path"
+shutil.rmtree(folder, ignore_errors=True)
 doc.auto_key = True
 doc.frame_current = 18
 e = next(b for b in rig().bones if b["name"] == "Ear")["position"]
@@ -264,5 +306,25 @@ want_in = (k6[0] + 0.05, k6[1] - 0.2)
 assert ops.anim.motion_path_handle(frame="6", side="IN", x=str(want_in[0]), y=str(want_in[1]), **args) == {'FINISHED'}
 got = {h["frame"]: h for h in path()["handles"]}[6]["in"]
 assert math.dist(got, want_in) < 1e-3, ("the handle went where it was put", got, want_in)
+
+# What the actions add past the last key, kept from a path drawn then, isn't added once a key past it puts those frames
+# between keys: from its keys (and the kept frames) the path is as working every frame out has it.
+rig_id, rig = build()
+args = dict(bone="Ear", head="1", layer=str(rig_id))
+assert ops.anim.motion_path_on_path(on="1", **args) == {'FINISHED'}
+whole = range(0, 45)
+kept = lambda: next(p for p in wm.motion_paths(kept=True) if p["label"] == "Ear head")
+kept()
+d = dots_at()
+assert ops.anim.motion_path_move(frame="40", x=str(d[40][0]), y=str(d[40][1] + 0.2), **args) == {'FINISHED'}
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 6, 30, 40]
+wm.motion_path_places_clear()
+p = kept()
+fast = {p["first"] + i: tuple(q) for i, q in enumerate(p["points"])}
+assert wm.motion_path_places()["offsets"] > 0, ("the kept frames used", wm.motion_path_places())
+wm.motion_path_own_from_keys(False)
+full = dots_at()
+wm.motion_path_own_from_keys(True)
+assert worst(fast, full, whole) < 1e-4, ("between the keys now, nothing kept added", worst(fast, full, whole))
 
 print("test_motion_path_on_path: ok")

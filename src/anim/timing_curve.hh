@@ -72,12 +72,12 @@ void timing_point_handles(const TimingCurve &curve, size_t i, float2 &r_in, floa
 /* A point put on the curve at time `x` (0-1, strictly inside), the segment split so its shape stays. Its index, or -1
  * on an empty curve or an `x` at a point already. */
 int timing_point_insert(TimingCurve &curve, float x);
-/* Moves point `i` to `co`, kept between its neighbours in time; its handles come with it. The ends never move (their
- * time and progress are the keys'). */
+/* Moves point `i` to `co`, kept between its neighbours in time and within ten stretches' way past either end; its
+ * handles come with it. The ends never move (their time and progress are the keys'). */
 void timing_point_move(TimingCurve &curve, size_t i, float2 co);
-/* Sets point `i`'s handle (`out` or in) to offset `h`, as a drawing's handle is dragged: an aligned point's other handle
- * turns to stay in line, keeping its length, unless `free` (Alt), which moves this one alone and makes the point
- * broken (Aligned in the Handles menu puts it back). */
+/* Sets point `i`'s handle (`out` or in) to offset `h` (its tip within ten stretches' way past either end), as a
+ * drawing's handle is dragged: an aligned point's other handle turns to stay in line, keeping its length, unless
+ * `free` (Alt), which moves this one alone and makes the point broken (Aligned in the Handles menu puts it back). */
 void timing_handle_set(TimingCurve &curve, size_t i, bool out, float2 h, bool free);
 /* Takes out point `i` (never an end); the curve fitted again over the frames it spanned would be another edit. */
 bool timing_point_remove(TimingCurve &curve, size_t i);

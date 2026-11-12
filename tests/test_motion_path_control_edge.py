@@ -97,6 +97,9 @@ bottom = control()["at"][1]
 assert bottom < top[1] - 0.004, ("down to the bottom edge", bottom, top)
 assert move(top[0], top[1] - 20.0) == {'FINISHED'}
 assert abs(control()["at"][1] - bottom) < 0.02 * (top[1] - bottom), "held at the bottom edge"
+# The first drag past it already stops where it is held (the edge found from the rate measured inside the box: the
+# slopes alone left it 0.0001 short).
+assert abs(control()["at"][1] - bottom) < 2e-5, ("the first drag stops at the edge", bottom, control()["at"])
 middle = 0.5 * (top[1] + bottom)
 assert move(top[0], middle) == {'FINISHED'}, "back from the far edge"
 assert abs(control()["at"][1] - middle) < 0.02 * (top[1] - bottom), ("back in the box", control()["at"], middle)
