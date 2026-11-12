@@ -5574,21 +5574,76 @@ std::vector<int> motion_path_driver_frames(const Document &doc, const MotionPath
   return frames.size() >= 2 ? std::vector<int>(frames.begin(), frames.end()) : std::vector<int>();
 }
 
+/* `doc` with its bone dynamics left out: they move bones' poses only (Layer::dynamics_now), never their own values. */
+static void dynamics_off(Document &doc)
+{
+  for (const Layer *flat : document_layers_flat(doc)) {
+    if (!flat->is_bone_layer()) {
+      continue;
+    }
+    Layer &l = *layer_find(doc, flat->id);
+    l.dynamics_now.clear();
+    for (Bone &b : l.bones) {
+      for (BoneConstraint &c : b.constraints) {
+        if (c.type == BoneConstraintType::Dynamics) {
+          c.enabled = false;
+        }
+      }
+    }
+  }
+}
+
 /* Where the bone's position is (its channel's value, actions' moves in) on each frame from `first` to `last`, and what
- * the actions add then, worked out on a copy of the document. */
+ * the actions add then, worked out on copies of the document, side by side. Dynamics elsewhere in the rig would have
+ * them worked out one at a time: they are left out where they can't change these, the bone's actions played from
+ * bones' own values alone (action_offsets_apart) and no driver on its layer, as dynamics move only poses; so is
+ * everything else that poses bones after the actions (AnimationValuesOnly), much of it bending drawings. */
 static void on_path_frames(const Document &doc, const MotionPathTarget &t, int first, int last, bool on_path,
                            std::map<int, float2> &r_at, std::map<int, float2> &r_added)
 {
-  Document copy = doc;
+  Document base = doc;
   g_doc_copies++;
-  if (Bone *b = on_path_bone(copy, t)) {
-    b->position_keys.on_path = on_path;
+  Layer *owner = nullptr;
+  Bone *bone = on_path_bone(base, t, &owner);
+  if (!bone || last < first) {
+    return;
   }
-  for (int f = first; f <= last; f++) {
-    animation_evaluate(copy, f);
-    if (const Bone *b = on_path_bone(copy, t)) {
-      r_at[f] = b->transform;
-      r_added[f] = b->position_keys.from_action_bones;
+  bone->position_keys.on_path = on_path;
+  const bool driven = std::any_of(base.drivers.begin(), base.drivers.end(), [&](const Driver &d) {
+    return d.target.layer == t.layer || (d.two_way && std::any_of(d.vars.begin(), d.vars.end(), [&](const DriverVar &v) {
+                                           return v.source.layer == t.layer;
+                                         }));
+  });
+  const bool values_only = g_own_from_keys && !driven && action_offsets_apart(base, *owner, *bone);
+  if (values_only) {
+    dynamics_off(base);
+  }
+  const size_t frames = size_t(last - first + 1);
+  std::vector<char> got(frames, 0);
+  std::vector<float2> at(frames), added(frames);
+  const size_t runs = dynamics_in(base) ? 1 : place_lanes(frames);
+  places_side_by_side(base, runs, [&](size_t run, Document &copy) {
+    copy = base;
+    g_doc_copies++;
+    std::optional<AnimationValuesOnly> plain;
+    if (values_only) {
+      plain.emplace();
+    }
+    for (size_t k = frames * run / runs; k < frames * (run + 1) / runs; k++) {
+      const int f = first + int(k);
+      animation_evaluate(copy, f);
+      g_path_frames++;
+      if (const Bone *b = on_path_bone(copy, t)) {
+        got[k] = 1;
+        at[k] = b->transform;
+        added[k] = b->position_keys.from_action_bones;
+      }
+    }
+  });
+  for (size_t k = 0; k < frames; k++) {
+    if (got[k]) {
+      r_at[first + int(k)] = at[k];
+      r_added[first + int(k)] = added[k];
     }
   }
 }

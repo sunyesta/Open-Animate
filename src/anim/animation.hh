@@ -41,6 +41,15 @@ struct Layer;
 void animation_record(Document &doc);
 /* Writes every animated channel's value at `frame` into its plain value. */
 void animation_evaluate(Document &doc, int frame);
+/* While one is open, animation_evaluate on this thread works out values only: channels, action bone actions and
+ * drivers, leaving out what poses bones after them (dynamics, Follow Point, Limit to Shape, Look At, outer parents)
+ * and the rounds of action bone actions read from those. For a caller reading only bones' own values, whose actions
+ * are played from bones' values alone (a path put On Path). */
+struct AnimationValuesOnly {
+  bool was;
+  AnimationValuesOnly();
+  ~AnimationValuesOnly();
+};
 /* After the current frame changed: records edits at the old frame, then evaluates the new one.
  * Does nothing when the frame is already evaluated. */
 void animation_sync(Document &doc);

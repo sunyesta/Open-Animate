@@ -1767,6 +1767,18 @@ static uint64_t posed_after_reads(const Document &doc)
   return h;
 }
 
+static thread_local bool t_values_only = false;
+
+AnimationValuesOnly::AnimationValuesOnly() : was(t_values_only)
+{
+  t_values_only = true;
+}
+
+AnimationValuesOnly::~AnimationValuesOnly()
+{
+  t_values_only = was;
+}
+
 static void evaluate_frame(Document &doc, int frame, bool recorded)
 {
   std::unordered_set<const Layer *> action_bone_layers;
@@ -1801,6 +1813,10 @@ static void evaluate_frame(Document &doc, int frame, bool recorded)
   }
   /* Bone dynamics swing from the pose the keys and action bone actions give (and set each bone layer's
    * shown frame, for constraints' delays). */
+  if (t_values_only) {
+    doc.evaluated_frame = frame;
+    return;
+  }
   const int shown = doc.frame_current;
   doc.frame_current = frame;
   OANIM_PROFILE("eval_after");
