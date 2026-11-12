@@ -190,10 +190,10 @@ bool op_targets(Context &C, std::vector<MotionPathTarget> &r_targets);
 
 /* Before an edit to their paths' shape: paths an action moves put On Path, edited as they show, keys added where
  * they have none (motion_path_edit_prepare). */
-static void path_edit_prepare(Document &doc, const std::vector<MotionPathTarget> &targets)
+static void path_edit_prepare(Document &doc, const std::vector<MotionPathTarget> &targets, int frame = -1)
 {
   for (const MotionPathTarget &t : targets) {
-    motion_path_edit_prepare(doc, t);
+    motion_path_edit_prepare(doc, t, frame);
   }
 }
 
@@ -1340,9 +1340,9 @@ void motion_path_operators_register()
       if (!op_targets(C, targets)) {
         return OpStatus::Cancelled;
       }
-      path_edit_prepare(doc, targets);
-      animation_sync(doc);
       const int frame = op_arg_int(C, "frame", doc.frame_current);
+      path_edit_prepare(doc, targets, frame);
+      animation_sync(doc);
       const float2 at = {op_arg_float(C, "x", 0.0f), op_arg_float(C, "y", 0.0f)};
       if (!motion_path_handle_set(doc, targets.front(), frame, op_arg(C, "side") != "IN", at, op_arg_bool(C, "broken")))
       {

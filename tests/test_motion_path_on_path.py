@@ -236,4 +236,33 @@ d = dots_at()
 lead = (d[2][0] - d[0][0], d[2][1] - d[0][1])
 assert lead[1] > 0.0 and lead[1] > 2.0 * abs(lead[0]), ("the path leaves 0 the handle's way", lead)
 
+# Keys of its own either side of a knob's key (the ear keyed on 0 and 30, the knob on 6): the knob's diamond between, with
+# no key of the ear's there, shows the handles the ear's key will have; dragged, the ear is keyed there in place (the path
+# as it was) and the handle goes where it is put.
+rig_id, rig = build()
+args = dict(bone="Ear", head="1", layer=str(rig_id))
+for f in (0, 30):
+    doc.frame_current = f
+    assert ops.anim.keyframe_insert() == {'FINISHED'}
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 30]
+doc.frame_current = 18
+assert ops.anim.motion_path_select(frame="6", **args) == {'FINISHED'}
+p = path()
+assert 6 in p["keys_picked"], p["keys_picked"]
+shown = {h["frame"]: h for h in p["handles"]}
+assert 6 in shown and shown[6]["in"] is not None, ("the knob's key between the ear's shows its handles", p["handles"])
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 30], "showing them keys nothing"
+before = dots_at()
+h6 = shown[6]["in"]
+assert ops.anim.motion_path_handle(frame="6", side="IN", x=str(h6[0]), y=str(h6[1]), **args) == {'FINISHED'}
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 6, 30]
+assert path()["on_path"] is True
+travel = max(math.dist(before[0], before[f]) for f in frames)
+assert worst(before, dots_at(), frames) < 0.01 * travel, ("keyed in place, the path as it was", worst(before, dots_at(), frames))
+k6 = dots_at()[6]
+want_in = (k6[0] + 0.05, k6[1] - 0.2)
+assert ops.anim.motion_path_handle(frame="6", side="IN", x=str(want_in[0]), y=str(want_in[1]), **args) == {'FINISHED'}
+got = {h["frame"]: h for h in path()["handles"]}[6]["in"]
+assert math.dist(got, want_in) < 1e-3, ("the handle went where it was put", got, want_in)
+
 print("test_motion_path_on_path: ok")

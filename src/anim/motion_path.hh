@@ -199,12 +199,14 @@ std::vector<int> motion_path_lit_dots(const Document &doc, const MotionPathTarge
 bool motion_path_on_path_allowed(const Document &doc, const MotionPathTarget &target);
 bool motion_path_on_path(const Document &doc, const MotionPathTarget &target);
 bool motion_path_on_path_set(Document &doc, const MotionPathTarget &target, bool on);
-bool motion_path_edit_prepare(Document &doc, const MotionPathTarget &target);
+/* With `frame`, the edit is to the key there (a handle dragged): one from what moves it, between keys of its own with
+ * none there, is added in place, the path kept (motion_path_edit_keys_at). */
+bool motion_path_edit_prepare(Document &doc, const MotionPathTarget &target, int frame = -1);
 /* The frames keys go on when a path without keys is edited: the keys of what moves it, and the setup frame. */
 std::vector<int> motion_path_driver_frames(const Document &doc, const MotionPathTarget &target);
 /* Whether the first edit to the path adds a key on `frame` (it has no keys of its own, or one, too few to hold a path,
- * and what moves it has one there): its diamond there then shows the handles that key will have (motion_path_handles),
- * and dragging one adds the keys. */
+ * or it is between two of its own with none there, and what moves it has one there): its diamond there then shows the
+ * handles that key will have (motion_path_handles), and dragging one adds the keys. */
 bool motion_path_edit_keys_at(const Document &doc, const MotionPathTarget &target, int frame);
 /* Whether the path shows a diamond on frame 0, the setup's key (picked for its out handle, never moved): a key there,
  * or one the first edit adds (motion_path_edit_keys_at), so a path with no keys of its own has both ends' handles. */

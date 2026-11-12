@@ -1141,8 +1141,9 @@ static void motion_path_tool_input(Context &C, Area &area, const ViewMapping &vi
     return;
   }
   if (!g.dragging && g.control < 0) {
-    /* A path an action moves edited as it shows (motion_path_edit_prepare); Esc goes back to the snapshot, before. */
-    motion_path_edit_prepare(doc, g.target);
+    /* A path an action moves edited as it shows (motion_path_edit_prepare), a handle's key added where it has none;
+     * Esc goes back to the snapshot, before. */
+    motion_path_edit_prepare(doc, g.target, g.handle ? g.frame : -1);
   }
   g.dragging = true;
   float2 at = view.to_document(io.MousePos);

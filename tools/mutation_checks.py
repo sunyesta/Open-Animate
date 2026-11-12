@@ -75,6 +75,9 @@ PENDING = [
     ('src/anim/motion_path.cc', '  Layer *owner = t.bone ? layer_find(doc, t.layer) : nullptr;',
      '  Layer *owner = t.bone && t.head ? layer_find(doc, t.layer) : nullptr;',
      'On Path and its handles on a tip path too, the bone not turning', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/motion_path.cc', '  if (ch.keys.size() >= 2 && (ch.key_at(frame) || frame <= ch.keys.front().frame || frame >= ch.keys.back().frame)) {',
+     '  if (ch.keys.size() >= 2) {',
+     'A diamond from what moves it between the bone\'s own keys shows the handles its key will have', 'tests/test_motion_path_on_path.py'),
 ]
 
 def build(root):

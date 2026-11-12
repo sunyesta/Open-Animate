@@ -4568,13 +4568,13 @@ bool motion_path_handles(const Document &doc, const MotionPathTarget &target, in
   const Channel<float2> *ch = handle_channel(const_cast<Document &>(doc), target);
   const Key<float2> *key = ch ? ch->key_at(frame) : nullptr;
   if (motion_path_edit_keys_at(doc, target, frame)) {
-    /* Too few keys of its own to hold a path (none, or a lone one), a diamond there from what moves it: the handles its
-     * key will have, the path put On Path (keys added, refitted) as the first edit to it puts it
-     * (motion_path_edit_prepare), on a copy. */
+    /* Too few keys of its own to hold a path (none, or a lone one), or between two with none there, a diamond there
+     * from what moves it: the handles its key will have, the path put On Path (keys added, refitted) as the first edit
+     * to it puts it (motion_path_edit_prepare), on a copy. */
     OANIM_PROFILE("motion_path_handles_unkeyed");
     Document copy = doc;
     g_doc_copies++;
-    const Channel<float2> *made = motion_path_on_path_set(copy, target, true) ? handle_channel(copy, target) : nullptr;
+    const Channel<float2> *made = motion_path_edit_prepare(copy, target, frame) ? handle_channel(copy, target) : nullptr;
     return made && made->key_at(frame) && motion_path_handles(copy, target, frame, r_key, r_in, r_out, r_mode);
   }
   float2 cx, cy;
@@ -5616,18 +5616,45 @@ bool motion_path_frame_picked(const std::map<int, KeyFrameSummary> &picked,
 bool motion_path_edit_keys_at(const Document &doc, const MotionPathTarget &target, int frame)
 {
   const Bone *b = on_path_bone(const_cast<Document &>(doc), target);
-  if (!b || b->position_keys.keys.size() >= 2 || b->position_keys.follow_action) {
+  if (!b || b->position_keys.follow_action) {
+    return false;
+  }
+  const Channel<float2> &ch = b->position_keys;
+  if (ch.keys.size() >= 2 && (ch.key_at(frame) || frame <= ch.keys.front().frame || frame >= ch.keys.back().frame)) {
+    /* Keys of its own: only a diamond between them where it has none (a knob's key inside its stretch) gets one. */
     return false;
   }
   const std::vector<int> frames = motion_path_driver_frames(doc, target);
   return std::binary_search(frames.begin(), frames.end(), frame);
 }
 
-bool motion_path_edit_prepare(Document &doc, const MotionPathTarget &target)
+bool motion_path_edit_prepare(Document &doc, const MotionPathTarget &target, int frame)
 {
   const Bone *b = on_path_bone(doc, target);
-  return b && !channel_on_path(b->position_keys) && !b->position_keys.follow_action &&
-         motion_path_on_path_set(doc, target, true);
+  if (!b || b->position_keys.follow_action) {
+    return false;
+  }
+  /* A key from what moves it inside a stretch of its own: added after it is On Path (where it shows then). */
+  const bool inside = frame >= 0 && b->position_keys.keys.size() >= 2 && motion_path_edit_keys_at(doc, target, frame);
+  bool changed = false;
+  if (!channel_on_path(b->position_keys)) {
+    if (!motion_path_on_path_set(doc, target, true)) {
+      return false;
+    }
+    changed = true;
+  }
+  if (inside) {
+    Channel<float2> &ch = on_path_bone(doc, target)->position_keys;
+    /* Where the stretch has it, the path split there as it runs (key_add_in_place); what the actions added there as
+     * its neighbours had it, as a key made there would (record_with in animation.cc). */
+    const float2 offset = channel_path_offset_at(ch, frame);
+    if (key_add_in_place(ch, frame)) {
+      ch.key_at(frame)->path_offset = offset;
+      animation_evaluate(doc, doc.frame_current);
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 bool motion_path_place(Document &doc, const MotionPathTarget &target, float2 at)
