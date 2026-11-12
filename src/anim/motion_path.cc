@@ -5655,6 +5655,34 @@ bool motion_path_setup_key(const Document &doc, const MotionPathTarget &target)
   return motion_path_is_key(doc, target, 0) || motion_path_edit_keys_at(doc, target, 0);
 }
 
+std::vector<PathRun> motion_path_runs(const Document &doc, const MotionPath &path)
+{
+  std::vector<PathRun> out;
+  const int n = int(path.points.size());
+  for (int i = 0; i < n;) {
+    PathRun r;
+    r.start = i;
+    r.end = i + 1;
+    while (r.end < n && length(path.points[size_t(r.end)] - path.points[size_t(i)]) < 1e-6f) {
+      r.end++;
+    }
+    r.frame = path.first + i;
+    for (int k = i; k < r.end; k++) {
+      const int f = path.first + k;
+      if (std::binary_search(path.keys.begin(), path.keys.end(), f) ||
+          (f == 0 && motion_path_setup_key(doc, path.target)))
+      {
+        r.frame = f;
+        r.key = true;
+        break;
+      }
+    }
+    out.push_back(r);
+    i = r.end;
+  }
+  return out;
+}
+
 bool motion_path_frame_picked(const std::map<int, KeyFrameSummary> &picked,
                               const std::vector<std::pair<MotionPathTarget, int>> &dots,
                               const MotionPathTarget &target, int frame, bool on_key)

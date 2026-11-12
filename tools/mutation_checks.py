@@ -97,6 +97,8 @@ PENDING = [
     ('src/anim/motion_path.cc', '  if (path_edit) {\n    return std::vector<Color>(path.points.size(), path.color);',
      '  if (false) {\n    return std::vector<Color>(path.points.size(), path.color);',
      'Edit Path\'s dots are the path\'s own colour', 'tests/test_motion_path_edit_split.py'),
+    ('src/anim/motion_path.cc', '        r.frame = f;\n        r.key = true;', '        r.key = true;',
+     'a held dot holding a key is the key\'s to click', 'tests/test_motion_path_edit_split.py'),
 ]
 
 def build(root):

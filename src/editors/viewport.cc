@@ -2479,11 +2479,8 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
     const std::vector<int> lit_dots = motion_path_lit_dots(doc, p.target, wm.path_dots);
     const std::vector<Color> dot_colors = motion_path_dot_colors(doc, p, lit_dots, path_edit);
     /* A dot every `step` frames (and on every key); frames it holds still over make one dot with how many. */
-    for (size_t i = 0; i < screen.size();) {
-      size_t run = i + 1;
-      while (run < screen.size() && length(p.points[run] - p.points[i]) < 1e-6f) {
-        run++;
-      }
+    for (const PathRun &dot_run : motion_path_runs(doc, p)) {
+      const size_t i = size_t(dot_run.start), run = size_t(dot_run.end);
       bool shown = false, key = false, selected = false, breakdown = false;
       for (size_t k = i; k < run; k++) {
         const int f = p.first + int(k);
@@ -2540,20 +2537,19 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
            * reach (the dots take no clicks there but Alt's). */
           const float bias = !key ? 0.0f : path_edit && !ImGui::GetIO().KeyAlt ? pick_path_pixels() : 2.0f;
           const float how_near = std::max(std::sqrt(dx * dx + dy * dy) - bias, 0.0f) + (path_edit && !key ? 0.01f : 0.0f);
-          /* Edit Timing: only the dots between keys. */
+          /* Edit Timing: only the dots between keys. A held dot is its key's, where it holds one. */
           if (hovering && !(timing_edit && key) && how_near * how_near < best) {
             best = how_near * how_near;
             hover_path = &p;
-            hover_frame = p.first + int(k);
+            hover_frame = dot_run.frame;
           }
           if (under_look && how_near * how_near < under_best) {
             under_best = how_near * how_near;
             under_path = &p;
-            under_frame = p.first + int(k);
+            under_frame = dot_run.frame;
           }
         }
       }
-      i = run;
     }
     const int now = doc.frame_current - p.first;
     if (now >= 0 && now < int(screen.size())) {

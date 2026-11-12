@@ -214,6 +214,15 @@ bool motion_path_edit_keys_at(const Document &doc, const MotionPathTarget &targe
 /* Whether the path shows a diamond on frame 0, the setup's key (picked for its out handle, never moved): a key there,
  * or one the first edit adds (motion_path_edit_keys_at), so a path with no keys of its own has both ends' handles. */
 bool motion_path_setup_key(const Document &doc, const MotionPathTarget &target);
+/* The frames a path draws as one dot, held still there (each within 1e-6 of the first): points [start, end), and the
+ * frame a press on it takes, its first key (frame 0's setup key too) when it holds one, so a key at the end of a hold
+ * (On Path's overshoot coming back) is still the key's; else its first frame. */
+struct PathRun {
+  int start = 0, end = 0;
+  int frame = 0;
+  bool key = false;
+};
+std::vector<PathRun> motion_path_runs(const Document &doc, const MotionPath &path);
 /* Whether a path's frame is picked, as the tool shows it (a key picked shows its handles): a key selected there (`picked`,
  * layers_key_summary of its key layers), or, on a key (`on_key`), its dot picked, as a diamond from what moves a path
  * with no keys of its own is (motion_path_edit_keys_at). */

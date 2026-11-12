@@ -1569,6 +1569,12 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["points"] = pts;
       d["speed"] = speed;
       d["keys"] = p.keys;
+      /* The dots as drawn: frames held still make one, which a press takes as its key's frame where it holds one. */
+      py::list runs;
+      for (const PathRun &r : motion_path_runs(doc, p)) {
+        runs.append(py::make_tuple(p.first + r.start, r.end - r.start, r.frame));
+      }
+      d["runs"] = runs;
       /* The keys picked, as the tool shows them (and their handles once editing): motion_path_frame_picked. */
       bool setup_picked = false;
       {

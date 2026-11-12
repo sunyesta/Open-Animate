@@ -78,6 +78,15 @@ assert not all(all(abs(a - b) < 1e-4 for a, b in zip(c[:3], p["color"])) for c i
 assert ops.anim.motion_path_brush_set(brush="EDIT") == {'FINISHED'}
 doc.path_dot_colors = "TIMING_CURRENT"
 
+# A stretch getting to its key early and holding there (as On Path's overshoot coming back can): frames 16-20 one dot,
+# and a click on it is the key's, which Edit Path takes (it was frame 16's, a dot taking no click).
+l.keyframe_set("position", 20, speeds=[1.0] * 6 + [0.0] * 4)
+p = next(p for p in wm.motion_paths() if p["layer"] == l.id)
+held = [r for r in p["runs"] if r[1] > 1 and r[0] < 20 <= r[0] + r[1] - 1]
+assert held and held[0][2] == 20, p["runs"]
+assert wm.motion_path_press_taken("EDIT", held[0][2] in p["keys"], False)
+assert all(r[2] == r[0] for r in p["runs"] if r[1] == 1), "a dot of its own takes its own frame"
+
 # O, proportional editing of the dots: Edit Timing's.
 ops.layer.new()
 empty = layers.active
