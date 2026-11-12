@@ -1400,6 +1400,11 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     static const char *const names[] = {"HANDLE", "PATH", "PICK", "DESELECT"};
     return std::string(names[int(motion_path_press_kind(on_handle, on_path, thing_under))]);
   });
+  m.def("motion_path_press_taken", [](const std::string &brush, bool on_key, bool alt) {
+    PathBrush b = PathBrush::Edit;
+    path_brush_from_id(brush, &b);
+    return motion_path_press_taken(b == PathBrush::EditTiming, on_key, alt);
+  });
   m.def("motion_path_vector_under", [](float x, float y, float zoom) {
     return motion_path_vector_under_test(current_context(), {x, y}, zoom);
   });
@@ -1951,7 +1956,10 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     d["radius"] = ts.path_brush_settings(sized).radius;
     d["strength"] = ts.path_brush_settings(sized).strength;
     py::dict each;
-    for (int i = 1; i < PATH_BRUSH_COUNT; i++) {
+    for (int i = 0; i < PATH_BRUSH_COUNT; i++) {
+      if (!path_brush_has_radius(PathBrush(i))) {
+        continue;
+      }
       const PathBrushSettings &bs = ts.path_brushes[i];
       each[path_brush_id(PathBrush(i))] = py::make_tuple(bs.radius, bs.strength);
     }

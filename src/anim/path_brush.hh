@@ -1,9 +1,10 @@
 #pragma once
 
-/* The Motion Path tool's brushes (its shelf along the bottom of the viewport): Edit is the tool itself (clicking and
- * dragging dots, keys and handles); Grab and Smooth move keys, Blend Speed evens out how fast a path is gone along
- * (anim/motion_path.hh). Shift held swaps in a brush, as Blender's sculpt Shift is Smooth: Grab's is Smooth, Edit's
- * Blend Speed. */
+/* The Motion Path tool's brushes (its shelf along the bottom of the viewport): Edit Path and Edit Timing are the tool
+ * itself, clicking and dragging (Edit Path the keys, handles and control points, where the path goes; Edit Timing the
+ * dots, when it gets there); Grab and Smooth move keys, Blend Speed evens out how fast a path is gone along
+ * (anim/motion_path.hh). Shift held swaps in a brush, as Blender's sculpt Shift is Smooth: Grab's is Smooth, Edit
+ * Timing's Blend Speed. */
 
 #include <cstdint>
 #include <string>
@@ -12,14 +13,15 @@
 
 namespace oanim {
 
-/* Edit takes dots, keys and handles; Grab, Smooth and Surface Smooth shape the path (the Sculpt tool's own, on the
- * path as a line: motion_path_sculpt_begin); Blend Speed, Pinch and Slide retime it. */
-enum class PathBrush : uint8_t { Edit, Grab, Smooth, BlendSpeed, Pinch, Slide, SurfaceSmooth };
-inline constexpr int PATH_BRUSH_COUNT = 7;
+/* Edit (Edit Path) takes keys, handles and control points, Edit Timing the dots between keys; Grab, Smooth and Surface
+ * Smooth shape the path (the Sculpt tool's own, on the path as a line: motion_path_sculpt_begin); Blend Speed, Pinch
+ * and Slide retime it. */
+enum class PathBrush : uint8_t { Edit, Grab, Smooth, BlendSpeed, Pinch, Slide, SurfaceSmooth, EditTiming };
+inline constexpr int PATH_BRUSH_COUNT = 8;
 
-/* "EDIT", "GRAB", "SMOOTH", "BLEND_SPEED", "PINCH", "SLIDE", "SURFACE_SMOOTH". */
+/* "EDIT", "GRAB", "SMOOTH", "BLEND_SPEED", "PINCH", "SLIDE", "SURFACE_SMOOTH", "EDIT_TIMING". */
 const char *path_brush_id(PathBrush brush);
-/* "Edit", "Grab", "Smooth", "Blend Speed", "Pinch", "Slide", "Surface Smooth". */
+/* "Edit Path", "Grab", "Smooth", "Blend Speed", "Pinch", "Slide", "Surface Smooth", "Edit Timing". */
 const char *path_brush_name(PathBrush brush);
 bool path_brush_from_id(const std::string &id, PathBrush *r_brush);
 /* The brushes painting speed under a circle (Ctrl paints the opposite: Pinch spreads). */
@@ -27,19 +29,25 @@ inline bool path_brush_is_speed(PathBrush brush)
 {
   return brush == PathBrush::BlendSpeed || brush == PathBrush::Pinch;
 }
+/* The tool's own clicking and dragging, no circle: Edit Path and Edit Timing. */
+inline bool path_brush_is_edit(PathBrush brush)
+{
+  return brush == PathBrush::Edit || brush == PathBrush::EditTiming;
+}
 /* The timing brushes (the shelf's Timing): they move no key and never change the path's shape, only when its dots
  * land. */
 inline bool path_brush_is_timing(PathBrush brush)
 {
-  return path_brush_is_speed(brush) || brush == PathBrush::Slide;
+  return path_brush_is_speed(brush) || brush == PathBrush::Slide || brush == PathBrush::EditTiming;
 }
-/* The brush Shift swaps in while held: Grab's Smooth; Edit's and the timing brushes' Blend Speed; the others are their
- * own. */
+/* The brush Shift swaps in while held: Grab's Smooth; Edit Timing's and the timing brushes' Blend Speed; the others
+ * are their own (Edit Path's Shift only adds to the selection). */
 inline PathBrush path_brush_shifted(PathBrush brush)
 {
-  return brush == PathBrush::Grab                                                     ? PathBrush::Smooth
-         : brush == PathBrush::Edit || brush == PathBrush::Pinch || brush == PathBrush::Slide ? PathBrush::BlendSpeed
-                                                                                      : brush;
+  return brush == PathBrush::Grab ? PathBrush::Smooth
+         : brush == PathBrush::EditTiming || brush == PathBrush::Pinch || brush == PathBrush::Slide
+             ? PathBrush::BlendSpeed
+             : brush;
 }
 /* The shape brushes: the Sculpt tool's Grab, Smooth and Surface Smooth on the path. */
 inline bool path_brush_is_sculpt(PathBrush brush)
@@ -60,10 +68,10 @@ struct PathBrushSettings {
   SculptFalloff falloff = SculptFalloff::Smooth;
   float sensitivity = 0.25f;
 };
-/* The brushes with a circle (a radius and a strength): all but Edit, which takes dots, keys and handles. */
+/* The brushes with a circle (a radius and a strength): all but Edit Path and Edit Timing, which click and drag. */
 inline bool path_brush_has_radius(PathBrush brush)
 {
-  return brush != PathBrush::Edit;
+  return !path_brush_is_edit(brush);
 }
 
 }  // namespace oanim

@@ -3018,15 +3018,15 @@ static void path_shape_fill(const Document &doc, MotionPath &p)
 
 const char *path_brush_id(PathBrush brush)
 {
-  static const char *const IDS[PATH_BRUSH_COUNT] = {"EDIT", "GRAB", "SMOOTH", "BLEND_SPEED", "PINCH", "SLIDE",
-                                                       "SURFACE_SMOOTH"};
+  static const char *const IDS[PATH_BRUSH_COUNT] = {"EDIT",  "GRAB",  "SMOOTH",         "BLEND_SPEED",
+                                                       "PINCH", "SLIDE", "SURFACE_SMOOTH", "EDIT_TIMING"};
   return IDS[int(brush)];
 }
 
 const char *path_brush_name(PathBrush brush)
 {
-  static const char *const NAMES[PATH_BRUSH_COUNT] = {"Edit", "Grab", "Smooth", "Blend Speed", "Pinch", "Slide",
-                                                         "Surface Smooth"};
+  static const char *const NAMES[PATH_BRUSH_COUNT] = {"Edit Path", "Grab",  "Smooth",         "Blend Speed",
+                                                         "Pinch",     "Slide", "Surface Smooth", "Edit Timing"};
   return NAMES[int(brush)];
 }
 

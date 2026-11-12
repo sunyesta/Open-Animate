@@ -68,15 +68,16 @@ assert s["brush"] == "GRAB" and close(s["radius"], 80.0) and close(s["strength"]
 assert ops.anim.motion_path_brush_set(brush="NOPE") == {'CANCELLED'}
 for gone in ("PAINT_SPEED", "FASTER", "SLOWER"):
     assert ops.anim.motion_path_brush_set(brush=gone) == {'CANCELLED'}, gone + " is gone"
-# Each brush keeps its own; Edit's are its Shift brush's, Blend Speed's.
+# Each brush keeps its own; Edit Timing's are its Shift brush's, Blend Speed's.
 assert ops.anim.motion_path_brush_set(brush="SMOOTH", radius="30", strength="0.2") == {'FINISHED'}
-assert ops.anim.motion_path_brush_set(brush="EDIT", radius="40", strength="0.9") == {'FINISHED'}
+assert ops.anim.motion_path_brush_set(brush="EDIT_TIMING", radius="40", strength="0.9") == {'FINISHED'}
 s = oanim.wm.path_brush_settings()
 assert close(s["brushes"]["GRAB"], (80.0, 0.7)) and close(s["brushes"]["SMOOTH"], (30.0, 0.2)), s
 assert close(s["brushes"]["BLEND_SPEED"], (40.0, 0.9)) and close(s["radius"], 40.0), s
 assert ops.anim.motion_path_brush_set(brush="GRAB") == {'FINISHED'}
 assert close(oanim.wm.path_brush_settings()["radius"], 80.0), "Grab's own again"
-assert ops.anim.motion_path_stroke(brush="EDIT", points="0,0") == {'CANCELLED'}, "Edit isn't a brush"
+assert ops.anim.motion_path_stroke(brush="EDIT", points="0,0") == {'CANCELLED'}, "Edit Path isn't a brush"
+assert ops.anim.motion_path_stroke(brush="EDIT_TIMING", points="0,0") == {'CANCELLED'}, "nor is Edit Timing"
 
 # --- Grab (stage 5): the keys under the brush follow the mouse by the falloff, none added ---------------------------
 box = fresh_layer({10: (0.0, 0.0), 20: (1.0, 0.0), 30: (2.0, 0.0)})
@@ -137,8 +138,9 @@ k = key(line, "position", 20)
 assert k["interp"] == "CUSTOM" and len(k["speeds"]) == 10 and close(sum(k["speeds"]), 10.0), k
 assert close(where(line, 10), (0.0, 0.0)) and close(where(line, 20), (1.0, 0.0)), "still arrives on its frames"
 assert all(abs(where(line, f)[1]) < 1e-5 for f in range(10, 21)), "the same straight path"
-# Shift with Edit is Blend Speed.
-assert close(blend("0.3", brush="EDIT", shift="1")[1], blended, 1e-5)
+# Shift with Edit Timing is Blend Speed; Edit Path's Shift only adds to the selection, no brush.
+assert close(blend("0.3", brush="EDIT_TIMING", shift="1")[1], blended, 1e-5)
+assert ops.anim.motion_path_stroke(brush="EDIT", shift="1", points="0.5,0", radius="0.3") == {'CANCELLED'}
 # Left out, a stroke's strength is its brush's own.
 held = oanim.wm.path_brush_settings()["brush"]
 assert ops.anim.motion_path_brush_set(brush="BLEND_SPEED", strength="0.3") == {'FINISHED'}

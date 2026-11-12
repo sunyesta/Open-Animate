@@ -881,9 +881,14 @@ PathPress motion_path_press_kind(bool on_handle, bool on_path, bool thing_under)
   return thing_under ? PathPress::Pick : PathPress::Deselect;
 }
 
+bool motion_path_press_taken(bool timing, bool on_key, bool alt)
+{
+  return timing ? !on_key && !alt : on_key || alt;
+}
+
 static void motion_path_tool_input(Context &C, Area &area, const ViewMapping &view, const MotionPath *hover_path,
                                    int hover_frame, int first, int last, const PathHandlesShown *hover_handle,
-                                   bool hover_out, bool hovered, ImDrawList *dl)
+                                   bool hover_out, bool hovered, ImDrawList *dl, bool timing)
 {
   OANIM_PROFILE("motion_path_tool_input");
   Document &doc = *C.document;
@@ -958,6 +963,26 @@ static void motion_path_tool_input(Context &C, Area &area, const ViewMapping &vi
   if (!g.active) {
     if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       return;
+    }
+    if (hover_path) {
+      const bool on_key_here = std::binary_search(hover_path->keys.begin(), hover_path->keys.end(), hover_frame) ||
+                               (hover_frame == 0 && motion_path_setup_key(doc, hover_path->target));
+      /* Edit Path takes the keys, Edit Timing the dots: the other kind takes no click (a double click still goes to
+       * its frame), so what lies under it gets the press. Edit Timing adds nothing: Alt's are Edit Path's. */
+      if (!motion_path_press_taken(timing, on_key_here, io.KeyAlt)) {
+        if (io.KeyAlt) {
+          return;
+        }
+        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+          OpArgs go = motion_path_target_args(doc, hover_path->target);
+          go["frame"] = std::to_string(hover_frame);
+          go["go"] = "1";
+          go["pick"] = "0";
+          operator_call(C, "anim.motion_path_select", go);
+          return;
+        }
+        hover_path = nullptr;
+      }
     }
     /* Anything but a path handle pressed: the handles picked are let go (never picked with anything else). */
     C.wm->path_handle_picks.clear();
@@ -1596,7 +1621,7 @@ static void motion_path_brush_input(Context &C, Area &area, const ViewMapping &v
   ToolSettings &ts = wm.tool_settings;
   const ImGuiIO &io = ImGui::GetIO();
   auto &g = g_path_brush;
-  /* F and Shift F size the brush picked (Edit's: Shift's, Blend Speed). */
+  /* F and Shift F size the brush picked (Edit Timing's: Shift's, Blend Speed). */
   PathBrushSettings &picked = ts.path_brush_settings(
       path_brush_has_radius(ts.path_brush) ? ts.path_brush : path_brush_shifted(ts.path_brush));
   if (wm.path_adjust_request && hovered && !g.active) {
@@ -1731,8 +1756,8 @@ static void motion_path_brush_input(Context &C, Area &area, const ViewMapping &v
     g.last = io.MousePos;
     g.press = mouse;
     g.press_px = io.MousePos;
-    /* Edit's Shift: a click on a dot or key adds it to the selection; only a drag paints. */
-    g.pending = ts.path_brush == PathBrush::Edit;
+    /* Edit Timing's Shift: a click on a dot adds it to the selection; only a drag paints. */
+    g.pending = ts.path_brush == PathBrush::EditTiming;
     g.pick = pick;
     if (path_brush_is_timing(brush)) {
       g.together.start(doc);
@@ -2178,8 +2203,11 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
     return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, c.a * alpha));
   };
   const ImVec2 mouse = ImGui::GetIO().MousePos;
-  /* With a brush other than Edit the dots aren't picked, and only the brush's circle shows. */
-  const bool editing = !tool || wm.tool_settings.path_brush == PathBrush::Edit;
+  /* With a brush other than Edit Path or Edit Timing nothing is picked, and only the brush's circle shows. Edit Path
+   * takes the keys, handles and control points, Edit Timing the dots between keys. */
+  const bool editing = !tool || path_brush_is_edit(wm.tool_settings.path_brush);
+  const bool timing_edit = tool && wm.tool_settings.path_brush == PathBrush::EditTiming;
+  const bool path_edit = tool && wm.tool_settings.path_brush == PathBrush::Edit;
   const bool moving = path_hover_quiet_update(wm.modal_running || g_path_brush.active || motion_path_vector_active() ||
                                               g_path_drag.active || g_path_slide.active);
   const bool hovering = hovered && editing && !moving &&
@@ -2336,9 +2364,12 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
         }
         for (size_t k = i; k < run; k++) {
           const float dx = screen[k].x - mouse.x, dy = screen[k].y - mouse.y;
-          /* A key wins over a dot about as near (it is drawn over it). */
-          const float how_near = std::max(std::sqrt(dx * dx + dy * dy) - (key ? 2.0f : 0.0f), 0.0f);
-          if (hovering && how_near * how_near < best) {
+          /* A key wins over a dot about as near (it is drawn over it); with Edit Path, over any dot while it is in
+           * reach (the dots take no clicks there but Alt's). */
+          const float bias = !key ? 0.0f : path_edit && !ImGui::GetIO().KeyAlt ? pick_path_pixels() : 2.0f;
+          const float how_near = std::max(std::sqrt(dx * dx + dy * dy) - bias, 0.0f) + (path_edit && !key ? 0.01f : 0.0f);
+          /* Edit Timing: only the dots between keys. */
+          if (hovering && !(timing_edit && key) && how_near * how_near < best) {
             best = how_near * how_near;
             hover_path = &p;
             hover_frame = p.first + int(k);
@@ -2446,7 +2477,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
       const ImVec2 e = view.to_screen(h.drawn.apply(out ? h.out : h.in));
       handle_lines.push_back({float2{k.x, k.y}, float2{e.x, e.y}});
       const float dx = e.x - mouse.x, dy = e.y - mouse.y;
-      if (tool && hovering && dx * dx + dy * dy < handle_best) {
+      if (tool && hovering && !timing_edit && dx * dx + dy * dy < handle_best) {
         handle_best = dx * dx + dy * dy;
         hover_handle = &h;
         hover_out = out;
@@ -2550,7 +2581,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
           }
           handle_lines.push_back({float2{s.x, s.y}, float2{e.x, e.y}});
           const float tx = e.x - mouse.x, ty = e.y - mouse.y;
-          if (tool && hovering && !hover_handle && tx * tx + ty * ty < best_control) {
+          if (tool && hovering && !timing_edit && !hover_handle && tx * tx + ty * ty < best_control) {
             best_control = tx * tx + ty * ty;
             hover_cs = &cs;
             g_path_control_hover = PathControlHover{cs.target, cs.c.end, cs.c.index, cs.c.near_frame, part, cs.drawn};
@@ -2558,7 +2589,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
         }
       }
       const float dx = s.x - mouse.x, dy = s.y - mouse.y;
-      if (tool && hovering && !hover_handle && dx * dx + dy * dy < best_control) {
+      if (tool && hovering && !timing_edit && !hover_handle && dx * dx + dy * dy < best_control) {
         best_control = dx * dx + dy * dy;
         hover_cs = &cs;
         g_path_control_hover = PathControlHover{cs.target, cs.c.end, cs.c.index, cs.c.near_frame, 0, cs.drawn};
@@ -2680,12 +2711,16 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
       return;
     }
     draw_selected_path_dots(C, view, dl, hover_path, hover_frame, cache.paths);
-    /* Shift held with Edit: Blend Speed's circle (a drag paints, a click on a dot or key adds it), and F sizing it.
-     * Alt Shift stays Edit's breakdown. */
+    /* Shift held with Edit Timing: Blend Speed's circle (a drag paints, a click on a dot adds it), and F sizing it.
+     * Edit Path's Shift only adds to the selection, and it has no brush to size. */
     const ImGuiIO &io = ImGui::GetIO();
-    if (g_path_brush.active || g_path_brush.adjust || wm.path_adjust_request ||
-        (io.KeyShift && !io.KeyAlt && !g_path_drag.active && !g_path_slide.active && !motion_path_vector_active() &&
-         hovered && !((hover_handle || g_path_control_hover) && ImGui::IsMouseClicked(ImGuiMouseButton_Left))))
+    if (path_edit) {
+      wm.path_adjust_request = 0;
+    }
+    if (timing_edit &&
+        (g_path_brush.active || g_path_brush.adjust || wm.path_adjust_request ||
+         (io.KeyShift && !io.KeyAlt && !g_path_drag.active && !g_path_slide.active && !motion_path_vector_active() &&
+          hovered)))
     {
       std::optional<OpArgs> pick;
       if (hover_path) {
@@ -2709,7 +2744,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
     const std::optional<PathHandlesShown> pressed_handle =
         hover_handle ? std::optional<PathHandlesShown>(*hover_handle) : std::nullopt;
     motion_path_tool_input(C, area, view, pressed ? &*pressed : nullptr, hover_frame, first, last,
-                           pressed_handle ? &*pressed_handle : nullptr, hover_out, hovered, dl);
+                           pressed_handle ? &*pressed_handle : nullptr, hover_out, hovered, dl, timing_edit);
     if (g_path_drag.active) {
       return;
     }
@@ -5133,7 +5168,7 @@ static void motion_path_menus(Context &C, bool hovered)
 {
   WindowManager &wm = *C.wm;
   const ToolSettings &ts = wm.tool_settings;
-  const bool edit = C.document && ts.tool == Tool::MotionPath && ts.path_brush == PathBrush::Edit;
+  const bool edit = C.document && ts.tool == Tool::MotionPath && path_brush_is_edit(ts.path_brush);
   if (hovered && wm.menu_request == "motion_path_handles") {
     g_path_stretch_menu.valid = false;
     ImGui::OpenPopup("##path_handles");
@@ -5789,7 +5824,7 @@ static void motion_path_header(Context &C)
   }
   /* The brush picked on the shelf, and its settings. */
   ToolSettings &ts = C.wm->tool_settings;
-  if (ts.path_brush != PathBrush::Edit) {
+  if (path_brush_has_radius(ts.path_brush)) {
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
@@ -5873,6 +5908,7 @@ static const char *tool_hint(const ToolSettings &ts)
     case Tool::MotionPath:
       switch (ts.path_brush) {
         case PathBrush::Edit:
+        case PathBrush::EditTiming:
           break;
         case PathBrush::Grab:
           return "Drag: the path under the brush follows, as the Sculpt tool's Grab, the keys keeping their timing  |  "
@@ -5892,9 +5928,12 @@ static const char *tool_hint(const ToolSettings &ts)
           return "Drag: the dots in the circle slide along the path, the keys staying  |  Shift: Blend Speed  |  "
                  "F: radius  |  Esc: cancel";
       }
-      return "Click: select  |  Shift: add  |  Shift drag: Blend Speed  |  Double click: its frame  |  Drag a key: "
-             "move it, a dot: slide it (O: proportional)  |  Alt click: add a control point  |  Alt Shift: breakdown on "
-             "the arc  |  G R S  |  Alt S: timing  |  V: handles  |  X: delete";
+      if (ts.path_brush == PathBrush::EditTiming) {
+        return "Click a dot: select  |  Shift: add  |  Shift drag: Blend Speed  |  Double click: its frame  |  Drag a "
+               "dot: slide it (O: proportional)  |  Alt S: timing";
+      }
+      return "Click a key: select  |  Shift: add  |  Double click: its frame  |  Drag a key: move it  |  Alt click: "
+             "add a control point  |  Alt Shift: breakdown on the arc  |  G R S  |  V: handles  |  X: delete";
     default:
       return "";
   }

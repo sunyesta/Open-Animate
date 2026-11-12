@@ -85,6 +85,10 @@ uint64_t overlay_drawing_identity_test(const Layer &layer);
  * that; off the paths, a bone or point is picked; else the path selection clears. */
 enum class PathPress { Handle, Path, Pick, Deselect };
 PathPress motion_path_press_kind(bool on_handle, bool on_path, bool thing_under);
+/* Whether a left press on a path's key (`on_key`) or dot is the brush's to take: Edit Path takes the keys, and Alt's
+ * presses anywhere on the path (a key, control point or breakdown added); Edit Timing (`timing`) only the dots, never
+ * with Alt. One not taken passes to what lies under it (a double click still goes to its frame). */
+bool motion_path_press_taken(bool timing, bool on_key, bool alt);
 /* Test hook: the Motion Path tool's pick at document point `at` (zoom pixels a unit): whether a bone or point is
  * there, and with `apply` picks it (`extend` adds). */
 bool motion_path_pick_test(Context &C, float2 at, float zoom, bool extend, bool apply);

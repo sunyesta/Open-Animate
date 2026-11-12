@@ -294,7 +294,13 @@ static bool stroke_brush(Context &C, PathBrush &r_brush)
 static bool path_edit_poll(Context &C)
 {
   return C.document && C.wm && C.wm->tool_settings.tool == Tool::MotionPath &&
-         C.wm->tool_settings.path_brush == PathBrush::Edit;
+         path_brush_is_edit(C.wm->tool_settings.path_brush);
+}
+
+/* Edit Path's own shortcuts (the keys and handles: G R S, V, X): not Edit Timing's, which takes only dots. */
+static bool path_shape_poll(Context &C)
+{
+  return path_edit_poll(C) && C.wm->tool_settings.path_brush == PathBrush::Edit;
 }
 
 /* The keys selected on the paths traced. */
@@ -705,7 +711,8 @@ void motion_path_operators_register()
                      "tool's Edit does: a key (showing its path handles), or a dot between keys (for its timing); "
                      "extend=1 (Shift) adds it to the selection, or takes it out if it was in (a key keeping the control "
                      "points picked, a dot letting them go); go=1 (double click) "
-                     "also goes to that frame; none=1 deselects every key and dot";
+                     "also goes to that frame (with pick=0 only goes there, as Edit Path's double click on a dot); "
+                     "none=1 deselects every key and dot";
     ot.flag = OPTYPE_REGISTER;
     ot.poll = [](Context &C) { return C.document != nullptr; };
     ot.exec = [](Context &C) {
@@ -716,6 +723,12 @@ void motion_path_operators_register()
       }
       /* Frame 0 only for its key, the setup's: picked for its out handle, never a dot to slide. */
       const int frame = std::max(0, op_arg_int(C, "frame", doc.frame_current));
+      if (op_arg_bool(C, "go") && op_has_arg(C, "pick") && !op_arg_bool(C, "pick")) {
+        doc.frame_current = frame;
+        animation_sync(doc);
+        C.undo->mark_selection_changed();
+        return OpStatus::Finished;
+      }
       PathToolSync sync{C};
       std::vector<std::pair<MotionPathTarget, int>> &dots = C.wm->path_dots;
       const bool none = op_arg_bool(C, "none");
@@ -955,7 +968,7 @@ void motion_path_operators_register()
                      "back to Auto, the control points deleted (the path as it was without them; keys picked with them "
                      "deleted too), a control point's handles picked worked out smooth again";
     ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-    ot.poll = [](Context &C) { return path_edit_poll(C) && path_handles_picked(C); };
+    ot.poll = [](Context &C) { return path_shape_poll(C) && path_handles_picked(C); };
     ot.exec = [](Context &C) {
       animation_sync(*C.document);
       std::vector<MotionPathHandlePick> &picks = C.wm->path_handle_picks;
@@ -1387,7 +1400,8 @@ void motion_path_operators_register()
     OperatorType ot;
     ot.idname = "anim.motion_path_brush_set";
     ot.name = "Set Motion Path Brush";
-    ot.description = "Pick the Motion Path tool's brush (brush=EDIT, GRAB, SMOOTH, BLEND_SPEED, PINCH or SLIDE), "
+    ot.description = "Pick the Motion Path tool's brush (brush=EDIT for Edit Path, EDIT_TIMING, GRAB, SMOOTH, "
+                     "SURFACE_SMOOTH, BLEND_SPEED, PINCH or SLIDE), "
                      "Edit Layer (edit_layer=0/1: the layer itself, not its bones and points), and set that "
                      "brush's own radius= (screen pixels) and strength= (Edit's are its Shift brush's, Blend Speed's), "
                      "the timing chart's and Path Timing graph's reach (chart_size=, graph_size=, in frames), "
@@ -1405,7 +1419,7 @@ void motion_path_operators_register()
         }
         ts.path_brush = brush;
       }
-      /* Edit has no circle of its own: its settings are Shift's brush's. */
+      /* Edit Path and Edit Timing have no circle of their own: their settings are Shift's brush's. */
       const PathBrush sized = path_brush_has_radius(ts.path_brush) ? ts.path_brush : path_brush_shifted(ts.path_brush);
       PathBrushSettings &bs = ts.path_brush_settings(sized);
       if (op_has_arg(C, "radius")) {
@@ -2585,7 +2599,7 @@ void motion_path_operators_register()
                            "keys about their centre, handles scaling with them)";
     ot.flag = 0;
     ot.poll = [](Context &C) {
-      return path_edit_poll(C) && (path_handles_picked(C) || !path_selected_keys(C).empty());
+      return path_shape_poll(C) && (path_handles_picked(C) || !path_selected_keys(C).empty());
     };
     ot.exec = [kind](Context &C) {
       C.wm->path_keys_request = kind;
@@ -2664,7 +2678,7 @@ void motion_path_operators_register()
     ot.description = "V with the Motion Path tool's Edit: a menu of handle types for the selected keys (or the keys of "
                      "the path handles picked)";
     ot.flag = 0;
-    ot.poll = [](Context &C) { return path_edit_poll(C) && (path_handles_picked(C) || !path_selected_keys(C).empty()); };
+    ot.poll = [](Context &C) { return path_shape_poll(C) && (path_handles_picked(C) || !path_selected_keys(C).empty()); };
     ot.exec = [](Context &C) {
       C.wm->menu_request = "motion_path_handles";
       return OpStatus::Finished;
@@ -2678,7 +2692,7 @@ void motion_path_operators_register()
     ot.description = "Delete the selected keys of the paths traced (X with the Motion Path tool's Edit; the setup "
                      "frame's stay)";
     ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-    ot.poll = [](Context &C) { return path_edit_poll(C) && !path_selected_keys(C).empty(); };
+    ot.poll = [](Context &C) { return path_shape_poll(C) && !path_selected_keys(C).empty(); };
     ot.exec = [](Context &C) {
       animation_record(*C.document);
       if (motion_path_keys_delete(*C.document, motion_path_targets(C)) == 0) {

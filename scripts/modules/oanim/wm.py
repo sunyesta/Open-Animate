@@ -508,6 +508,12 @@ def motion_path_press_kind(on_handle=False, on_path=False, thing_under=False):
     return _oanim.motion_path_press_kind(bool(on_handle), bool(on_path), bool(thing_under))
 
 
+def motion_path_press_taken(brush, on_key=False, alt=False):
+    """Whether a left press on a path's key (on_key) or dot is the brush's to take: EDIT (Edit Path) takes keys and
+    Alt's presses, EDIT_TIMING only dots, never with Alt."""
+    return _oanim.motion_path_press_taken(str(brush), bool(on_key), bool(alt))
+
+
 def motion_path_vector_under(x, y, zoom=100.0):
     """Test hook: whether a point, a shown handle or (outside Points mode) a line of the drawings being edited is at
     document point (x, y): there the Motion Path tool's Edit brush edits the drawing as the Select tool does."""

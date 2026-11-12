@@ -1,5 +1,6 @@
-/* The Motion Path tool's brush shelf (editors/tool_shelf.hh), while it is the tool: tabs All and Shape; a tile
- * per brush, its picture a path with what the brush does to it, its name beneath. Clicking a tile picks the brush. */
+/* The Motion Path tool's brush shelf (editors/tool_shelf.hh), while it is the tool: tabs All, Shape and Timing, each
+ * led by its Edit (Edit Path, Edit Timing); a tile per brush, its picture a path with what the brush does to it, its
+ * name beneath. Clicking a tile picks the brush. */
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "imgui.h"
@@ -61,6 +62,19 @@ void path_brush_icon(ImDrawList *dl, PathBrush brush, ImVec2 c, float s, unsigne
       const float r = s * 0.13f;
       const ImVec2 d[4] = {{k.x, k.y - r}, {k.x + r, k.y}, {k.x, k.y + r}, {k.x - r, k.y}};
       dl->AddConvexPolyFilled(d, 4, col);
+      break;
+    }
+    case PathBrush::EditTiming: {
+      /* Dots along the arc, one picked (orange), slid along it. */
+      arc_line(dl, c, s, COL_FAINT, 0.45f, t * 0.6f);
+      dots(dl, c, s, 7, even, col);
+      const float u = 0.58f;
+      const ImVec2 p = c + ImVec2((u - 0.5f) * 1.6f * s, -std::sin(u * 3.14159f) * 0.45f * s + 0.25f * s);
+      dl->AddCircleFilled(p, std::max(2.5f, s * 0.12f), COL_ARROW);
+      const ImVec2 a = c + ImVec2(-0.1f * s, 0.45f * s), b = c + ImVec2(0.35f * s, 0.45f * s);
+      dl->AddLine(a, b, COL_ARROW, t);
+      dl->AddTriangleFilled(b + ImVec2(0.14f * s, 0), b + ImVec2(-0.02f * s, -0.1f * s),
+                            b + ImVec2(-0.02f * s, 0.1f * s), COL_ARROW);
       break;
     }
     case PathBrush::Grab:
@@ -134,11 +148,11 @@ void path_brush_icon(ImDrawList *dl, PathBrush brush, ImVec2 c, float s, unsigne
   }
 }
 
-/* 0 All, 1 Shape (Grab, Smooth), 2 Timing (Blend Speed, Pinch, Slide). */
+/* 0 All, 1 Shape (Edit Path, Grab, Smooth, Surface Smooth), 2 Timing (Edit Timing, Blend Speed, Pinch, Slide). */
 static bool in_tab(PathBrush brush, int tab)
 {
   if (tab == 1) {
-    return path_brush_is_sculpt(brush);
+    return brush == PathBrush::Edit || path_brush_is_sculpt(brush);
   }
   if (tab == 2) {
     return path_brush_is_timing(brush);
@@ -150,11 +164,15 @@ static const char *brush_tip(PathBrush brush)
 {
   switch (brush) {
     case PathBrush::Edit:
-      return "Click a key or a dot to select it (Shift: add or take out; double click: go to its frame). Drag a key "
-             "to move it, a dot along its path (proportional editing: O), a selected key's handles to bend the path "
-             "(Alt breaks them). Alt click the path: a control point there, shaping it only (Alt drag: and move it; "
-             "Alt Shift: a breakdown on the arc). G R S on the selected keys, V their handle types, X deletes them; "
-             "Alt S scales the timing around the selection. Shift drag: Blend Speed";
+      return "Where the path goes: click a key to select it (Shift: add or take out; double click: go to its frame). "
+             "Drag a key to move it, a selected key's handles to bend the path (Alt breaks them). Alt click the path: "
+             "a control point there, shaping it only (Alt drag: and move it; Alt Shift: a breakdown on the arc). G R S "
+             "on the selected keys, V their handle types, X deletes them. The dots take no clicks here (a double "
+             "click goes to a dot's frame): Edit Timing edits them";
+    case PathBrush::EditTiming:
+      return "When the path gets there: click a dot to select it (Shift drag: Blend Speed; double click: go to its "
+             "frame), drag a dot along its path (proportional editing: O). Alt S scales the timing around the dots "
+             "selected. Keys and handles show but take no clicks here: Edit Path edits them";
     case PathBrush::Grab:
       return "The Sculpt tool's Grab on the path: the path under the brush follows the mouse, the middle most, its "
              "keys, control points and handles fitted to it; each stretch keeps its timing. Shift: Smooth";
@@ -201,10 +219,9 @@ void path_shelf_draw(Context &C, Area &area, ImVec2 min, ImVec2 size)
     const int per_row = std::max(1, int((size.x - gap) / (tile + gap)));
     const std::string search = shelf_lower(shelf.search);
     std::vector<PathBrush> shown;
-    static constexpr PathBrush ORDER[PATH_BRUSH_COUNT] = {PathBrush::Edit,          PathBrush::Grab,
-                                                          PathBrush::Smooth,        PathBrush::SurfaceSmooth,
-                                                          PathBrush::BlendSpeed,    PathBrush::Pinch,
-                                                          PathBrush::Slide};
+    static constexpr PathBrush ORDER[PATH_BRUSH_COUNT] = {
+        PathBrush::Edit,       PathBrush::Grab,       PathBrush::Smooth, PathBrush::SurfaceSmooth,
+        PathBrush::EditTiming, PathBrush::BlendSpeed, PathBrush::Pinch,  PathBrush::Slide};
     for (const PathBrush brush : ORDER) {
       if (in_tab(brush, shelf.tab) &&
           (search.empty() || shelf_lower(path_brush_name(brush)).find(search) != std::string::npos))

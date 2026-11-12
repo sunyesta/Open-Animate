@@ -82,6 +82,12 @@ PENDING = [
      'A key left last by a delete: its out handle back in line', 'tests/test_motion_path_key_ends.py'),
     ('src/anim/channel.cc', '      k.path_handles = PathHandles::Auto;', '      k.path_handles = k.path_handles;',
      'A key left alone by a delete: its handles back to Auto', 'tests/test_motion_path_key_ends.py'),
+    ('src/editors/viewport.cc', '  return timing ? !on_key && !alt : on_key || alt;', '  return on_key || alt;',
+     'Edit Timing takes only dots, Edit Path keys', 'tests/test_motion_path_edit_split.py'),
+    ('src/ops/motion_path_ops.cc', '  return path_edit_poll(C) && C.wm->tool_settings.path_brush == PathBrush::Edit;',
+     '  return path_edit_poll(C);', 'G R S, V and X are Edit Path\'s only', 'tests/test_motion_path_edit_split.py'),
+    ('src/ops/motion_path_ops.cc', '      if (op_arg_bool(C, "go") && op_has_arg(C, "pick") && !op_arg_bool(C, "pick")) {',
+     '      if (false) {', 'Edit Path\'s double click on a dot only goes to its frame', 'tests/test_motion_path_edit_split.py'),
 ]
 
 def build(root):

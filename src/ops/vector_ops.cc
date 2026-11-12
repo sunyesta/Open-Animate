@@ -1745,8 +1745,8 @@ void vector_operators_register()
       if (!C.document || !C.wm) {
         return false;
       }
-      /* The Motion Path tool's Edit slides path dots proportionally too. */
-      if (C.wm->tool_settings.tool == Tool::MotionPath && C.wm->tool_settings.path_brush == PathBrush::Edit) {
+      /* The Motion Path tool's Edit Timing slides path dots proportionally too. */
+      if (C.wm->tool_settings.tool == Tool::MotionPath && C.wm->tool_settings.path_brush == PathBrush::EditTiming) {
         return true;
       }
       for (const Layer *layer : editable_layers(C)) {
