@@ -92,6 +92,8 @@ PENDING = [
      'G on several dots with O: each picked dot still lands where it is taken', 'tests/test_motion_path_dots_grab.py'),
     ('src/anim/motion_path.cc', '      if (f <= 0 || std::binary_search(p.keys.begin(), p.keys.end(), f) || at.x < lo.x || at.x > hi.x ||',
      '      if (f <= 0 || at.x < lo.x || at.x > hi.x ||', 'Edit Timing\'s box picks no key', 'tests/test_motion_path_dots_grab.py'),
+    ('src/ops/motion_path_ops.cc', '        if (brush == PathBrush::Edit && ts.path_brush != PathBrush::Edit && !C.wm->path_dots.empty()) {',
+     '        if (false) {', 'Edit Path lets go of the dots picked', 'tests/test_motion_path_edit_split.py'),
 ]
 
 def build(root):

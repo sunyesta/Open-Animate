@@ -58,6 +58,16 @@ assert doc.frame_current == 13
 assert not wm.motion_path_dots(), wm.motion_path_dots()
 assert not any(k["selected"] for k in l.keyframes("position")), "nothing picked"
 
+# Dots are Edit Timing's: Edit Path lets go of those picked (it neither shows nor picks them); keys stay picked.
+assert ops.anim.motion_path_brush_set(brush="EDIT_TIMING") == {'FINISHED'}
+assert ops.anim.motion_path_select(frame="13", layer=str(l.id)) == {'FINISHED'}
+assert ops.anim.motion_path_select(frame="20", layer=str(l.id), extend="1") == {'FINISHED'}
+assert [d["frame"] for d in wm.motion_path_dots()] == [13], wm.motion_path_dots()
+assert ops.anim.motion_path_brush_set(brush="EDIT") == {'FINISHED'}
+assert not wm.motion_path_dots(), "Edit Path picks no dots"
+assert any(k["selected"] and k["frame"] == 20 for k in l.keyframes("position")), "the key stays picked"
+assert ops.anim.motion_path_select(none="1") == {'FINISHED'}
+
 # O, proportional editing of the dots: Edit Timing's.
 ops.layer.new()
 empty = layers.active

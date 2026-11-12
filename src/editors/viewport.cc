@@ -2877,7 +2877,9 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
     if (motion_path_edit_modals(C, view, dl, hovered, first, last, cache.paths)) {
       return;
     }
-    draw_selected_path_dots(C, view, dl, hover_path, hover_frame, cache.paths);
+    /* Edit Path's dots take no clicks: no ring on one hovered, but with Alt (a key or control point added there). */
+    draw_selected_path_dots(C, view, dl, path_edit && !ImGui::GetIO().KeyAlt ? nullptr : hover_path, hover_frame,
+                            cache.paths);
     /* Shift held with Edit Timing: Blend Speed's circle (a drag paints, a click on a dot adds it), and F sizing it.
      * Edit Path's Shift only adds to the selection, and it has no brush to size. */
     const ImGuiIO &io = ImGui::GetIO();

@@ -1417,6 +1417,13 @@ void motion_path_operators_register()
           report(ReportType::Error, "Unknown path brush '" + op_arg(C, "brush") + "'");
           return OpStatus::Cancelled;
         }
+        /* Dots are Edit Timing's: Edit Path lets go of those picked (it neither shows nor picks them). */
+        if (brush == PathBrush::Edit && ts.path_brush != PathBrush::Edit && !C.wm->path_dots.empty()) {
+          C.wm->path_dots.clear();
+          if (C.undo) {
+            C.undo->mark_selection_changed();
+          }
+        }
         ts.path_brush = brush;
       }
       /* Edit Path and Edit Timing have no circle of their own: their settings are Shift's brush's. */

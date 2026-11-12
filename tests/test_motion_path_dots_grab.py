@@ -67,11 +67,12 @@ assert ops.anim.motion_path_select_box(box="0.25,0.45") == {'CANCELLED'}
 
 # --- G -----------------------------------------------------------------------------------------------------------
 assert not wm.event_simulate("G", area="Viewport"), "nothing picked to slide"
-assert ops.anim.motion_path_select_box(box="0.35,-0.1,0.55,0.1") == {'FINISHED'}
-assert picked() == [14, 15], picked()
 assert ops.anim.motion_path_brush_set(brush="EDIT") == {'FINISHED'}
+assert ops.anim.motion_path_select_box(box="0.35,-0.1,0.55,0.1") == {'FINISHED'}
 assert not ops.anim.motion_path_dots_grab.poll(), "Edit Path's G is the keys'"
 assert ops.anim.motion_path_brush_set(brush="EDIT_TIMING") == {'FINISHED'}
+assert ops.anim.motion_path_select_box(box="0.35,-0.1,0.55,0.1") == {'FINISHED'}
+assert picked() == [14, 15], picked()
 assert ops.anim.motion_path_dots_grab.poll()
 assert wm.event_simulate("G", area="Viewport"), "G slides the dots picked"
 
