@@ -65,13 +65,16 @@ PENDING = [
      'On Path: past the last key the actions add again', 'tests/test_motion_path_on_path.py'),
     ('src/anim/channel.cc', '  return ch.on_path && ch.keys.size() >= 2;', '  return ch.on_path;',
      'On Path dropped when its keys are all deleted and it is keyed again', 'tests/test_motion_path_on_path.py'),
-    ('src/anim/motion_path.cc', '  if (!key && ch && motion_path_edit_keys_at(doc, target, frame)) {', '  if (false) {',
+    ('src/anim/motion_path.cc', '  if (motion_path_edit_keys_at(doc, target, frame)) {', '  if (false) {',
      'A path with no keys: the handles its keys will have on what moves it diamonds', 'tests/test_motion_path_on_path.py'),
     ('src/anim/motion_path.cc', '  return on_key && std::any_of(dots.begin(), dots.end(),', '  return false && std::any_of(dots.begin(), dots.end(),',
      'A diamond on a path with no keys, picked as a dot, shows its handles', 'tests/test_motion_path_on_path.py'),
     ('src/anim/motion_path.cc', '  return motion_path_is_key(doc, target, 0) || motion_path_edit_keys_at(doc, target, 0);',
      '  return motion_path_is_key(doc, target, 0);',
      'A path with no keys shows the setup diamond, its out handle', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/motion_path.cc', '  Layer *owner = t.bone ? layer_find(doc, t.layer) : nullptr;',
+     '  Layer *owner = t.bone && t.head ? layer_find(doc, t.layer) : nullptr;',
+     'On Path and its handles on a tip path too, the bone not turning', 'tests/test_motion_path_on_path.py'),
 ]
 
 def build(root):

@@ -1565,6 +1565,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["speed"] = speed;
       d["keys"] = p.keys;
       /* The keys picked, as the tool shows them (and their handles once editing): motion_path_frame_picked. */
+      bool setup_picked = false;
       {
         const std::map<int, KeyFrameSummary> picked =
             layers_key_summary(motion_path_key_layers(doc, p.target), motion_path_key_filter(doc, p.target));
@@ -1576,6 +1577,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         for (const int f : keys) {
           if (motion_path_frame_picked(picked, C.wm->path_dots, p.target, f, true)) {
             keys_picked.append(f);
+            setup_picked |= f == 0;
           }
         }
         d["keys_picked"] = keys_picked;
@@ -1586,7 +1588,12 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
        * not shown). */
       py::list handles;
       if (motion_path_has_handles(doc, p.target)) {
-        for (const int f : p.keys) {
+        /* Frame 0's too once picked, as the tool shows it: the setup's out handle (motion_path_setup_key). */
+        std::vector<int> keys = p.keys;
+        if (setup_picked) {
+          keys.insert(keys.begin(), 0);
+        }
+        for (const int f : keys) {
           float2 key, in, out_end;
           bool show_in = false, show_out = false;
           if (f < p.first || f - p.first >= int(p.points.size()) ||

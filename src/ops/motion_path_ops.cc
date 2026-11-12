@@ -773,7 +773,7 @@ void motion_path_operators_register()
         const MotionPathTarget owner = motion_path_timing_owner(doc, t);
         /* A diamond from what moves it, with no keys of its own (motion_path_edit_keys_at): nothing of its own to
          * select there, so picked as a dot is, showing the handles its key will have. */
-        const bool unkeyed = motion_path_edit_keys_at(doc, t, frame);
+        const bool unkeyed = !motion_path_is_key(doc, t, frame) && motion_path_edit_keys_at(doc, t, frame);
         if (motion_path_is_key(doc, t, frame) && !unkeyed) {
           /* The key, on every channel the path's keys are on (as the timeline shows them). */
           const bool was = motion_path_key_selected(doc, owner, frame);

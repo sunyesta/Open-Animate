@@ -175,12 +175,31 @@ assert 30 in p["keys_picked"], p["keys_picked"]
 assert not rig().keyframes('bones["Ear"].position'), "showing them keys nothing"
 k30 = dots_at()[30]
 want_in = (k30[0] + 0.05, k30[1] - 0.2)
+# Its tip's path too, which its position keys move as they do its head (the ear doesn't turn).
+tip = dict(args, head="0")
+assert ops.anim.motion_path_select(frame="30", **tip) == {'FINISHED'}
+t = next(p for p in wm.motion_paths(kept=False) if p["label"] == "Ear tip")
+assert 30 in t["keys_picked"], t["keys_picked"]
+assert {h["frame"]: h for h in t["handles"]}.get(30, {}).get("in") is not None, ("the tip's diamond shows its handles", t["handles"])
+assert not rig().keyframes('bones["Ear"].position'), "showing them keys nothing"
+assert ops.anim.motion_path_select(frame="30", **args) == {'FINISHED'}
 assert ops.anim.motion_path_handle(frame="30", side="IN", x=str(want_in[0]), y=str(want_in[1]), **args) == {'FINISHED'}
 assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 6, 30]
 assert path()["on_path"] is True
 got = {h["frame"]: h for h in path()["handles"]}[30]["in"]
 assert math.dist(got, want_in) < 1e-3, ("the handle went where it was put", got, want_in)
 assert math.dist(dots_at()[30], k30) < 1e-4, "the key stays"
+
+# The tip's handle dragged: keyed (On Path) as the head's is, the handle where it is put.
+rig_id, rig = build()
+tip = dict(bone="Ear", head="0", layer=str(rig_id))
+tip_path = lambda: next(p for p in wm.motion_paths(kept=False) if p["label"] == "Ear tip")
+t30 = tip_path()["points"][30 - tip_path()["first"]]
+want_in = (t30[0] + 0.05, t30[1] - 0.2)
+assert ops.anim.motion_path_handle(frame="30", side="IN", x=str(want_in[0]), y=str(want_in[1]), **tip) == {'FINISHED'}
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 6, 30]
+got = {h["frame"]: h for h in tip_path()["handles"]}[30]["in"]
+assert math.dist(got, want_in) < 1e-3, ("the tip's handle went where it was put", got, want_in)
 
 # The path's start too: frame 0, the setup, shows a diamond (its out handle) with no key of the ear's there.
 rig_id, rig = build()
@@ -194,6 +213,26 @@ assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 6, 
 assert path()["on_path"] is True
 d = dots_at()
 assert math.dist(d[0], k0) < 1e-4, ("the setup stays", d[0], k0)
+lead = (d[2][0] - d[0][0], d[2][1] - d[0][1])
+assert lead[1] > 0.0 and lead[1] > 2.0 * abs(lead[0]), ("the path leaves 0 the handle's way", lead)
+
+# A lone key (the setup's, as left when the rest are deleted) holds no path: picked, it shows the handles it will have
+# all the same.
+rig_id, rig = build()
+args = dict(bone="Ear", head="1", layer=str(rig_id))
+doc.frame_current = 0
+assert ops.anim.keyframe_insert() == {'FINISHED'}
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0]
+doc.frame_current = 18
+assert ops.anim.motion_path_select(frame="0", **args) == {'FINISHED'}
+p = path()
+assert 0 in p["keys_picked"], p["keys_picked"]
+shown = {h["frame"]: h for h in p["handles"]}
+assert 0 in shown and shown[0]["out"] is not None, ("the lone key shows its handle", p["handles"])
+k0 = dots_at()[0]
+assert ops.anim.motion_path_handle(frame="0", side="OUT", x=str(k0[0]), y=str(k0[1] + 0.3), **args) == {'FINISHED'}
+assert [k["frame"] for k in rig().keyframes('bones["Ear"].position')] == [0, 6, 30]
+d = dots_at()
 lead = (d[2][0] - d[0][0], d[2][1] - d[0][1])
 assert lead[1] > 0.0 and lead[1] > 2.0 * abs(lead[0]), ("the path leaves 0 the handle's way", lead)
 

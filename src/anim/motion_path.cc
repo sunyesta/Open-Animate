@@ -4526,7 +4526,8 @@ int motion_path_keys_delete(Document &doc, const std::vector<MotionPathTarget> &
 
 bool motion_path_has_handles(const Document &doc, const MotionPathTarget &target)
 {
-  return handle_channel(const_cast<Document &>(doc), target) != nullptr;
+  /* (Or keys On Path will give it: a tip with no keys yet, its bone not turning of its own, on_path_bone.) */
+  return handle_channel(const_cast<Document &>(doc), target) != nullptr || motion_path_on_path_allowed(doc, target);
 }
 
 void motion_path_handle_sides(const MotionPath &p, int frame, bool &r_in, bool &r_out)
@@ -4566,9 +4567,10 @@ bool motion_path_handles(const Document &doc, const MotionPathTarget &target, in
   OANIM_PROFILE("motion_path_handles");
   const Channel<float2> *ch = handle_channel(const_cast<Document &>(doc), target);
   const Key<float2> *key = ch ? ch->key_at(frame) : nullptr;
-  if (!key && ch && motion_path_edit_keys_at(doc, target, frame)) {
-    /* No keys of its own, a diamond there from what moves it: the handles its key will have, the path put On Path
-     * (keys added, refitted) as the first edit to it puts it (motion_path_edit_prepare), on a copy. */
+  if (motion_path_edit_keys_at(doc, target, frame)) {
+    /* Too few keys of its own to hold a path (none, or a lone one), a diamond there from what moves it: the handles its
+     * key will have, the path put On Path (keys added, refitted) as the first edit to it puts it
+     * (motion_path_edit_prepare), on a copy. */
     OANIM_PROFILE("motion_path_handles_unkeyed");
     Document copy = doc;
     g_doc_copies++;
@@ -5449,11 +5451,18 @@ bool motion_path_position_at(const Document &doc, const MotionPathTarget &target
 /* The bone a path's position is, where actions move it on the mainline (On Path can be set): its owner too. */
 static Bone *on_path_bone(Document &doc, const MotionPathTarget &t, Layer **r_owner = nullptr)
 {
-  Layer *owner = t.bone && t.head ? layer_find(doc, t.layer) : nullptr;
-  if (!owner || (!doc.action.empty() && doc.action_layer == owner->id) || !handle_channel(doc, t)) {
+  /* Its head's path, or its tip's where the bone doesn't turn of its own (no turn keys, not connected): its position
+   * keys move the tip as they do the head, keys or none yet (a tip with none is taken as turned, tip_turns). */
+  MotionPathTarget head = t;
+  head.head = true;
+  Layer *owner = t.bone ? layer_find(doc, t.layer) : nullptr;
+  if (!owner || (!doc.action.empty() && doc.action_layer == owner->id) || !handle_channel(doc, head)) {
     return nullptr;
   }
   Bone &b = owner->bones[size_t(bone_index(*owner, t.bone))];
+  if (!t.head && !b.angle_keys.keys.empty()) {
+    return nullptr;
+  }
   const bool moved = std::any_of(b.position_keys.actions.begin(), b.position_keys.actions.end(), [&](const auto &a) {
     return !a.first.empty() && !bone_fix_line_of(*owner, a.first, b, &b.position_keys);
   });
@@ -5607,7 +5616,7 @@ bool motion_path_frame_picked(const std::map<int, KeyFrameSummary> &picked,
 bool motion_path_edit_keys_at(const Document &doc, const MotionPathTarget &target, int frame)
 {
   const Bone *b = on_path_bone(const_cast<Document &>(doc), target);
-  if (!b || b->position_keys.keys.size() >= 2 || b->position_keys.follow_action || b->position_keys.key_at(frame)) {
+  if (!b || b->position_keys.keys.size() >= 2 || b->position_keys.follow_action) {
     return false;
   }
   const std::vector<int> frames = motion_path_driver_frames(doc, target);
