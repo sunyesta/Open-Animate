@@ -1467,8 +1467,12 @@ bool motion_path_stretch_lit(int start, int end, int current, const std::vector<
   return std::any_of(dots.begin(), dots.end(), [&](int f) { return f > start && f < end; });
 }
 
-std::vector<Color> motion_path_dot_colors(const Document &doc, const MotionPath &path, const std::vector<int> &dots)
+std::vector<Color> motion_path_dot_colors(const Document &doc, const MotionPath &path, const std::vector<int> &dots,
+                                          bool path_edit)
 {
+  if (path_edit) {
+    return std::vector<Color>(path.points.size(), path.color);
+  }
   std::vector<Color> out(path.points.size(), motion_path_unlit_color());
   /* Every key, not only those in the range drawn, so a stretch running off its end still knows its keys. */
   const std::vector<int> keys = motion_path_keys(doc, path.target);

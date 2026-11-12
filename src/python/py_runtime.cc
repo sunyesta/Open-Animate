@@ -1635,7 +1635,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["handles"] = handles;
       const std::vector<int> lit_dots = motion_path_lit_dots(doc, p.target, C.wm->path_dots);
       py::list dot_colors;
-      for (const Color &c : motion_path_dot_colors(doc, p, lit_dots)) {
+      const bool path_edit =
+          C.wm->tool_settings.tool == Tool::MotionPath && C.wm->tool_settings.path_brush == PathBrush::Edit;
+      for (const Color &c : motion_path_dot_colors(doc, p, lit_dots, path_edit)) {
         dot_colors.append(py::make_tuple(c.r, c.g, c.b, c.a));
       }
       d["dot_colors"] = dot_colors;

@@ -2470,9 +2470,10 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
       picked = layers_key_summary(motion_path_key_layers(doc, p.target), motion_path_key_filter(doc, p.target));
     }
     /* Each dot's colour (by time through its stretch, the one being worked on lit), for its selected dots too. In a
-     * folded group the stretch is the group's: lit on every path in it, wherever it was picked. */
+     * folded group the stretch is the group's: lit on every path in it, wherever it was picked. With Edit Path, the
+     * path's own colour: its dots take no clicks there. */
     const std::vector<int> lit_dots = motion_path_lit_dots(doc, p.target, wm.path_dots);
-    const std::vector<Color> dot_colors = motion_path_dot_colors(doc, p, lit_dots);
+    const std::vector<Color> dot_colors = motion_path_dot_colors(doc, p, lit_dots, path_edit);
     /* A dot every `step` frames (and on every key); frames it holds still over make one dot with how many. */
     for (size_t i = 0; i < screen.size();) {
       size_t run = i + 1;
@@ -2873,13 +2874,19 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
     motion_path_brush_input(C, area, view, dl, hovered, first, last);
     return;
   }
+  /* Edit Path's dots take no clicks: hovered, no ring or frame number on one, but with Alt (a key or control point
+   * added there). Its keys show theirs. */
+  const bool hover_shown =
+      hover_path && (!path_edit || motion_path_press_taken(
+                                       false,
+                                       std::binary_search(hover_path->keys.begin(), hover_path->keys.end(), hover_frame) ||
+                                           (hover_frame == 0 && motion_path_setup_key(doc, hover_path->target)),
+                                       ImGui::GetIO().KeyAlt));
   if (tool) {
     if (motion_path_edit_modals(C, view, dl, hovered, first, last, cache.paths)) {
       return;
     }
-    /* Edit Path's dots take no clicks: no ring on one hovered, but with Alt (a key or control point added there). */
-    draw_selected_path_dots(C, view, dl, path_edit && !ImGui::GetIO().KeyAlt ? nullptr : hover_path, hover_frame,
-                            cache.paths);
+    draw_selected_path_dots(C, view, dl, hover_shown ? hover_path : nullptr, hover_frame, cache.paths);
     /* Shift held with Edit Timing: Blend Speed's circle (a drag paints, a click on a dot adds it), and F sizing it.
      * Edit Path's Shift only adds to the selection, and it has no brush to size. */
     const ImGuiIO &io = ImGui::GetIO();
@@ -2920,7 +2927,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
   }
   /* The hovered dot's frame: a ring and its number (not until the mouse moves on after a move: what was just moved is
    * what's looked at). No ghost of the drawing there: it got in the way of the paths and cost a redraw per hover. */
-  if (hover_path && !ImGui::IsAnyMouseDown() && !g_path_hover_quiet.on) {
+  if (hover_path && hover_shown && !ImGui::IsAnyMouseDown() && !g_path_hover_quiet.on) {
     const ImVec2 s = view.to_screen(hover_path->points[size_t(hover_frame - hover_path->first)]);
     dl->AddCircle(s, 5.0f, u32(hover_path->color, 1.0f), 0, 1.5f);
     const std::string label = std::to_string(hover_frame);

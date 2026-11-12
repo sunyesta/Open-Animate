@@ -65,7 +65,8 @@ doc.motion_paths = True
 doc.path_before, doc.path_after = 3, 3
 doc.auto_key = False
 assert ops.wm.tool_motion_path() == {'FINISHED'}
-assert ops.anim.motion_path_brush_set(brush="EDIT", proportional="0") == {'FINISHED'}
+# Edit Timing: its dots show the timing colours (Edit Path's are the path's own colour).
+assert ops.anim.motion_path_brush_set(brush="EDIT_TIMING", proportional="0") == {'FINISHED'}
 
 # A straight, even line: (0, 0) on 10, (1, 0) on 20, (2, 0) on 30, 0.1 a frame.
 ops.layer.new()

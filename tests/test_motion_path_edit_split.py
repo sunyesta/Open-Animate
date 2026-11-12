@@ -68,6 +68,16 @@ assert not wm.motion_path_dots(), "Edit Path picks no dots"
 assert any(k["selected"] and k["frame"] == 20 for k in l.keyframes("position")), "the key stays picked"
 assert ops.anim.motion_path_select(none="1") == {'FINISHED'}
 
+# Edit Path's dots are the path's own colour, whatever the dot colours say; Edit Timing's show the timing.
+doc.path_dot_colors = "TIMING_ALL"
+p = next(p for p in wm.motion_paths() if p["layer"] == l.id)
+assert all(all(abs(a - b) < 1e-4 for a, b in zip(c[:3], p["color"])) for c in p["dot_colors"]), "Edit Path"
+assert ops.anim.motion_path_brush_set(brush="EDIT_TIMING") == {'FINISHED'}
+p = next(p for p in wm.motion_paths() if p["layer"] == l.id)
+assert not all(all(abs(a - b) < 1e-4 for a, b in zip(c[:3], p["color"])) for c in p["dot_colors"]), "Edit Timing"
+assert ops.anim.motion_path_brush_set(brush="EDIT") == {'FINISHED'}
+doc.path_dot_colors = "TIMING_CURRENT"
+
 # O, proportional editing of the dots: Edit Timing's.
 ops.layer.new()
 empty = layers.active

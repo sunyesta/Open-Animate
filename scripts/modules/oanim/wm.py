@@ -338,7 +338,7 @@ def motion_paths(kept=False):
     first (the frame of points[0]), points (where it is on each frame, as drawn: relative to doc.path_relative),
     speed (0 still to 1 its fastest, per frame), keys, handles (each key's path handles as the Motion Path tool shows
     them once selected: dicts with frame, in and out, as drawn, None for a side not shown), speed_colors ((still,
-    fast) rgb), dot_colors (each dot's rgba as drawn, by doc.path_dot_colors) and overshoot (the frames past their key
+    fast) rgb), dot_colors (each dot's rgba as drawn, by doc.path_dot_colors; with the Motion Path tool's Edit Path, the path's own) and overshoot (the frames past their key
     or back before their start, the path dashed there). They trace the selected
     bones (tip, or head) or points of the layers being edited, else those layers' origins, and pinned ones. With
     kept, what they are worked out from is kept while the document stays the same, as the viewport keeps it."""

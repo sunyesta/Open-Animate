@@ -184,7 +184,10 @@ bool motion_path_stretch_time(const std::vector<int> &keys, int frame, float &r_
 bool motion_path_stretch_lit(int start, int end, int current, const std::vector<int> &dots);
 /* Each of a path's dots' colour, by doc.path_dot_colors; `dots` the frames of its selected dots. Keys are drawn as
  * keys, so theirs is the unlit grey. */
-std::vector<Color> motion_path_dot_colors(const Document &doc, const MotionPath &path, const std::vector<int> &dots);
+/* `path_edit` (the Motion Path tool's Edit Path, where dots take no clicks): every dot the path's own colour, whatever
+ * doc.path_dot_colors says. */
+std::vector<Color> motion_path_dot_colors(const Document &doc, const MotionPath &path, const std::vector<int> &dots,
+                                          bool path_edit = false);
 /* The frames of the dots picked (`dots`) that light `target`'s path: its own, and in a folded group any picked on the
  * group's timing (the stretch is the group's, lit on every path in it). */
 std::vector<int> motion_path_lit_dots(const Document &doc, const MotionPathTarget &target,

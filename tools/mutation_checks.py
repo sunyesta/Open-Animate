@@ -94,6 +94,9 @@ PENDING = [
      '      if (f <= 0 || at.x < lo.x || at.x > hi.x ||', 'Edit Timing\'s box picks no key', 'tests/test_motion_path_dots_grab.py'),
     ('src/ops/motion_path_ops.cc', '        if (brush == PathBrush::Edit && ts.path_brush != PathBrush::Edit && !C.wm->path_dots.empty()) {',
      '        if (false) {', 'Edit Path lets go of the dots picked', 'tests/test_motion_path_edit_split.py'),
+    ('src/anim/motion_path.cc', '  if (path_edit) {\n    return std::vector<Color>(path.points.size(), path.color);',
+     '  if (false) {\n    return std::vector<Color>(path.points.size(), path.color);',
+     'Edit Path\'s dots are the path\'s own colour', 'tests/test_motion_path_edit_split.py'),
 ]
 
 def build(root):

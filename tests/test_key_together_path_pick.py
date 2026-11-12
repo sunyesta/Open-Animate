@@ -55,6 +55,8 @@ def scene(fold=True, nest=False):
     layers.active = a
     doc.frame_current = 15
     assert ops.wm.tool_motion_path() == {'FINISHED'}
+    # Edit Timing: the dots and their stretches' timing colours (Edit Path draws them the path's own colour).
+    assert ops.anim.motion_path_brush_set(brush="EDIT_TIMING") == {'FINISHED'}
     return doc, a, b, g
 
 
