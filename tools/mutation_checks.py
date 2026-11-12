@@ -131,6 +131,14 @@ PENDING = [
      '      values_only = own[i] && (t.bone ? bone_values_apart(doc, t) : true);',
      'a point\'s path values only just where its actions play from bones\' own values',
      'tests/test_motion_path_point_actions_fast.py'),
+    ('src/anim/motion_path.cc', '  if (!drawings_posing_bones(doc, read)) {', '  if (true || !drawings_posing_bones(doc, read)) {',
+     'kept action offsets: keys of drawings no bone is posed from left out',
+     'tests/test_motion_path_offsets_other_paths.py'),
+    ('src/anim/motion_path.cc', '    r.built = false;\n    r.built_ids.clear();', '    r.built_ids.clear();',
+     'kept action offsets: a reference\'s drawing as last built left out',
+     'tests/test_motion_path_offsets_other_paths.py'),
+    ('src/anim/motion_path.cc', '          r_read.insert(c.shape_layer);\n', '',
+     'kept action offsets: a shape a bone is kept inside still counts', 'tests/test_motion_path_offsets_other_paths.py'),
 ]
 
 def build(root):

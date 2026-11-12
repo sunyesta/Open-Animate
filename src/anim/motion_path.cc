@@ -388,7 +388,120 @@ static bool action_offsets_apart(const Document &doc, const Layer &owner, const 
   return apart(b.position_keys.actions) && apart(b.angle_keys.actions) && apart(b.scale_keys.actions);
 }
 
-/* Whether `inputs` (a document as animation_inputs_only leaves it) is what `kept` was worked out from but for the
+/* The layers whose drawings bones are posed from: a shape a bone is kept inside (Limit Shape, a Look At's eye shape)
+ * and the drawing kept in it, the layer whose deform a bone follows (Follow Point), a layer a driver reads points or curves of; and those
+ * drawings are made from (what they reference, the shapes deforming them or a group holding them). False where that
+ * can't be told (a Limit Shape keeping in all the layers that follow its bone). The rest of the drawings' keys change
+ * neither the actions bones play nor what they add to a bone or a point. */
+static bool drawings_posing_bones(const Document &doc, std::set<uint64_t> &r_read)
+{
+  r_read.clear();
+  for (const Driver &d : doc.drivers) {
+    for (const DriverVar &v : d.vars) {
+      if (v.source.path.rfind("points[", 0) == 0 || v.source.path.rfind("curves[", 0) == 0) {
+        r_read.insert(v.source.layer);
+      }
+    }
+  }
+  const std::vector<const Layer *> layers = document_layers_flat(doc);
+  for (const Layer *l : layers) {
+    for (const Bone &b : l->bones) {
+      for (const BoneConstraint &c : b.constraints) {
+        /* (Look At with an eye shape of its own is kept in it as Limit Shape keeps its bone.) */
+        if (c.type == BoneConstraintType::LimitShape || (c.type == BoneConstraintType::LookAt && c.shape_layer != 0)) {
+          if (c.shape_fit == ShapeFit::Whole && c.fit_layer == 0) {
+            return false;
+          }
+          r_read.insert(c.shape_layer);
+          r_read.insert(c.fit_layer);
+        }
+        else if (c.type == BoneConstraintType::FollowPoint) {
+          r_read.insert(c.follow_layer);
+        }
+      }
+    }
+  }
+  /* (What they are made from, and that from, and so on.) */
+  std::vector<uint64_t> todo(r_read.begin(), r_read.end());
+  const auto add = [&](uint64_t id) {
+    if (id != 0 && r_read.insert(id).second) {
+      todo.push_back(id);
+    }
+  };
+  for (int guard = 0; !todo.empty() && guard < 4096; guard++) {
+    const uint64_t id = todo.back();
+    todo.pop_back();
+    const Layer *l = layer_find(doc, id);
+    if (!l) {
+      continue;
+    }
+    add(l->reference_source);
+    for (const Layer *at = l; at; at = layer_parent(const_cast<Document &>(doc), at->id)) {
+      add(at->id);
+      for (const Modifier &m : at->modifiers) {
+        add(m.deform_layer);
+        add(m.deform_from_group);
+      }
+    }
+  }
+  r_read.erase(0);
+  return true;
+}
+
+/* `doc` (a copy) as what kept action offsets are worked out from: its inputs only (animation_inputs_only), on frame 0,
+ * with the keys of drawings no bone is posed from left out (an edit of a lip's keys leaves what actions add to an ear
+ * bone, or to the lip's other points, as it was). */
+static bool offsets_inputs_make(Document &doc)
+{
+  if (!animation_inputs_only(doc)) {
+    return false;
+  }
+  doc.frame_current = 0;
+  /* How it is looked at (zooming the view keeps them). */
+  doc.view = {};
+  doc.view_serial = 0;
+  doc.overlays = {};
+  doc.shading = {};
+  doc.ui_open.clear();
+  doc.ui_panel_order.clear();
+  doc.path_targets.clear();
+  std::set<uint64_t> read;
+  if (!drawings_posing_bones(doc, read)) {
+    return true;
+  }
+  for (const Layer *cl : document_layers_flat(doc)) {
+    if (read.count(cl->id)) {
+      continue;
+    }
+    /* Of its points only which they are and their actions' keys (what actions add to one is from those): neither
+     * their keys nor the values shown now (an edit not keyed yet, which a reference's copy of the drawing holds too,
+     * animation_inputs_only leaving references' drawings as they are). */
+    Layer *l = const_cast<Layer *>(cl);
+    for (MeshPoint &p : l->drawing.points) {
+      MeshPoint bare;
+      bare.id = p.id;
+      bare.pos_keys.actions = std::move(p.pos_keys.actions);
+      bare.pos_keys.action_setup = std::move(p.pos_keys.action_setup);
+      p = std::move(bare);
+    }
+    l->drawing.curves.clear();
+    /* (A reference's drawing as last built from its original too.) */
+    ReferenceSettings &r = l->reference;
+    r.built = false;
+    r.built_ids.clear();
+    r.built_pos.clear();
+    r.built_radius.clear();
+    r.built_weights.clear();
+    r.built_shapes.clear();
+    r.built_curves.clear();
+    r.built_position = r.built_scale = r.built_shear = {};
+    r.built_rotation = 0.0f;
+    r.built_opacity = 1.0f;
+  }
+  return true;
+}
+
+/* Whether `inputs` (a document as offsets_inputs_make leaves it) is what `kept` was worked out from but for the
  * bone's own keys. */
 static bool offsets_inputs_same(KeptActionOffsets &kept, const Document &inputs)
 {
@@ -492,10 +605,9 @@ struct ActionOffsetsScope {
     }
     Document inputs = doc;
     g_doc_copies++;
-    if (!animation_inputs_only(inputs)) {
+    if (!offsets_inputs_make(inputs)) {
       return;
     }
-    inputs.frame_current = 0;
     found = {&doc, document, g_offsets_kept_count, {}};
     for (const std::shared_ptr<KeptActionOffsets> &k : g_offsets) {
       if (offsets_inputs_same(*k, inputs)) {
@@ -560,11 +672,10 @@ static void action_offsets_keep(const Document &doc, uint64_t layer, uint64_t bo
   }
   auto inputs = std::make_unique<Document>(doc);
   g_doc_copies++;
-  if (!animation_inputs_only(*inputs)) {
+  /* (Kept by frame: the frame shown, which a place's copy moves to, isn't what they come from.) */
+  if (!offsets_inputs_make(*inputs)) {
     return;
   }
-  /* (Kept by frame: the frame shown, which a place's copy moves to, isn't what they come from.) */
-  inputs->frame_current = 0;
   auto keep = std::make_shared<KeptActionOffsets>();
   keep->layer = layer;
   keep->bone = point ? 0 : bone;
