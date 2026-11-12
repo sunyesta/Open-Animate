@@ -705,6 +705,10 @@ struct PathHandlesShown {
 
 /* How long, in pixels, an Auto handle with no length is drawn, so it can be grabbed. */
 static constexpr float PATH_HANDLE_STUB = 30.0f;
+/* A key's diamond on a path, from its middle to a corner, in pixels (picked: larger); a breakdown's circle a pixel
+ * less. Keys stand out from the dots between them. */
+static constexpr float PATH_KEY_SIZE = 6.5f;
+static constexpr float PATH_KEY_SIZE_PICKED = 8.0f;
 
 /* The Edit brush's selection: the dots selected (`wm.path_dots`), then the keys selected on the paths traced. */
 static std::vector<std::pair<MotionPathTarget, int>> path_edit_selection(Context &C)
@@ -2441,7 +2445,7 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
           dl->AddCircleFilled(s, 3.0f, m.fill);
         }
         else {
-          const float r = 4.5f;
+          const float r = PATH_KEY_SIZE;
           const ImVec2 d[4] = {{s.x, s.y - r}, {s.x + r, s.y}, {s.x, s.y + r}, {s.x - r, s.y}};
           if (m.kind == PathQuietMark::Key) {
             dl->AddConvexPolyFilled(d, 4, m.fill);
@@ -2503,14 +2507,14 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
         dot.a *= fade;
         if (key && breakdown) {
           /* A breakdown: a dark blue circle, larger and light blue when selected. */
-          const float r = selected ? 5.0f : 4.0f;
+          const float r = selected ? PATH_KEY_SIZE_PICKED - 1.0f : PATH_KEY_SIZE - 1.0f;
           dl->AddCircleFilled(s, r, selected ? IM_COL32(0x8c, 0xc8, 0xff, 255) : IM_COL32(0x1f, 0x5f, 0xd6, 255));
           dl->AddCircle(s, r, selected ? IM_COL32(255, 160, 40, 255) : IM_COL32(20, 20, 20, 220), 0,
                         selected ? 2.0f : 1.0f);
         }
         else if (key) {
           /* Keys plain white, so they stand apart from the coloured dots; selected, larger and ringed orange. */
-          const float r = selected ? 6.0f : 4.5f;
+          const float r = selected ? PATH_KEY_SIZE_PICKED : PATH_KEY_SIZE;
           const ImVec2 d[4] = {{s.x, s.y - r}, {s.x + r, s.y}, {s.x, s.y + r}, {s.x - r, s.y}};
           dl->AddConvexPolyFilled(d, 4, u32_faded(IM_COL32(240, 240, 240, 255), fade));
           dl->AddPolyline(d, 4, u32_faded(selected ? IM_COL32(255, 160, 40, 255) : IM_COL32(20, 20, 20, 220), fade),
@@ -2929,9 +2933,12 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
    * what's looked at). No ghost of the drawing there: it got in the way of the paths and cost a redraw per hover. */
   if (hover_path && hover_shown && !ImGui::IsAnyMouseDown() && !g_path_hover_quiet.on) {
     const ImVec2 s = view.to_screen(hover_path->points[size_t(hover_frame - hover_path->first)]);
-    dl->AddCircle(s, 5.0f, u32(hover_path->color, 1.0f), 0, 1.5f);
+    /* Around a key, outside its diamond. */
+    const bool on_key = std::binary_search(hover_path->keys.begin(), hover_path->keys.end(), hover_frame);
+    const float ring = on_key ? PATH_KEY_SIZE_PICKED + 2.0f : 5.0f;
+    dl->AddCircle(s, ring, u32(hover_path->color, 1.0f), 0, 1.5f);
     const std::string label = std::to_string(hover_frame);
-    dl->AddText(ImVec2(s.x + 7.0f, s.y + 2.0f), IM_COL32(255, 255, 255, 230), label.c_str());
+    dl->AddText(ImVec2(s.x + ring + 2.0f, s.y + 2.0f), IM_COL32(255, 255, 255, 230), label.c_str());
   }
 }
 
