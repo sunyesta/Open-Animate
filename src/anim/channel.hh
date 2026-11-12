@@ -310,6 +310,22 @@ bool interp_path_smooth(Interp interp);
 /* Gives key `i` its Auto handles as its own (Broken), so its path stays as it is whatever the stretches either side
  * become. */
 void key_path_handles_freeze(std::vector<Key<float2>> &keys, size_t i);
+/* A channel's first and last keys' frames, taken before keys are deleted, for keys_ends_release. */
+struct KeyEnds {
+  int first = 0, last = 0;
+  bool any = false;
+};
+template<typename T> KeyEnds key_ends(const Channel<T> &ch)
+{
+  return ch.keys.empty() ? KeyEnds{} : KeyEnds{ch.keys.front().frame, ch.keys.back().frame, true};
+}
+/* After keys of a position channel are deleted (`was`: its ends before): a key left at an end it wasn't at has nothing
+ * that side for its path handle to shape, but a handle kept there would bend the stretch the next key there makes. It
+ * goes back in line with the key's other one, as an Auto key's would be (the side still shaping keeps its shape); a key
+ * newly first loses the control points of the stretch it no longer has. One key left holds no path: its handles go
+ * back to Auto and On Path's leftovers go (Channel::on_path, Key::path_offset). Only position keys have path handles. */
+void keys_ends_release(Channel<float2> &ch, const KeyEnds &was);
+template<typename T> void keys_ends_release(Channel<T> & /*ch*/, const KeyEnds & /*was*/) {}
 
 /* Makes the stretch arriving at key `i` Custom with `speeds` (one a frame, any scale), kept as the fewest curve points
  * that time each frame as they do (timing_from_speeds). */

@@ -5263,9 +5263,11 @@ template<typename T> static bool delete_key(Channel<T> &ch, T &value, int frame)
   if (frame == 0 && ch.keys.size() > 1) {
     return false;
   }
+  const KeyEnds ends = key_ends(ch);
   const bool removed = ch.remove_key(frame);
   /* Only what this took away can leave the setup key alone (one already alone is kept: nothing was deleted). */
   if (removed) {
+    keys_ends_release(ch, ends);
     drop_lone_setup_key(ch, value);
   }
   return removed;
@@ -6693,9 +6695,11 @@ int layers_delete_selected_keys(const std::vector<Layer *> &layers)
   for (Layer *layer : layers) {
     layer_for_each_channel(*layer, [&](auto &ch, auto &value) {
       const size_t before = ch.keys.size();
+      const KeyEnds ends = key_ends(ch);
       std::erase_if(ch.keys, [](const auto &key) { return key.selected && key.frame != 0; });
       removed += int(before - ch.keys.size());
       if (ch.keys.size() != before) {
+        keys_ends_release(ch, ends);
         drop_lone_setup_key(ch, value);
       }
     });

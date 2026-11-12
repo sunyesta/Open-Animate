@@ -3487,15 +3487,21 @@ int motion_path_key_settings(Document &doc, const MotionPathTarget &target, int 
   });
 }
 
-/* Takes out a key, the control points either side of it staying where they are. */
+/* Takes out a key, the control points either side of it staying where they are; a key it leaves at an end lets go of
+ * the handle facing nothing (keys_ends_release). */
 template<typename T> static bool path_key_remove(Channel<T> &ch, int frame)
 {
+  const KeyEnds ends = key_ends(ch);
   if constexpr (std::is_same_v<T, float2>) {
     if (const Key<float2> *k = ch.key_at(frame)) {
       key_controls_join(ch.keys, size_t(k - ch.keys.data()));
     }
   }
-  return ch.remove_key(frame);
+  if (!ch.remove_key(frame)) {
+    return false;
+  }
+  keys_ends_release(ch, ends);
+  return true;
 }
 
 int motion_path_key_delete(Document &doc, const MotionPathTarget &target, int frame)

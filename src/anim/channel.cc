@@ -435,6 +435,52 @@ void key_path_handles_freeze(std::vector<Key<float2>> &keys, size_t i)
   keys_changed();
 }
 
+void keys_ends_release(Channel<float2> &ch, const KeyEnds &was)
+{
+  if (!was.any) {
+    return;
+  }
+  if (ch.keys.size() <= 1) {
+    ch.on_path = false;
+    if (ch.keys.empty()) {
+      return;
+    }
+    Key<float2> &k = ch.keys.front();
+    if (k.path_handles != PathHandles::Auto || !(k.path_in == float2{}) || !(k.path_out == float2{}) ||
+        !(k.path_offset == float2{}) || !k.path_controls.empty())
+    {
+      k.path_handles = PathHandles::Auto;
+      k.path_in = k.path_out = k.path_offset = float2{};
+      k.path_controls.clear();
+      k.path_control_handles.clear();
+      keys_changed();
+    }
+    return;
+  }
+  Key<float2> &first = ch.keys.front(), &last = ch.keys.back();
+  bool changed = false;
+  if (first.frame != was.first) {
+    if (first.path_handles != PathHandles::Auto) {
+      first.path_in = -first.path_out;
+      first.path_handles = PathHandles::Aligned;
+      changed = true;
+    }
+    if (!first.path_controls.empty()) {
+      first.path_controls.clear();
+      first.path_control_handles.clear();
+      changed = true;
+    }
+  }
+  if (last.frame != was.last && last.path_handles != PathHandles::Auto) {
+    last.path_out = -last.path_in;
+    last.path_handles = PathHandles::Aligned;
+    changed = true;
+  }
+  if (changed) {
+    keys_changed();
+  }
+}
+
 template<typename T> void key_speeds_set(std::vector<Key<T>> &keys, size_t i, const std::vector<float> &speeds)
 {
   /* Speeds its own curve already plays keep that curve: fitting it again would move every dot by a hair each time,

@@ -78,6 +78,10 @@ PENDING = [
     ('src/anim/motion_path.cc', '  if (ch.keys.size() >= 2 && (ch.key_at(frame) || frame <= ch.keys.front().frame || frame >= ch.keys.back().frame)) {',
      '  if (ch.keys.size() >= 2) {',
      'A diamond from what moves it between the bone\'s own keys shows the handles its key will have', 'tests/test_motion_path_on_path.py'),
+    ('src/anim/channel.cc', '  if (last.frame != was.last && last.path_handles != PathHandles::Auto) {', '  if (false) {',
+     'A key left last by a delete: its out handle back in line', 'tests/test_motion_path_key_ends.py'),
+    ('src/anim/channel.cc', '      k.path_handles = PathHandles::Auto;', '      k.path_handles = k.path_handles;',
+     'A key left alone by a delete: its handles back to Auto', 'tests/test_motion_path_key_ends.py'),
 ]
 
 def build(root):
