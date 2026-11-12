@@ -6204,9 +6204,23 @@ bool motion_path_breakdown(Document &doc, const MotionPathTarget &target, float 
     return false;
   }
   const float f = std::clamp(factor, 0.0f, 1.0f);
-  own_values_set(doc, target,
-                 {a.position + (b.position - a.position) * f, a.scale + (b.scale - a.scale) * f,
-                  a.angle + (b.angle - a.angle) * f});
+  float2 position = a.position + (b.position - a.position) * f;
+  /* A position keyed on both: on its path as it runs between those keys without one here, `f` of the way along by
+   * length (the straight line between the two would cut a curved path's corner). What the actions add on the two
+   * keys' frames (the own values less the keys) shared out as the rest is. */
+  if (const Channel<float2> *pos = handle_channel(doc, target)) {
+    std::vector<Key<float2>> keys = pos->keys;
+    std::erase_if(keys, [&](const Key<float2> &k) { return k.frame == doc.frame_current; });
+    const auto at = [&](int frame) {
+      return std::find_if(keys.begin(), keys.end(), [&](const Key<float2> &k) { return k.frame == frame; });
+    };
+    const auto ka = at(before), kb = at(after);
+    if (ka != keys.end() && kb != keys.end() && kb == ka + 1) {
+      const float2 da = a.position - ka->value, db = b.position - kb->value;
+      position = stretch_path_point(keys, size_t(kb - keys.begin()), f) + da + (db - da) * f;
+    }
+  }
+  own_values_set(doc, target, {position, a.scale + (b.scale - a.scale) * f, a.angle + (b.angle - a.angle) * f});
   return true;
 }
 

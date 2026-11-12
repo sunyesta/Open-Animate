@@ -1406,6 +1406,26 @@ std::pair<int, int> key_together_release(Document &doc, Layer &group)
 
 template<typename F> static void owner_for_each_channel(Layer &owner, F &&f);
 
+/* An aligned point's two handle keys on one frame play alike (interpolation, hold, interval...): played apart, the
+ * handles turn apart between keys and the point bends by itself. `way(in, out)`: 1 for the in handle's key to give
+ * its settings to the out handle's, -1 the other way, 0 neither. */
+template<typename Way> static void aligned_handle_keys_match(CurvePoint &p, Way &&way)
+{
+  for (Key<float2> &ki : p.handle_in_keys.keys) {
+    Key<float2> *ko = p.handle_out_keys.key_at(ki.frame);
+    if (!ko || key_settings(ki) == key_settings(*ko)) {
+      continue;
+    }
+    const int w = way(ki, *ko);
+    if (w > 0) {
+      key_settings_apply(*ko, key_settings(ki));
+    }
+    else if (w < 0) {
+      key_settings_apply(ki, key_settings(*ko));
+    }
+  }
+}
+
 void animation_record(Document &doc)
 {
   OANIM_PROFILE("animation_record");
@@ -5899,6 +5919,16 @@ int layers_change_selected_keys(const std::vector<Layer *> &layers, const std::f
         count++;
       }
     });
+    /* An aligned point's partner handle key on the frame takes the same, or the two would turn apart. */
+    for (Curve &c : layer->drawing.curves) {
+      for (CurvePoint &p : c.points) {
+        if (p.aligned) {
+          aligned_handle_keys_match(p, [](const Key<float2> &ki, const Key<float2> &ko) {
+            return ki.selected == ko.selected ? 0 : ki.selected ? 1 : -1;
+          });
+        }
+      }
+    }
   }
   return count;
 }

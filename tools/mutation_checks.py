@@ -171,6 +171,15 @@ PENDING = [
     ('src/anim/timing_curve.cc', '  h.y = std::clamp(h.y, -REACH - p.co.y, 1.0f + REACH - p.co.y);\n', '',
      'a timing handle within reach', 'tests/test_motion_path_sweep_guards.py'),
 
+    ('src/anim/animation.cc', '            return ki.selected == ko.selected ? 0 : ki.selected ? 1 : -1;',
+     '            return ki.selected == ko.selected ? 0 : 0;',
+     'Set Interpolation on an aligned point\'s handle key sets its partner\'s', 'tests/test_aligned_handle_keys.py'),
+    ('src/data/vector.cc', '          key_settings_apply(k, key_settings(*led));', '          (void)led;',
+     'Align Handles: the turned handle\'s keys play as the other\'s', 'tests/test_aligned_handle_keys.py'),
+    ('src/anim/motion_path.cc', '    if (ka != keys.end() && kb != keys.end() && kb == ka + 1) {',
+     '    if (false && ka != keys.end() && kb != keys.end() && kb == ka + 1) {',
+     'a breakdown on a curved path goes on the path', 'tests/test_motion_path_sweep_guards.py'),
+
 ]
 
 def build(root):

@@ -253,7 +253,8 @@ void motion_path_neighbour_keys(const Document &doc, const MotionPathTarget &tar
  * frame shown (the nearest place on it). False without keys both sides. */
 bool motion_path_straighten(const Document &doc, const MotionPathTarget &target, float2 &at);
 /* A breakdown, as tweenMachine's: the target's own values on the frame shown become `factor` (0-1) of the way from
- * those on the key before to those on the key after, so a turning bone stays on its arc. */
+ * those on the key before to those on the key after, so a turning bone stays on its arc; a position keyed on both goes
+ * that share of the way along its path between them by length. */
 bool motion_path_breakdown(Document &doc, const MotionPathTarget &target, float factor);
 /* The channels of `target` itself, for picking its keys, on the layers motion_path_key_layers gives. */
 KeyFilter motion_path_key_filter(const Document &doc, const MotionPathTarget &target);

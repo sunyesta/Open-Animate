@@ -341,14 +341,21 @@ static bool align_timeline(std::vector<Key<float2>> &in, std::vector<Key<float2>
     }
   }
   const auto value = [](const Channel<float2> &ch, int frame) { return ch.animated() ? ch.evaluate(frame) : float2(); };
+  /* `lead`: the keys whose interpolation (and the rest of how they play) the rebuilt ones take on the frames both are
+   * keyed on, or the two would turn apart between keys. */
   const auto rebuilt = [&](const std::vector<Key<float2>> &own, const std::vector<Key<float2>> &other,
-                           const Channel<float2> &own_ch, const auto &turn) {
+                           const Channel<float2> &own_ch, const auto &turn, const std::vector<Key<float2>> *lead) {
     std::vector<Key<float2>> keys;
     for (const int f : frames) {
       const auto at = [f](const Key<float2> &k) { return k.frame == f; };
       const auto mine = std::find_if(own.begin(), own.end(), at);
       /* A frame only the other is keyed on takes its key's timing. */
       Key<float2> k = mine != own.end() ? *mine : *std::find_if(other.begin(), other.end(), at);
+      if (lead) {
+        if (const auto led = std::find_if(lead->begin(), lead->end(), at); led != lead->end()) {
+          key_settings_apply(k, key_settings(*led));
+        }
+      }
       k.frame = f;
       k.value = float2(turn(f), value(own_ch, f).y);
       keys.push_back(k);
@@ -357,22 +364,22 @@ static bool align_timeline(std::vector<Key<float2>> &in, std::vector<Key<float2>
   };
   const std::vector<Key<float2>> was_in = in, was_out = out;
   if (follow == AlignFollow::In) {
-    in = rebuilt(was_in, was_out, ci, [&](int f) { return value(co, f).x; });
+    in = rebuilt(was_in, was_out, ci, [&](int f) { return value(co, f).x; }, &was_out);
   }
   else if (follow == AlignFollow::Out) {
-    out = rebuilt(was_out, was_in, co, [&](int f) { return value(ci, f).x; });
+    out = rebuilt(was_out, was_in, co, [&](int f) { return value(ci, f).x; }, &was_in);
   }
   else {
     const auto halfway = [&](int f) {
       const float a = value(ci, f).x;
       return a + wrap_turn(value(co, f).x - a) * 0.5f;
     };
-    in = rebuilt(was_in, was_out, ci, halfway);
-    out = rebuilt(was_out, was_in, co, halfway);
+    in = rebuilt(was_in, was_out, ci, halfway, nullptr);
+    out = rebuilt(was_out, was_in, co, halfway, &was_in);
   }
   const auto same = [](const std::vector<Key<float2>> &a, const std::vector<Key<float2>> &b) {
     return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](const Key<float2> &x, const Key<float2> &y) {
-             return x.frame == y.frame && x.value == y.value;
+             return x.frame == y.frame && x.value == y.value && key_settings(x) == key_settings(y);
            });
   };
   return !same(in, was_in) || !same(out, was_out);
