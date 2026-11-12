@@ -480,6 +480,8 @@ add_test(NAME controller_constraints
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_constraints.py)
 add_test(NAME controller_look_from
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_look_from.py)
+add_test(NAME drag_settles_actions
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_drag_settles_actions.py)
 add_test(NAME controller_robust
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_robust.py)
 add_test(NAME motion_path_robust

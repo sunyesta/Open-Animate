@@ -1831,6 +1831,27 @@ static bool posed_after_action_bones(const Document &doc)
   return false;
 }
 
+static uint64_t posed_after_reads(const Document &doc);
+
+/* Action bone actions played again from where the bones posed after them went, until what those read stops changing
+ * (see evaluate_frame). */
+static void action_bones_settle(Document &doc)
+{
+  if (!doc.action_bones_applied || !posed_after_action_bones(doc)) {
+    return;
+  }
+  for (int round = 0; round < 4; round++) {
+    const uint64_t read = posed_after_reads(doc);
+    animation_refresh_action_bones(doc);
+    bone_outer_parents_update(doc);
+    follow_points_update(doc);
+    shape_limits_update(doc);
+    if (posed_after_reads(doc) == read) {
+      break;
+    }
+  }
+}
+
 /* What the bones posed after action bone actions read from the frame, as one number: each Limit to Shape's and Look
  * At's shape, each Follow Point's place, each outer parent's pose (to a millionth: rounding may never settle). */
 static uint64_t posed_after_reads(const Document &doc)
@@ -1937,18 +1958,7 @@ static void evaluate_frame(Document &doc, int frame, bool recorded)
    * what they read stops changing, as a chain needs (a head turn moves the eye a pupil's knob looks inside, and the
    * knob plays the pupil's actions): once more only, the frame would still show some of the frame before. A few
    * rounds at most, for a rig whose drawing moves the very bone that poses it, which may never settle. */
-  if (doc.action_bones_applied && posed_after_action_bones(doc)) {
-    for (int round = 0; round < 4; round++) {
-      const uint64_t read = posed_after_reads(doc);
-      animation_refresh_action_bones(doc);
-      bone_outer_parents_update(doc);
-      follow_points_update(doc);
-      shape_limits_update(doc);
-      if (posed_after_reads(doc) == read) {
-        break;
-      }
-    }
-  }
+  action_bones_settle(doc);
   doc.frame_current = shown;
   doc.evaluated_frame = frame;
 }
@@ -3978,6 +3988,9 @@ void animation_drag_refresh(Document &doc)
   bone_outer_parents_update(doc);
   follow_points_update(doc);
   shape_limits_update(doc);
+  /* As a frame shown settles them: else a drag drew what the pose read an update before (a head turn moving the eye a
+   * pupil's knob looks in), right only once dropped. */
+  action_bones_settle(doc);
 }
 
 void animation_action_bone_drag_begin(Document &doc)

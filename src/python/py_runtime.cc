@@ -660,8 +660,10 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   /* G on the picked bones as the viewport's drag does it, one mouse update per (dx, dy) (bone layer space, from where
    * the drag began), then confirmed. Returns where bone `watch` (its knob, for a controller) is drawn after each
    * update, in the bone layer's space: in the main loop's order, the frame synced first, then the drag's update, then
-   * the drawing, nothing synced in between (for tests: a real drag needs a mouse). */
-  m.def("debug_move_bones", [](uint64_t id, const std::vector<std::pair<float, float>> &deltas, const std::string &watch) {
+   * the drawing, nothing synced in between (for tests: a real drag needs a mouse). With `watch_layer`, where that
+   * layer's drawing is drawn instead: the middle of its points. */
+  m.def("debug_move_bones", [](uint64_t id, const std::vector<std::pair<float, float>> &deltas, const std::string &watch,
+                               uint64_t watch_layer) {
     Context &C = current_context();
     Layer *armature = layer_find(*C.document, id);
     if (!armature || !armature->is_bone_layer()) {
@@ -679,13 +681,20 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       const Bone *b = bone_find_by_name(*armature, watch);
       const std::vector<BonePose> poses = armature_pose(*armature, setup);
       const BonePose *p = b ? bone_pose_find(poses, b->id) : nullptr;
-      const float2 at = !p ? float2() : bone_is_controller(*b) ? p->knob.apply({0, 0}) : p->head;
+      float2 at = !p ? float2() : bone_is_controller(*b) ? p->knob.apply({0, 0}) : p->head;
+      if (const Layer *l = watch_layer ? layer_find(*C.document, watch_layer) : nullptr) {
+        const VectorDrawing d = layer_evaluated_drawing(*C.document, *l, false);
+        at = float2();
+        for (const MeshPoint &mp : d.points) {
+          at = at + mp.pos / float(d.points.size());
+        }
+      }
       drawn.append(py::make_tuple(at.x, at.y));
     }
     animation_action_bone_drag_end();
     C.undo->push("Move Bones", *C.document);
     return drawn;
-  });
+  }, py::arg("id"), py::arg("deltas"), py::arg("watch"), py::arg("watch_layer") = 0);
   /* Crashes on purpose, to try the crash report (oanim.wm.debug_crash). */
   m.def("debug_crash", []() {
     volatile bool go = true;

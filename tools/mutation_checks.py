@@ -37,6 +37,9 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 PENDING = [
     ('src/data/bones.cc', 'if (knob_pulled && bone.controller_knob_independent) {', 'if (false) {',
      'Look At on a knob riding a Knob Parent looks from where it rides, not from the box', 'tests/test_controller_look_from.py'),
+    ('src/anim/animation.cc', "   * pupil's knob looks in), right only once dropped. */\n  action_bones_settle(doc);",
+     "   * pupil's knob looks in), right only once dropped. */", 'A bone drag settles action bone actions as a frame shown does',
+     'tests/test_drag_settles_actions.py'),
 ]
 
 def build(root):
