@@ -132,4 +132,84 @@ full, _ = drawn(True, False)
 assert counts["threads"] <= 1, ("dynamics can move the knob: one at a time", counts)
 assert furthest(fast, full) < 1e-5, ("the same path", furthest(fast, full))
 
+def build_self():
+    """A bone whose turn plays an action moving the bone itself (as a head turn's bone), dynamics elsewhere."""
+    ops.wm.read_homefile()
+    doc.auto_key = True
+    ops.layer.new_bone()
+    rig_id = layers.active.id
+    rig = lambda: next(l for l in layers.all() if l.id == rig_id)
+    ops.armature.bone_add(name="Hair", head_x="-3.0", head_y="0.0", tail_x="-3.0", tail_y="2.0")
+    ops.armature.select_none()
+    ops.armature.bone_add(name="Turn", head_x="0.0", head_y="4.0", tail_x="1.0", tail_y="4.0")
+    ops.armature.select_none()
+    rig().select_bone("Turn")
+    assert ops.armature.bone_turn_action_new(direction="CCW") == {'FINISHED'} and doc.action == "Turn"
+    p = next(b for b in rig().bones if b["name"] == "Turn")["position"]
+    rig().bone_set("Turn", position=(p[0] + 0.8, p[1] - 0.5))
+    doc.frame_current = 11
+    ops.anim.action_set(name="", layer=str(rig_id))
+    for f, turn in ((0, 0.0), (6, 0.4), (20, 1.4), (30, 0.2)):
+        doc.frame_current = f
+        rig().bone_set("Turn", angle=turn)
+        doc.frame_current += 1
+        doc.frame_current -= 1
+    ops.armature.select_none()
+    rig().select_bone("Hair")
+    for f, turn in ((0, 0.0), (8, 1.2), (14, -0.4)):
+        doc.frame_current = f
+        rig().bone_set("Hair", angle=math.pi / 2 + turn)
+        doc.frame_current += 1
+        doc.frame_current -= 1
+    assert ops.armature.constraint_add(type="DYNAMICS", bone="Hair") == {'FINISHED'}
+    doc.auto_key = False
+    doc.motion_paths = True
+    assert ops.wm.tool_motion_path() == {'FINISHED'}
+    layers.active = rig()
+    ops.armature.select_none()
+    rig().select_bone("Turn")
+    doc.frame_current = 18
+    return rig_id, rig
+
+
+def on_path_self(shortcuts):
+    """The Turn bone's position keys once On Path, its path as drawn then, and the places' counts of each."""
+    rig_id, rig = build_self()
+    wm.motion_path_own_from_keys(shortcuts)
+    wm.motion_path_places_clear()
+    assert ops.anim.motion_path_on_path(on="1", bone="Turn", head="1", layer=str(rig_id)) == {'FINISHED'}
+    counts = wm.motion_path_places()
+    keys = [(k["frame"], tuple(k["value"]), tuple(k["path_offset"])) for k in rig().keyframes('bones["Turn"].position')]
+    wm.motion_path_places_clear()
+    path = next(p for p in wm.motion_paths() if p["head"])["points"]
+    path_counts = wm.motion_path_places()
+    wm.motion_path_own_from_keys(True)
+    return keys, counts, path, path_counts
+
+
+# Its action played from its own turn: its own values have nothing posing bones in them, so side by side, values only,
+# as working everything out has it.
+fast, counts, fast_path, path_counts = on_path_self(True)
+full, full_counts, full_path, _ = on_path_self(False)
+assert counts["threads"] >= 2 and path_counts["threads"] >= 2, ("side by side", counts, path_counts)
+assert full_counts["threads"] <= 1, ("in full, one at a time with dynamics", full_counts)
+assert worst(fast, full) < 1e-5, ("the same keys", fast, full)
+assert max(math.dist(k[2], (0.0, 0.0)) for k in fast) > 0.1, ("its action moves it", fast)
+assert furthest(fast_path, full_path) < 1e-5, ("the same path", furthest(fast_path, full_path))
+
+# Keys picked with no keys of its own yet: their handles are what On Path would give, worked out on a copy. Keys made
+# on the copy are no change to the document, else what is kept until keys change (the paths, the handles) was worked
+# out again on every redraw, freezing the app with every bone picked.
+build(False)
+ops.anim.keys_select_all()
+wm.motion_path_places_clear()
+first = next(p for p in wm.motion_paths(True) if p["head"])
+made = wm.motion_path_places()["frames"]
+assert first["handles"], ("the knob's keys' handles show", first)
+wm.motion_path_places_clear()
+again = next(p for p in wm.motion_paths(True) if p["head"])
+# (The handles' copies are worked out each time; the path's frames, kept, are not.)
+assert wm.motion_path_places()["frames"] < made, ("kept: the path not worked out again", made, wm.motion_path_places())
+assert again["handles"] == first["handles"], (again["handles"], first["handles"])
+
 print("test_motion_path_on_path_fast: ok")

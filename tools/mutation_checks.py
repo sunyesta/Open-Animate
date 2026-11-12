@@ -99,7 +99,7 @@ PENDING = [
      'Edit Path\'s dots are the path\'s own colour', 'tests/test_motion_path_edit_split.py'),
     ('src/anim/motion_path.cc', '        r.frame = f;\n        r.key = true;', '        r.key = true;',
      'a held dot holding a key is the key\'s to click', 'tests/test_motion_path_edit_split.py'),
-    ('src/anim/motion_path.cc', '!layer_driven(base, t.layer) && action_offsets_apart(base, *owner, *bone);',
+    ('src/anim/motion_path.cc', '!layer_driven(base, t.layer) && action_offsets_apart(base, *owner, *bone, true);',
      '!layer_driven(base, t.layer);', 'On Path: values only just where poses cannot change the bone',
      'tests/test_motion_path_on_path_fast.py'),
     ('src/anim/motion_path.cc', '  if (values_only) {\n    dynamics_off(base);\n  }\n', '',
@@ -109,6 +109,11 @@ PENDING = [
      'tests/test_motion_path_on_path_fast.py'),
     ('src/anim/motion_path.cc', '      calm.emplace(doc);\n      g_doc_copies++;\n      dynamics_off(*calm);',
      '      calm.emplace(doc);\n      g_doc_copies++;', 'paths drawn side by side, dynamics left out',
+     'tests/test_motion_path_on_path_fast.py'),
+    ('src/anim/motion_path.cc', '    const ChannelKeysQuiet scratch;\n    Document copy = doc;', '    Document copy = doc;',
+     'handles of keys not made yet change no keys (kept paths stay kept)', 'tests/test_motion_path_on_path_fast.py'),
+    ('src/anim/motion_path.cc', '      if ((b->id == bone.id && !values) || b->outer_bone != 0) {',
+     '      if (b->id == bone.id || b->outer_bone != 0) {', 'values only for a bone playing its own action',
      'tests/test_motion_path_on_path_fast.py'),
 ]
 

@@ -238,15 +238,17 @@ static bool bone_played_at(const Document &doc, const MotionPathTarget &t)
 
 /* Whether what plays `name` (its bone's turn, its knob's place, its own Frame, a fix's drivers) is had from that bone's
  * or knob's own values alone, none of them `bone` or hanging from it, posed by nothing drawn (a knob held in its box by
- * its pose, an independent one, plays where it is posed). */
-static bool action_played_apart(const Layer &owner, const std::string &name, const Bone &bone, int depth = 0)
+ * its pose, an independent one, plays where it is posed). `values`: only whether its own values are worked out without
+ * poses, which `bone` playing it or hanging from it doesn't change (kept offsets need it apart from `bone`'s keys too). */
+static bool action_played_apart(const Layer &owner, const std::string &name, const Bone &bone, int depth = 0,
+                                bool values = false)
 {
   if (depth > 4) {
     return false;
   }
   const auto hangs_from_bone = [&](const Bone *b) {
     for (int guard = 0; b && guard < 256; guard++) {
-      if (b->id == bone.id || b->outer_bone != 0) {
+      if ((b->id == bone.id && !values) || b->outer_bone != 0) {
         return true;
       }
       for (const BoneConstraint &c : b->constraints) {
@@ -313,7 +315,7 @@ static bool action_played_apart(const Layer &owner, const std::string &name, con
       /* A linked dial: its knob's. */
       if (const Bone *knob = holder ? controller_of_dial(owner, *holder) : nullptr) {
         for (const std::string &side : knob->controller_actions) {
-          if (!side.empty() && !action_played_apart(owner, side, bone, depth + 1)) {
+          if (!side.empty() && !action_played_apart(owner, side, bone, depth + 1, values)) {
             return false;
           }
         }
@@ -339,18 +341,18 @@ static bool action_played_apart(const Layer &owner, const std::string &name, con
   return !play || play->frame_keys.actions.empty();
 }
 
-static bool action_offsets_apart(const Document &doc, const Layer &owner, const Bone &b)
+static bool action_offsets_apart(const Document &doc, const Layer &owner, const Bone &b, bool values = false)
 {
   /* (Nor itself an action bone: what it plays, it may move.) */
   const bool action_bone = std::any_of(owner.actions.begin(), owner.actions.end(), [&](const std::string &name) {
     return controller_dial_of_action(owner, name) == &b;
   });
-  if (bone_is_controller(b) || action_bone || !doc.action.empty()) {
+  if (bone_is_controller(b) || (action_bone && !values) || !doc.action.empty()) {
     return false;
   }
   const auto apart = [&](const auto &actions) {
     for (const auto &[name, keys] : actions) {
-      if (!action_played_apart(owner, name, b)) {
+      if (!action_played_apart(owner, name, b, 0, values)) {
         return false;
       }
     }
@@ -1020,7 +1022,7 @@ static bool bone_values_apart(const Document &doc, const MotionPathTarget &t)
 {
   const Layer *rig = t.bone ? layer_find(doc, t.layer) : nullptr;
   const int b = rig ? bone_index(*rig, t.bone) : -1;
-  return b >= 0 && !layer_driven(doc, t.layer) && action_offsets_apart(doc, *rig, rig->bones[size_t(b)]);
+  return b >= 0 && !layer_driven(doc, t.layer) && action_offsets_apart(doc, *rig, rig->bones[size_t(b)], true);
 }
 
 /* `fn(i, scratch)` for each i below `count`, side by side on the pool's threads (each works whole frames of a rig out on
@@ -4681,6 +4683,9 @@ bool motion_path_handles(const Document &doc, const MotionPathTarget &target, in
      * from what moves it: the handles its key will have, the path put On Path (keys added, refitted) as the first edit
      * to it puts it (motion_path_edit_prepare), on a copy. */
     OANIM_PROFILE("motion_path_handles_unkeyed");
+    /* (Keys made on the copy don't count as keys changed: they would have what is kept until keys change, these
+     * handles among it, worked out again on every redraw.) */
+    const ChannelKeysQuiet scratch;
     Document copy = doc;
     g_doc_copies++;
     const Channel<float2> *made = motion_path_edit_prepare(copy, target, frame) ? handle_channel(copy, target) : nullptr;
@@ -5647,7 +5652,8 @@ static void on_path_frames(const Document &doc, const MotionPathTarget &t, int f
     return;
   }
   bone->position_keys.on_path = on_path;
-  const bool values_only = g_own_from_keys && !layer_driven(base, t.layer) && action_offsets_apart(base, *owner, *bone);
+  const bool values_only =
+      g_own_from_keys && !layer_driven(base, t.layer) && action_offsets_apart(base, *owner, *bone, true);
   if (values_only) {
     dynamics_off(base);
   }
