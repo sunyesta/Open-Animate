@@ -252,6 +252,14 @@ template<typename T> struct Channel {
   /* An action bone action is playing into it now (its bone turned into it, the offset maybe 0 at this turn):
    * its field shows pink. Worked out with `from_action_bones`, never saved. */
   bool action_bone_live = false;
+  /* How what action bone actions add changes with the setup (each one's share of the setup, less one, summed): worked
+   * out where an edit not yet recorded sits on an unkeyed value, so with Auto Keying off its setup moves by as much more
+   * as lands the edit where it was put (the actions blend from the setup). Never saved, never compared. */
+  struct ActionSlope {
+    float slope = 0.0f;
+    bool known = false;
+    bool operator==(const ActionSlope &) const { return true; }
+  } action_slope;
   /* A bone's position On Path (the Motion Path tool's: edited on its path while actions move it): from its first key
    * to its last on the mainline its keys hold where it is, the path as seen, and what the actions would add is left
    * out there, so its handles, control points and brushes shape the path itself. Before its first key and after its

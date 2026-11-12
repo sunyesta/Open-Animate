@@ -205,8 +205,34 @@ template<typename P, typename F> static void layers_for_each_channel_if(std::vec
 
 /* A channel with something an action bone action added to take off (or marked as played into). */
 static constexpr auto action_bones_added = [](const auto &ch) {
-  return ch.action_bone_live || !(ch.from_action_bones == std::decay_t<decltype(ch.from_action_bones)>{});
+  return ch.action_bone_live || ch.action_slope.known ||
+         !(ch.from_action_bones == std::decay_t<decltype(ch.from_action_bones)>{});
 };
+
+/* Adds to an unkeyed channel's slope (Channel::ActionSlope) what one action or fix does, `delta_at(setup)` being what it
+ * adds from that setup: only where an edit not yet recorded sits on it. */
+template<typename T, typename F>
+static void action_slope_add(Channel<T> &ch, const T &value, const T &setup, const T &delta, F &&delta_at)
+{
+  if (ch.animated() || ch.constant || !ch.has_last || value == ch.last) {
+    return;
+  }
+  T unit{};
+  if constexpr (std::is_same_v<T, float>) {
+    unit = 1.0f;
+  }
+  else {
+    unit.x = 1.0f;
+  }
+  const T step = delta_at(setup + unit) - delta;
+  if constexpr (std::is_same_v<T, float>) {
+    ch.action_slope.slope += step;
+  }
+  else {
+    ch.action_slope.slope += step.x;
+  }
+  ch.action_slope.known = true;
+}
 
 /* The layers with action bone action data: something added to take off, or keys in an action. An action bone being
  * turned has its actions worked out again every update, and a big rig's thousands of other layers have
@@ -543,6 +569,15 @@ static bool record_with(Channel<T> &ch, const T &value, int frame, bool auto_key
     ch.last = value;
     return true;
   }
+  /* Unkeyed, the edit goes into the setup, which the actions blend from: by as much more as keeps it where it was put
+   * (none more where the actions take it whole). */
+  if (frame != 0 && !ch.animated() && ch.action_slope.known && ch.action_bone_live) {
+    const float keep = 1.0f + ch.action_slope.slope;
+    if (keep > 0.05f && keep < 0.999f) {
+      ch.from_action_bones += (value - ch.last) * (1.0f - 1.0f / keep);
+    }
+  }
+  ch.action_slope = {};
   ch.last = value;
   return false;
 }
@@ -576,6 +611,7 @@ template<typename T> static void evaluate(Channel<T> &ch, T &value, int frame)
   }
   ch.from_action_bones = T{};
   ch.action_bone_live = false;
+  ch.action_slope = {};
   ch.last = value;
   ch.has_last = true;
 }
@@ -900,6 +936,10 @@ static int keys_together_sync(Layer &owner, Visit &&visit, Changes &&changes, bo
       channel_delete_key(ch, value, frame);
     }
     const bool was_animated = ch.animated();
+    /* As it played before the settle: a filler inside a stretch it retimes holds what showed there. */
+    using C = std::decay_t<decltype(ch)>;
+    const std::optional<C> before = settle ? std::optional<C>(ch) : std::nullopt;
+    const int settled_before = settled;
     /* Its last key of its own: a filler before it is inside motion it already has. */
     int own_last = INT32_MIN;
     for (const auto &k : ch.keys) {
@@ -947,6 +987,28 @@ static int keys_together_sync(Layer &owner, Visit &&visit, Changes &&changes, bo
       key_timing_set(k, *timing);
       k.filler = fillers;
       k.filler_inside = fillers && was_animated && frame < own_last;
+    }
+    /* Its timing settled, a stretch plays otherwise, and a filler inside it (worked out without) would leave its pose
+     * there: it keeps what showed there and shapes the stretch, so every pose stays as it was. */
+    if (before && settled != settled_before) {
+      for (auto &k : ch.keys) {
+        if (!k.filler_inside) {
+          continue;
+        }
+        const auto was = before->evaluate(k.frame), now = ch.evaluate(k.frame);
+        const auto gap = was - now;
+        float off = 0.0f;
+        if constexpr (std::is_same_v<std::decay_t<decltype(gap)>, float2>) {
+          off = std::max(std::abs(gap.x), std::abs(gap.y));
+        }
+        else {
+          off = std::abs(float(gap));
+        }
+        if (off > 1e-6f) {
+          k.value = was;
+          k.filler_inside = false;
+        }
+      }
     }
   });
   changes(false);
@@ -1446,6 +1508,21 @@ void animation_record(Document &doc)
     doc.frame_current = doc.evaluated_frame;
     drivers_evaluate(doc);
     doc.frame_current = now;
+  }
+  /* An edit not yet recorded on an unkeyed value the actions move, and no refresh since it: what they do as its setup
+   * changes (Channel::ActionSlope) is worked out now, for it to land where it was put. */
+  if (doc.evaluated_frame != 0) {
+    bool unknown = false;
+    layers_for_each_channel_if(doc.layers, action_bones_added, [&](auto &ch, auto &value) {
+      unknown = unknown || (!ch.animated() && !ch.constant && ch.has_last && ch.action_bone_live &&
+                            !ch.action_slope.known && !(value == ch.last));
+    });
+    if (unknown) {
+      const int now = doc.frame_current;
+      doc.frame_current = doc.evaluated_frame;
+      animation_refresh_action_bones(doc);
+      doc.frame_current = now;
+    }
   }
   /* So is a linked dial's the knob's: an edit to it is the knob's to take or refuse, never a key of its own. */
   for (const Layer *flat : document_layers_flat(doc)) {
@@ -2001,6 +2078,7 @@ void animation_strip_action_bones(Document &doc)
     ch.last -= ch.from_action_bones;
     ch.from_action_bones = {};
     ch.action_bone_live = false;
+    ch.action_slope = {};
   });
   doc.action_bones_applied = false;
 }
@@ -3757,12 +3835,17 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
   };
   const auto setup_of = [](const auto &ch, const auto &value) { return channel_setup(ch, value); };
   /* The action bones' own angles: they pick the frames, so nothing else moves them. */
-  std::set<const void *> driving;
+  std::set<const void *> driving, action_bones;
   for (const std::string &name : owner.actions) {
     if (const Bone *b = action_bone_of(owner, name)) {
       driving.insert(&b->angle_keys);
+      action_bones.insert({&b->position_keys, &b->angle_keys, &b->scale_keys});
     }
   }
+  /* A fix never moves an action bone (its keys of one show only while it is edited), nor a bone it follows. */
+  const auto fix_leaves = [&](const BoneFix &fix, const void *ch) {
+    return action_bones.count(ch) > 0 || bone_fix_tracing(owner, fix, ch);
+  };
   /* A fix that follows bones, from where they are on that frame by then. */
   const auto play_fix = [&](const BoneFix &fix) {
     const BoneFixPlay at = bone_fix_play_with(owner, fix, false, [&](size_t i, int axis) {
@@ -3779,14 +3862,14 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
       const Bone &src = owner.bones[j];
       Bone &b = bones[j];
       if (const auto it = src.position_keys.actions.find(fix.name);
-          it != src.position_keys.actions.end() && !bone_fix_tracing(owner, fix, &src.position_keys))
+          it != src.position_keys.actions.end() && !fix_leaves(fix, &src.position_keys))
       {
         float2 d;
         if (bone_fix_delta(it->second, setup_of(src.position_keys, src.transform), at, false, d)) {
           b.position += rotate(d, src.setup_angle);
         }
       }
-      if (!driving.count(&src.angle_keys) && !bone_fix_tracing(owner, fix, &src.angle_keys)) {
+      if (!fix_leaves(fix, &src.angle_keys)) {
         if (const auto it = src.angle_keys.actions.find(fix.name); it != src.angle_keys.actions.end()) {
           float d;
           if (bone_fix_delta(it->second, setup_of(src.angle_keys, src.turn), at, false, d)) {
@@ -3795,7 +3878,7 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
         }
       }
       if (const auto it = src.scale_keys.actions.find(fix.name);
-          it != src.scale_keys.actions.end() && !bone_fix_tracing(owner, fix, &src.scale_keys))
+          it != src.scale_keys.actions.end() && !fix_leaves(fix, &src.scale_keys))
       {
         float2 d;
         if (bone_fix_delta(it->second, setup_of(src.scale_keys, src.scale), at, false, d)) {
@@ -3882,6 +3965,7 @@ void animation_refresh_action_bones(Document &doc)
     ch.last -= ch.from_action_bones;
     ch.from_action_bones = {};
     ch.action_bone_live = false;
+    ch.action_slope = {};
   });
   doc.action_bones_applied = false;
   apply_action_bone_actions(doc, doc.frame_current);
@@ -3982,10 +4066,11 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
     };
     /* The action bones' own angles: they pick the frames, so nothing else moves them (shown turned only
      * while a fix is edited, its drivers held). */
-    std::set<const void *> driving;
+    std::set<const void *> driving, action_bones;
     for (const std::string &name : owner.actions) {
       if (const Bone *b = action_bone_of(owner, name)) {
         driving.insert(&b->angle_keys);
+        action_bones.insert({&b->position_keys, &b->angle_keys, &b->scale_keys});
       }
     }
     /* Switches pick rather than add: an action has a say once its bone has turned past one of its
@@ -4046,6 +4131,8 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
          * recorded (a bone being dragged) stays on top instead of being taken into the offset. */
         const auto setup = ch.animated() ? ch.evaluate(0) : (ch.has_last ? ch.last : value) - ch.from_action_bones;
         const auto delta = action_bone_sample(it->second, setup, t, ch.constant) - setup;
+        action_slope_add(ch, value, setup, delta,
+                         [&](const auto &s) { return action_bone_sample(it->second, s, t, ch.constant) - s; });
         /* The value and what it was last recorded as both move, so an edit stays an edit. */
         value += delta;
         ch.last += delta;
@@ -4096,7 +4183,8 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
           }
           return;
         }
-        if (driving.count(key) || bone_fix_tracing(owner, fix, key)) {
+        /* Nor an action bone: its keys in a fix show only while the fix is edited. */
+        if (action_bones.count(key) || bone_fix_tracing(owner, fix, key)) {
           return;
         }
         const auto it = ch.actions.find(fix.name);
@@ -4108,6 +4196,11 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
         if (!bone_fix_delta(it->second, setup, at, ch.constant, delta)) {
           return;
         }
+        action_slope_add(ch, value, setup, delta, [&](const auto &s) {
+          auto d = s - s;
+          bone_fix_delta(it->second, s, at, ch.constant, d);
+          return d;
+        });
         value += delta;
         ch.last += delta;
         ch.from_action_bones += delta;

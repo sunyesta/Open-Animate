@@ -188,6 +188,15 @@ PENDING = [
     ('src/anim/deform.cc', '[&](uint64_t reader) { return reader_in(doc, reader, group->id); }) ||',
      '[&](uint64_t reader) { return layer_inside(doc, reader, group->id); }) ||',
      "a group's reference reads a deform's shape as its original does", 'tests/test_sweep_rig_guards.py'),
+    ('src/anim/animation.cc', '        if (action_bones.count(key) || bone_fix_tracing(owner, fix, key)) {',
+     '        if (driving.count(key) || bone_fix_tracing(owner, fix, key)) {',
+     'a fix leaves an action bone keyed in it as it is', 'tests/test_sweep_rig_guards.py'),
+    ('src/anim/animation.cc', '    if (keep > 0.05f && keep < 0.999f) {', '    if (false && keep > 0.05f && keep < 0.999f) {',
+     'auto-key off: an edit on a point an action moves lands where it was put', 'tests/test_sweep_rig_guards.py'),
+    ('src/anim/animation.cc', '    if (unknown) {', '    if (false && unknown) {',
+     'auto-key off: the slope worked out at record when no refresh came after the edit', 'tests/test_sweep_rig_guards.py'),
+    ('src/anim/animation.cc', '    if (before && settled != settled_before) {', '    if (false && before && settled != settled_before) {',
+     'Key Together turned on keeps every pose inside a retimed stretch', 'tests/test_sweep_rig_guards.py'),
 
 ]
 
