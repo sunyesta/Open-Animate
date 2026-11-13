@@ -339,15 +339,6 @@ static bool action_played_apart(const Layer &owner, const std::string &name, con
       }
       return holder->angle_keys.actions.empty() && holder->scale_keys.actions.empty();
     case ActionFrameBy::Bone:
-      /* A linked dial: its knob's. */
-      if (const Bone *knob = holder ? controller_of_dial(owner, *holder) : nullptr) {
-        for (const std::string &side : knob->controller_actions) {
-          if (!side.empty() && !action_played_apart(owner, side, bone, depth + 1, values)) {
-            return false;
-          }
-        }
-        return !hangs_from_bone(holder);
-      }
       break;
     case ActionFrameBy::Own:
       break;

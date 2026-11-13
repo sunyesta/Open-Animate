@@ -99,6 +99,11 @@ PENDING = [
     ('src/editors/timeline.cc', 'return order(a) < order(b); });',
      'return false; });',
      "Action menu: a controller's sides Right, Left, Up, Down; a bone's turns counterclockwise first", 'tests/test_action_menu.py'),
+    ('src/anim/animation.cc', 'if (const Bone *bone = controller_dial_of_action(*owner, action)) {',
+     'if (const Bone *bone = controller_dial_of_action(*owner, action + "?")) {',
+     "A controller side refuses a bone's own action", 'tests/test_controller_link_open.py'),
+    ('src/io/oanim_file.cc', '  controller_links_undo(doc);', '  (void)doc;',
+     "An old file's linked controller sides open as ordinary actions keying the bone's turn", 'tests/test_controller_link_open.py'),
 ]
 
 def build(root):

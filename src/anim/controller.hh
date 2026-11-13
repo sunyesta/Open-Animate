@@ -9,11 +9,8 @@
  * The knob never bends a drawing: posed, the bone stays where it rests, riding on its parent, and its children and
  * points with it. Only the knob moves, inside the box.
  *
- * An ordinary action in a side is played by the controller. An action bone action stays its bone's (a dial), which
- * still plays it, so what else turns that bone goes on working: the knob and the dial are linked instead, one set of
- * keys, the knob's, the dial's row in the timeline showing them. Moving either moves the other. The knob has one value
- * per axis, so while it is on one side the other side's dial is held at rest. The link is the mainline's: inside an
- * action the dial is keyed as ever. */
+ * A side plays an ordinary action. A bone's own action (an action bone action) plays as that bone turns, so a knob
+ * drives one through an ordinary action keying the bone's turn. */
 
 #include <string>
 #include <vector>
@@ -96,14 +93,9 @@ int controller_side_from_id(const std::string &id);
 
 /* The controller with `action` in a side (and which side), or null. */
 const Bone *controller_of_action(const Layer &owner, const std::string &action, int *r_side = nullptr);
-/* The bone an action bone action belongs to by its name, a controller never: the dial a side would be linked to. */
+/* The bone an action bone action belongs to by its name, a controller never. */
 const Bone *controller_dial_of_action(const Layer &owner, const std::string &action);
 Bone *controller_dial_of_action(Layer &owner, const std::string &action);
-/* The controller a dial is linked to (one of its actions is in a side of it, on `r_axis`), or null. */
-const Bone *controller_of_dial(const Layer &owner, const Bone &dial, int *r_axis = nullptr);
-/* The dial linked to on `side`, if it has anything to link by: its angle keyed in that action. */
-Bone *controller_side_dial(Layer &owner, const Bone &knob, int side);
-const Bone *controller_side_dial(const Layer &owner, const Bone &knob, int side);
 
 /* A side's action's length in frames: 0 for a side with no action. */
 float controller_side_frames(const Bone &knob, int side);

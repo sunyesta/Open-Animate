@@ -1,5 +1,5 @@
 """2 Axis Controller edge cases: Dynamics springs the knob; in a side's own action a key at rest holds it there; a
-linked dial and a moved fix pose go through the side's timing; back to Regular its timing keys go; an independent knob
+moved fix pose goes through the side's timing; back to Regular its timing keys go; an independent knob
 goes to a spot where it is seen, its box turned; dragging a knob its constraints pull goes from where it is seen; a Knob
 Parent hanging from its own controller can't carry it; a knob plays after what moves its constraints' targets.
 
@@ -102,47 +102,6 @@ assert close(r.bone("eye")["knob_shown"], (0, 0)), ("a key at rest holds it ther
 go(30)
 assert close(r.bone("eye")["knob_shown"], (0, 0)), ("and holds there after it", r.bone("eye")["knob_shown"])
 assert ops.anim.action_set(name="") == {'FINISHED'}
-
-# --- A linked dial goes through the timing -------------------------------------------------------------------------
-ops.wm.read_homefile()
-doc.auto_key = True
-doc.frame_current = 0
-ops.layer.new_bone()
-rig = layers.active
-for name, y in (("dial", 1.0), ("joy", 3.0)):
-    ops.armature.select_none()
-    ops.armature.bone_add(name=name, head_x="5.0", head_y=str(y), tail_x="6.0", tail_y=str(y))
-rig.bone_set("dial", strength=0.0)
-ops.layer.new()
-face = layers.active
-face.add_curve([(0.0, 0.0), (1.0, 0.0)])
-ops.layer.move_to_group(group=str(rig.id))
-layers.active = rig
-dial_bone = lambda: next(b for b in rig.bones if b["name"] == "dial")
-joy_bone = lambda: next(b for b in rig.bones if b["name"] == "joy")
-rig.select_bone("dial")
-assert ops.anim.action_new(name="dial", action_bone="1") == {'FINISHED'}
-doc.frame_current = 40
-rig.bone_set("dial", angle=dial_bone()["setup_angle"] + QUARTER)
-face.set_point(0, (1.0, 1.0))
-go(40)
-doc.action = ""
-doc.frame_current = 0
-ops.armature.select_none()
-rig.select_bone("joy")
-assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
-assert ops.armature.controller_side(side="RIGHT", action="dial") == {'FINISHED'}
-assert ops.anim.action_set(name="dial") == {'FINISHED'}
-doc.frame_current = 20
-rig.bone_set("joy", knob=(10.0, 0.0))
-go(20)
-assert ops.anim.action_set(name="") == {'FINISHED'}
-doc.frame_current = 7
-go(7)
-rig.select_bone("dial")
-rig.bone_set("dial", angle=dial_bone()["setup_angle"] + QUARTER / 2)
-go(7)
-assert close(joy_bone()["knob"], (10, 0), 0.05), ("the dial's frame 20 is 10 out", joy_bone()["knob"])
 
 # --- Back to Regular, its timing keys go ------------------------------------------------------------------------------
 r = Rig()

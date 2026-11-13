@@ -288,6 +288,8 @@ add_test(NAME controller
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller.py)
 add_test(NAME controller_edges
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_edges.py)
+add_test(NAME controller_link_open
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_link_open.py)
 add_test(NAME action_panel
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_action_panel.py)
 add_test(NAME action_panel_edges
@@ -506,8 +508,6 @@ add_test(NAME dynamics_bake_controller
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_dynamics_bake_controller.py)
 add_test(NAME layer_move_rebind
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_layer_move_rebind.py)
-add_test(NAME controller_dial_setup_key
-  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_dial_setup_key.py)
 add_test(NAME noop_ops
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_noop_ops.py)
 add_test(NAME paste_keys_points

@@ -68,40 +68,6 @@ Bone *controller_dial_of_action(Layer &owner, const std::string &action)
   return const_cast<Bone *>(controller_dial_of_action(const_cast<const Layer &>(owner), action));
 }
 
-const Bone *controller_side_dial(const Layer &owner, const Bone &knob, int side)
-{
-  const std::string &action = knob.controller_actions[side];
-  const Bone *dial = action.empty() ? nullptr : controller_dial_of_action(owner, action);
-  if (!dial) {
-    return nullptr;
-  }
-  const auto keys = dial->angle_keys.actions.find(action);
-  return keys != dial->angle_keys.actions.end() && !keys->second.empty() ? dial : nullptr;
-}
-
-Bone *controller_side_dial(Layer &owner, const Bone &knob, int side)
-{
-  return const_cast<Bone *>(controller_side_dial(const_cast<const Layer &>(owner), knob, side));
-}
-
-const Bone *controller_of_dial(const Layer &owner, const Bone &dial, int *r_axis)
-{
-  for (const Bone &knob : owner.bones) {
-    if (!bone_is_controller(knob)) {
-      continue;
-    }
-    for (int side = 0; side < CONTROLLER_SIDES; side++) {
-      if (controller_side_dial(owner, knob, side) == &dial) {
-        if (r_axis) {
-          *r_axis = controller_side_axis(side);
-        }
-        return &knob;
-      }
-    }
-  }
-  return nullptr;
-}
-
 float controller_side_frames(const Bone &knob, int side)
 {
   if (knob.controller_actions[side].empty()) {

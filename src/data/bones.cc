@@ -1388,8 +1388,7 @@ bool armature_clear_pose(Layer &armature, bool position, bool angle, bool scale)
       b.position = bone_position_from_transform(b, b.position_keys.from_action_bones);
     }
     if (angle) {
-      /* What a controller's knob gives a dial is added the same way, and that does go back. */
-      b.angle = b.setup_angle + (controller_of_dial(armature, b) ? 0.0f : b.angle_keys.from_action_bones);
+      b.angle = b.setup_angle + b.angle_keys.from_action_bones;
     }
     if (scale) {
       b.scale = setup_value(b.scale_keys, b.scale, false) + b.scale_keys.from_action_bones;

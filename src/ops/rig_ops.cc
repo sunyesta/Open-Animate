@@ -155,7 +155,7 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
     if (knob && bone_is_controller(*knob) && knob->controller_actions[side].empty() &&
         std::find(rig->actions.begin(), rig->actions.end(), action) != rig->actions.end())
     {
-      controller_side_set(doc, owner_id, knob->id, side, action, "", &why, &note);
+      controller_side_set(doc, owner_id, knob->id, side, action, &why);
     }
   }
   for (const std::string &name : fixes) {
@@ -952,9 +952,6 @@ void rig_operators_register()
                        doomed.push_back(other);
                      }
                    }
-                 }
-                 for (const uint64_t id : doomed) {
-                   controller_release(*C.document, armature.id, id);
                  }
                  /* Posed, the setup pose is where the bones rest, not as they are now. */
                  const std::vector<BonePose> poses = armature_pose(armature, C.document->frame_current == 0);
@@ -2157,23 +2154,17 @@ void rig_operators_register()
 
   rig_operator("armature.controller_side", "Set Controller Action",
                "Put an action in a side of the active 2 Axis Controller (side=RIGHT, LEFT, UP or DOWN; action=\"\" empties "
-               "it). An action bone action's bone is linked to the knob, its keys moved there; keep=THIS or OTHER says "
-               "whose keys stay when both have them",
+               "it): an ordinary action, never a bone's own",
                bone_layer_active, [active_controller](Context &C) {
                  Bone *knob = active_controller(C);
                  if (!knob) {
                    return OpStatus::Cancelled;
                  }
                  const int side = controller_side_from_id(op_arg(C, "side", "RIGHT"));
-                 std::string why, note;
-                 if (!controller_side_set(*C.document, active_armature(C)->id, knob->id, side, op_arg(C, "action"),
-                                          op_arg(C, "keep"), &why, &note))
-                 {
+                 std::string why;
+                 if (!controller_side_set(*C.document, active_armature(C)->id, knob->id, side, op_arg(C, "action"), &why)) {
                    report(ReportType::Warning, why);
                    return OpStatus::Cancelled;
-                 }
-                 if (!note.empty()) {
-                   report(ReportType::Info, note);
                  }
                  return OpStatus::Finished;
                });
@@ -2232,8 +2223,8 @@ void rig_operators_register()
                  for (const std::string &note : document_action_mirror(doc, owner, from, to)) {
                    text += "; " + note;
                  }
-                 std::string why, note;
-                 if (!controller_side_set(doc, owner, id, side, to, "THIS", &why, &note)) {
+                 std::string why;
+                 if (!controller_side_set(doc, owner, id, side, to, &why)) {
                    report(ReportType::Warning, why);
                    return OpStatus::Cancelled;
                  }

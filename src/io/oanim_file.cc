@@ -4090,6 +4090,8 @@ bool oanim_document_from_json(const std::string &text, Document &r_doc, std::str
   document_weight_new_points(doc, true);
   /* Older files' Vector Deforms become the deform their shape fits. */
   vector_deform_resolve_legacy(doc);
+  /* Older files' controller sides linked to a bone's own action get ordinary actions of their own. */
+  controller_links_undo(doc);
 
   r_doc = std::move(doc);
   return true;

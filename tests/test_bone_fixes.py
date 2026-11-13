@@ -281,12 +281,27 @@ def dial_action(name, i, moved):
     mainline()
 
 
+def drive(name, bone):
+    """Ordinary action `name` turning `bone` a quarter by frame 20: in a side, the knob turns the bone, which plays
+    its own action."""
+    layers.active = fresh()
+    assert ops.anim.action_new(name=name) == {'FINISHED'} and doc.action == name
+    doc.frame_current = 20
+    b = next(b for b in fresh().bones if b["name"] == bone)
+    fresh().bone_set(bone, angle=b["setup_angle"] + 1.5708)
+    doc.frame_current = 21
+    mainline()
+
+
 dial_action("turn", 0, (2.0, 0.0))
 dial_action("up", 1, (1.0, 1.0))
 fresh().select_bone("Knob")
 assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
-assert ops.armature.controller_side(side="RIGHT", action="turn") == {'FINISHED'}
-assert ops.armature.controller_side(side="UP", action="up") == {'FINISHED'}
+drive("Knob Right", "turn")
+drive("Knob Up", "up")
+fresh().select_bone("Knob")
+assert ops.armature.controller_side(side="RIGHT", action="Knob Right") == {'FINISHED'}
+assert ops.armature.controller_side(side="UP", action="Knob Up") == {'FINISHED'}
 knob = lambda x, y, frame=5: (setattr(doc, "frame_current", frame), fresh().select_bone("Knob"),
                               fresh().bone_set("Knob", knob=(x, y)), settle())
 knob(0.0, 20.0)
@@ -302,7 +317,7 @@ face_now().set_point(2, (2.0, 0.5))
 settle()
 assert close(point(2), (2.0, 0.5))
 mainline()
-assert [f["name"] for f in fixes()] == ["up and turn"], fixes()
+assert [f["name"] for f in fixes()] == ["Knob Up and Right"], fixes()
 knob(20.0, 20.0)
 assert close(point(0), (2.0, 0.0)) and close(point(2), (2.0, 0.5)), ("it plays on the mainline", point(2))
 
@@ -314,7 +329,7 @@ doc.frame_current = 30
 fresh().bone_set("Knob", knob=(20.0, 0.0))
 settle()
 mainline()
-named = [f["name"] for f in fixes() if f["name"] != "up and turn"]
+named = [f["name"] for f in fixes() if f["name"] != "Knob Up and Right"]
 assert len(named) == 1 and named[0] not in ("turn", "turn 2"), ("named for turn, never as turn's own", named)
 # A file from before, with a fix named so: it opens as a fix all the same.
 old = os.path.join(tempfile.mkdtemp(), "turn_named.oanim")

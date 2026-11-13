@@ -122,31 +122,26 @@ const Bone *action_bone_of(const Layer &owner, const std::string &action);
 /* Where a controller's knob shows, in frames: where it is, or inside one of its own actions the frame shown on that
  * side. */
 float2 controller_knob_shown(const Document &doc, const Layer &owner, const Bone &knob);
-/* Where its actions are really playing, in frames: not the knob where something else turns its dials. */
-float2 controller_knob_playing(const Layer &owner, const Bone &knob);
 /* Ctrl on a knob: onto its nearest spot, rest, or crossing of keys (controller_knob_snap). */
 void armature_knob_snap(const Layer &armature, Bone &knob);
-/* Whether a dial is held at rest because the knob is on the other side's. */
-bool controller_dial_held(const Layer &owner, const Bone &dial);
 /* What the sides' actions key, found again after keys change (Bone::controller_keys). */
 void controllers_update(Document &doc);
 /* Makes the bone a controller, or regular again, on the mainline. To a controller: its own action bone actions go into
  * Right and Left, its angle keys becoming knob keys; any other position keys are read as frames. Back: they come out
- * the same way, and linked dials get keys of their own. Returns anything the user should hear of. */
+ * the same way. Returns anything the user should hear of. */
 std::string bone_convert_to_controller(Document &doc, uint64_t owner, uint64_t bone);
 std::string bone_convert_to_regular(Document &doc, uint64_t owner, uint64_t bone);
 /* Makes the bone a Pin (BoneType::Pin; a controller becomes Regular first). Its children connected to its tip are
  * let go, keeping where they are: nothing connects to a pin. */
 std::string bone_convert_to_pin(Document &doc, uint64_t owner, uint64_t bone);
-/* Puts `action` in a side ("" empties it), from the mainline. An action bone action's dial is linked: its keys move to
- * the knob. Keys there too on that axis are one too many: `keep` says whose ("THIS" or "OTHER"). False with why,
- * nothing changed. `r_note`: anything the user should hear of. */
+/* Puts an ordinary `action` in a side ("" empties it), from the mainline: never a bone's own action (an action bone
+ * action), a fix or another side's. False with why, nothing changed. */
 bool controller_side_set(Document &doc, uint64_t owner, uint64_t knob, int side, const std::string &action,
-                         const std::string &keep, std::string *r_why, std::string *r_note);
-/* Whether `action` going in `side` needs `keep`. */
-bool controller_side_keys_clash(const Layer &owner, const Bone &knob, int side, const std::string &action);
-/* Before a controller goes: its dials get keys of their own that move them as the knob did. */
-void controller_release(Document &doc, uint64_t owner, uint64_t knob);
+                         std::string *r_why);
+/* Older files linked a side to a bone's own action (one set of keys, the knob's): each such side gets an ordinary
+ * action of its own instead, keying that bone's turn as its action did, so the knob still drives it. Returns how
+ * many. */
+int controller_links_undo(Document &doc);
 /* What the action bone actions of bone layer `owner` add to its bones on `frame`, as apply_action_bone_actions plays
  * them on the frame shown: `bones` (owner's, in its order) hold the keyed values there, without action bone
  * actions, and get the action bone actions' amounts added. For working out other frames than the one shown

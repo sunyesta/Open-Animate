@@ -398,7 +398,16 @@ ops.armature.select_none()
 ops.armature.bone_add(name="joy", head_x="-3.0", head_y="3.0", tail_x="-2.5", tail_y="3.0")
 dial_rig.select_bone("joy")
 assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
-assert ops.armature.controller_side(side="RIGHT", action="dial") == {'FINISHED'}
+# The knob turns the dial through an ordinary action keying its turn; the dial plays its own action by that turn.
+assert ops.anim.action_new(name="joy Right") == {'FINISHED'}
+doc.auto_key = True
+doc.frame_current = 90
+dial_rig.bone_set("dial", angle=1.5708)
+doc.frame_current = 91
+doc.action = ""
+doc.frame_current = 0
+dial_rig.select_bone("joy")
+assert ops.armature.controller_side(side="RIGHT", action="joy Right") == {'FINISHED'}
 doc.frame_current = 12
 dial_rig.bone_set("joy", knob=(30.0, 0.0))
 doc.frame_current = 28

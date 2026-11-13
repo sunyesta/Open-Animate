@@ -404,10 +404,9 @@ class _Layer:
         and setup_angle (the setup pose, frame 0: their keys hold the change from it), length,
         scale, strength, selected, select_head, select_tail, connected, shape, pin_size, shape_layer,
         color_set, colors (its regular, selected and active shades), active, head and tail (where it runs now, in the bone
-        layer's space), type ("REGULAR" or "CONTROLLER_2D"), and controller and held for a bone linked to a controller. A
-        controller also has controller_actions (by side, "RIGHT", "LEFT", "UP", "DOWN"), controller_frame_size,
+        layer's space), type ("REGULAR", "PIN" or "CONTROLLER_2D"). A controller also has controller_actions (by side, "RIGHT", "LEFT", "UP", "DOWN"), controller_frame_size,
         controller_box (its lowest and highest corners, in frames from the rest point), knob (in frames), knob_shown
-        (inside its own actions), knob_playing (where its actions really are), fix_lines (the fixes following it, as
+        (inside its own actions), knob_playing (where its actions play), fix_lines (the fixes following it, as
         drawn in its box: [{"name", "points" (its line in frames), "now" (where it plays), "strength", "edited"}]) and
         controller_spots ([(name, (x, y))], its named places, in frames; armature.controller_spot_add, _remove, _rename, _order, _go(name=, hold=), _move
         and controller_spots_corners). Convert with

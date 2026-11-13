@@ -509,8 +509,6 @@ static void pencil_icon(ImDrawList *dl, ImVec2 center, float size, ImU32 color)
  * stay. */
 static void controller_side_row(Context &C, Layer &armature, const Bone &knob, int side)
 {
-  static int pending_side = -1;
-  static std::string pending_action;
   const std::string now = knob.controller_actions[side];
   const char *id = controller_side_id(side);
   ImGui::PushID(id);
@@ -519,12 +517,6 @@ static void controller_side_row(Context &C, Layer &armature, const Bone &knob, i
   const float buttons = ImGui::GetFrameHeight() * (can_mirror ? 2.0f : 1.0f) + ImGui::GetStyle().ItemSpacing.x * (can_mirror ? 2.0f : 1.0f);
   ImGui::SetNextItemWidth(-buttons);
   const auto pick = [&](const std::string &action) {
-    if (!action.empty() && controller_side_keys_clash(armature, knob, side, action)) {
-      pending_side = side;
-      pending_action = action;
-      ImGui::OpenPopup("##controller_keep");
-      return;
-    }
     operator_call(C, "armature.controller_side", {{"side", id}, {"action", action}});
   };
   if (ImGui::BeginCombo("##action", now.empty() ? "None" : now.c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -535,9 +527,10 @@ static void controller_side_row(Context &C, Layer &armature, const Bone &knob, i
       if (bone_fix_find(armature, action)) {
         continue;
       }
+      /* Another side's, or a bone's own action (it plays as that bone turns). */
       int in_side = 0;
       const Bone *in = controller_of_action(armature, action, &in_side);
-      const bool taken = in && !(in == &knob && in_side == side);
+      const bool taken = (in && !(in == &knob && in_side == side)) || controller_dial_of_action(armature, action);
       if (ImGui::Selectable(action.c_str(), action == now, taken ? ImGuiSelectableFlags_Disabled : 0)) {
         pick(action);
       }
@@ -599,19 +592,6 @@ static void controller_side_row(Context &C, Layer &armature, const Bone &knob, i
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip("Make this side from the other, as a mirrored action");
     }
-  }
-  if (pending_side == side && ImGui::BeginPopup("##controller_keep")) {
-    ImGui::TextDisabled("Both have keys, and the knob has one place on an axis");
-    ImGui::Separator();
-    if (ImGui::Selectable(("Keep " + pending_action + "'s keys").c_str())) {
-      operator_call(C, "armature.controller_side", {{"side", id}, {"action", pending_action}, {"keep", "THIS"}});
-      pending_side = -1;
-    }
-    if (ImGui::Selectable("Keep the knob's keys")) {
-      operator_call(C, "armature.controller_side", {{"side", id}, {"action", pending_action}, {"keep", "OTHER"}});
-      pending_side = -1;
-    }
-    ImGui::EndPopup();
   }
   ImGui::PopID();
 }
@@ -1860,11 +1840,6 @@ static void bone_panel(Context &C, Layer &armature)
       }
       ImGui::PopID();
     };
-    if (const Bone *knob = controller_of_dial(armature, *active)) {
-      label("");
-      ImGui::TextDisabled("Linked to %s%s", knob->name.c_str(),
-                          controller_dial_held(armature, *active) ? ": held, the knob is on the other side" : "");
-    }
     if (bone_is_controller(*active)) {
       if (doc.frame_current != 0) {
         keyed_field("Knob", "position", [&] {

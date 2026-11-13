@@ -3317,10 +3317,6 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         const Bone *knob_parent = bone_find(layer, b.controller_knob_parent);
         d["knob_parent"] = knob_parent ? knob_parent->name : std::string();
       }
-      if (const Bone *knob = controller_of_dial(layer, b)) {
-        d["controller"] = knob->name;
-        d["held"] = controller_dial_held(layer, b);
-      }
       if (bone_is_controller(b)) {
         py::dict actions;
         for (int side = 0; side < CONTROLLER_SIDES; side++) {
@@ -3330,7 +3326,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         controller_box(b, lo, hi);
         const float2 knob = controller_knob(b);
         const float2 shown = controller_knob_shown(*current_context().document, layer, b);
-        const float2 playing = controller_knob_playing(layer, b);
+        const float2 playing = controller_knob_played(layer, b);
         d["controller_actions"] = actions;
         d["controller_frame_size"] = b.controller_frame_size;
         d["controller_box"] = py::make_tuple(py::make_tuple(lo.x, lo.y), py::make_tuple(hi.x, hi.y));

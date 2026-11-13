@@ -1,6 +1,6 @@
 """2 Axis Controllers: a bone converted into a box with a knob, whose four sides play actions. The knob's position is the
-action frame. An ordinary action is played by the controller; an action bone action stays its bone's, the bone and the
-knob linked, one set of keys. The knob has one place on an axis, so the other side's bone is held at rest.
+action frame. A side plays an ordinary action; a bone's own action (an action bone action) plays as that bone turns, so
+a knob drives one through an ordinary action keying the turn.
 
 Run with:  OpenAnimate --background --python tests/test_controller.py
 """
@@ -79,11 +79,8 @@ def action_bone(name, frames, angle, moved):
     mainline()
 
 
-def side(side_id, action, keep=None):
-    args = {"side": side_id, "action": action}
-    if keep:
-        args["keep"] = keep
-    return ops.armature.controller_side(**args)
+def side(side_id, action):
+    return ops.armature.controller_side(side=side_id, action=action)
 
 
 def turn(name, angle):
@@ -243,198 +240,49 @@ for k in list(rig.keyframes('bones["stick"].position')):
     if k["frame"]:
         rig.keyframe_delete('bones["stick"].position', k["frame"])
 
-# --- A bone's action in a side: linked ---------------------------------------------------------------------------
+# --- A bone's own action in a side: refused; an ordinary action turning the bone drives it ---------------------------
 action_bone("turn_r", 90, QUARTER, (1.0, 1.0))
 action_bone("turn_l", 60, -QUARTER, (-1.0, 1.0))
 ops.armature.select_none()
 ops.armature.bone_add(name="joy", head_x="-3.0", head_y="3.0", tail_x="-2.5", tail_y="3.0")
 rig.select_bone("joy")
 assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
-assert side("RIGHT", "turn_r") == {'FINISHED'}
-assert side("LEFT", "turn_l") == {'FINISHED'}
-assert bone("joy")["controller_box"] == ((-60.0, 0.0), (90.0, 0.0)), bone("joy")
-assert bone("turn_r")["controller"] == "joy" and bone("turn_l")["controller"] == "joy"
-kinds = {a["name"]: a["kind"] for a in rig.actions}
-assert kinds["turn_r"] == "ACTION_BONE" and kinds["Look Right"] == "ACTION_BONE", kinds
-
-# An action that holds a linked bone at 0, as every action does the bones it doesn't move, doesn't pull it back.
-ops.armature.select_none()
-ops.armature.bone_add(name="nodder", head_x="5.0", head_y="-2.0", tail_x="6.0", tail_y="-2.0")
-rig.bone_set("nodder", strength=0.0)
-action_bone("nodder", 90, QUARTER, (0.0, 0.0))
-doc.action = "nodder"
-rig.keyframe_insert('bones["turn_r"].angle', 90)
-assert [k["frame"] for k in rig.keyframes('bones["turn_r"].angle') if k["frame"]] == [90], "held at 0 in nodder"
+assert side("RIGHT", "turn_r") == {'CANCELLED'}, "turn_r plays as its bone turns"
+assert bone("joy")["controller_actions"]["RIGHT"] == ""
+assert "turn_r's own action" in oanim.wm.banner_report()[3], oanim.wm.banner_report()
+# The way to drive it: an ordinary action keying the bone's turn. The knob plays it, it turns the bone, and the bone
+# plays its own action by that turn (action bones drive action bones).
+assert ops.anim.action_new(name="joy Right") == {'FINISHED'}
+doc.frame_current = 90
+rig.bone_set("turn_r", angle=bone("turn_r")["setup_angle"] + QUARTER)
+doc.frame_current = 91
 mainline()
 rig.select_bone("joy")
-assert side("UP", "nodder") == {'FINISHED'}
-doc.frame_current = 10
-rig.select_bone("joy")
-rig.bone_set("joy", knob=(45.0, 45.0))
-settle()
-assert close(bone("turn_r")["angle"] - bone("turn_r")["setup_angle"], QUARTER / 2.0), bone("turn_r")
-assert close(bone("joy")["knob_playing"], (45.0, 45.0), 0.05), bone("joy")
-rig.bone_set("joy", knob=(0.0, 0.0))
-settle()
-doc.frame_current = 0
-assert side("UP", "") == {'FINISHED'}
-for path in ('bones["joy"].position', 'bones["nodder"].angle'):
-    for k in list(rig.keyframes(path)):
-        rig.keyframe_delete(path, k["frame"])
-
-# Knob to bone: it turns, and it is the bone that plays the action.
+assert side("RIGHT", "joy Right") == {'FINISHED'}
+assert bone("joy")["controller_box"] == ((0.0, 0.0), (90.0, 0.0)), bone("joy")
+kinds = {a["name"]: a["kind"] for a in rig.actions}
+assert kinds["turn_r"] == "ACTION_BONE" and kinds["joy Right"] == "ACTION_BONE" and kinds["Look Right"] == "ACTION_BONE", kinds
 doc.frame_current = 10
 rig.select_bone("joy")
 rig.bone_set("joy", knob=(45.0, 0.0))
 settle()
 assert close(bone("turn_r")["angle"] - bone("turn_r")["setup_angle"], QUARTER / 2.0), bone("turn_r")
-assert close(bone("turn_l")["angle"] - bone("turn_l")["setup_angle"], 0.0)
 assert close(where(), (0.5, 0.5)), where()
-doc.frame_current = 11
-doc.frame_current = 10
-keys = rig.keyframes('bones["joy"].position')
-assert [k["frame"] for k in keys] == [0, 10] and close(keys[-1]["value"], (45.0, 0.0)), keys
-assert not rig.keyframes('bones["turn_r"].angle'), "one set of keys, the knob's"
-
-# Bone to knob: either can be moved, and the key goes in the same place.
-doc.frame_current = 20
-turn("turn_r", QUARTER * 2.0 / 3.0)
-assert close(bone("joy")["knob"], (60.0, 0.0), 0.05), bone("joy")
-assert close(where(), (2.0 / 3.0, 2.0 / 3.0), 0.01), where()
-doc.frame_current = 21
-doc.frame_current = 20
-assert [k["frame"] for k in rig.keyframes('bones["joy"].position')] == [0, 10, 20]
+assert "controller" not in bone("turn_r"), "nothing linked"
+# The bone is its own: a key on it is its key, the knob's stay the knob's.
+assert [k["frame"] for k in rig.keyframes('bones["joy"].position')] == [0, 10]
 assert not rig.keyframes('bones["turn_r"].angle')
-
-# The timeline: the bone's row is the knob's keys, so the same keys answer either.
-rig.select_bone("turn_r")
-rows = [r for r in oanim.wm.timeline_rows() if r[2]]
-assert any("joy" in r[1] for r in rows), ("selecting the bone shows the knob's keys", rows)
-rig.select_bone("joy")
-assert any("joy" in r[1] for r in oanim.wm.timeline_rows() if r[2])
-
-# I on a linked bone keys the knob, never the bone.
-rig.keyframe_insert('bones["turn_r"].angle', 25)
-settle()
-assert not rig.keyframes('bones["turn_r"].angle'), "a key on the bone goes to the knob"
-assert any(k["frame"] == 25 for k in rig.keyframes('bones["joy"].position'))
-
-# Crossing the middle: the knob passes through rest, both bones at rest there, never both turning.
-doc.frame_current = 0
-for k in list(rig.keyframes('bones["joy"].position')):
-    if k["frame"]:
-        rig.keyframe_delete('bones["joy"].position', k["frame"])
-doc.frame_current = 10
-rig.select_bone("joy")
-rig.bone_set("joy", knob=(-60.0, 0.0))
-doc.frame_current = 30
-rig.bone_set("joy", knob=(60.0, 0.0))
-doc.frame_current = 31
-for frame in (0, 10, 30):
-    rig.keyframe_set('bones["joy"].position', frame, interp="LINEAR")
 doc.frame_current = 20
-settle()
-assert close(bone("joy")["knob"], (0.0, 0.0)), bone("joy")
-assert close(bone("turn_r")["angle"], bone("turn_r")["setup_angle"]) and close(bone("turn_l")["angle"], bone("turn_l")["setup_angle"])
-assert close(where(), (0.0, 0.0)), ("through rest, no mix of the two", where())
-
-# --- The block ------------------------------------------------------------------------------------------------------
-doc.frame_current = 10
-settle()
-assert close(bone("joy")["knob"], (-60.0, 0.0)), bone("joy")
-assert bone("turn_r")["held"] and not bone("turn_l")["held"], "the knob is on the left: the right bone is held"
-turn("turn_r", 0.5)
-assert close(bone("turn_r")["angle"] - bone("turn_r")["setup_angle"], 0.0), "it won't leave rest"
-assert close(bone("joy")["knob"], (-60.0, 0.0)), "and the knob stays"
-said = oanim.wm.banner_report()
-assert "held" in said[3] or "held" in said[2], ("and it says why", said)
-# The same the other way: on the right, the left bone is held.
-rig.select_bone("joy")
-rig.bone_set("joy", knob=(30.0, 0.0))
-settle()
-assert bone("turn_l")["held"] and not bone("turn_r")["held"]
-turn("turn_l", -0.5)
-assert close(bone("turn_l")["angle"] - bone("turn_l")["setup_angle"], 0.0), "it won't leave rest"
-assert close(bone("joy")["knob"], (30.0, 0.0)), bone("joy")
-
-# Picking both and turning them: neither moves.
-rig.bone_set("joy", knob=(0.0, 0.0))
-settle()
-rig.select_bone("turn_r")
-rig.select_bone("turn_l", extend=True)
-assert ops.armature.rotate(angle="20") == {'FINISHED'}
-settle()
-assert close(bone("joy")["knob"], (0.0, 0.0)), bone("joy")
-assert close(bone("turn_r")["angle"], bone("turn_r")["setup_angle"])
-assert close(bone("turn_l")["angle"], bone("turn_l")["setup_angle"])
-
-# Alt R on a linked bone sends the knob home.
-turn("turn_l", -QUARTER / 2.0)
-assert close(bone("joy")["knob"], (-30.0, 0.0)), bone("joy")
-rig.select_bone("turn_l")
-assert oanim.wm.event_simulate("R", alt=True, area="Viewport")
-settle()
-assert close(bone("joy")["knob"], (0.0, 0.0)), bone("joy")
-assert close(bone("turn_l")["angle"], bone("turn_l")["setup_angle"]), bone("turn_l")
-
-# Moving back toward rest is never blocked, and the other side is then free.
-turn("turn_l", -QUARTER / 2.0)
-assert close(bone("joy")["knob"], (-30.0, 0.0)), bone("joy")
-turn("turn_l", 0.0)
-assert close(bone("joy")["knob"], (0.0, 0.0)), bone("joy")
-assert not bone("turn_r")["held"]
-turn("turn_r", 0.5)
-assert bone("joy")["knob"][0] > 1.0, bone("joy")
-
-# Bones stop at their action's ends, and don't turn the wrong way.
-turn("turn_r", QUARTER * 3.0)
-assert close(bone("joy")["knob"], (90.0, 0.0)) and close(bone("turn_r")["angle"] - bone("turn_r")["setup_angle"], QUARTER), bone("turn_r")
-turn("turn_r", -0.4)
-assert close(bone("joy")["knob"], (0.0, 0.0)) and close(bone("turn_r")["angle"] - bone("turn_r")["setup_angle"], 0.0), bone("turn_r")
-
-# The link is the mainline's: inside an action the bone is keyed as ever.
+turn("turn_r", 0.3)
+assert close(bone("joy")["knob"], (45.0, 0.0)), ("turning the bone by hand leaves the knob", bone("joy"))
+doc.frame_current = 21
 doc.frame_current = 0
-doc.action = "turn_r"
-doc.frame_current = 45
-rig.bone_set("turn_r", angle=bone("turn_r")["setup_angle"] + 1.0)
-doc.frame_current = 46
-doc.frame_current = 45
-assert close(bone("turn_r")["angle"] - bone("turn_r")["setup_angle"], 1.0), "no limit, no block in there"
-rig.keyframe_delete('bones["turn_r"].angle', 45)
-mainline()
-
-# Frame 0 is the rig at rest.
-assert close(bone("turn_r")["angle"], bone("turn_r")["setup_angle"]) and close(bone("joy")["knob"], (0.0, 0.0))
-setup = bone("joy")["setup_position"]
-doc.frame_current = 1
-doc.frame_current = 0
-assert close(bone("joy")["setup_position"], setup), "no pose ever becomes its setup"
-
-# --- A dial that drives the linked bones goes on working --------------------------------------------------------------
-for k in list(rig.keyframes('bones["joy"].position')):
-    if k["frame"]:
-        rig.keyframe_delete('bones["joy"].position', k["frame"])
-rig.select_bone("dial")
-assert ops.anim.action_new(name="dial", action_bone="1") == {'FINISHED'}
-doc.frame_current = 90
-rig.bone_set("dial", angle=bone("dial")["setup_angle"] + 1.0)
-rig.bone_set("turn_r", angle=bone("turn_r")["setup_angle"] + QUARTER / 2.0)
-doc.frame_current = 91
-mainline()
-doc.frame_current = 40
-turn("dial", 1.0)
-assert close(where(), (0.5, 0.5)), ("the dial turns the bone, and it plays, as before", where())
-assert close(bone("joy")["knob"], (0.0, 0.0)), "that isn't the knob's"
-assert close(bone("joy")["knob_playing"], (45.0, 0.0), 0.5), ("the box shows where it really is", bone("joy"))
-turn("dial", 0.0)
-doc.frame_current = 0
+for path in ('bones["joy"].position', 'bones["turn_r"].angle'):
+    for k in list(rig.keyframes(path)):
+        if k["frame"]:
+            rig.keyframe_delete(path, k["frame"])
 
 # --- Fixes ----------------------------------------------------------------------------------------------------------
-for k in list(rig.keyframes('bones["joy"].position')):
-    if k["frame"]:
-        rig.keyframe_delete('bones["joy"].position', k["frame"])
-for k in list(rig.keyframes('bones["dial"].angle')):
-    rig.keyframe_delete('bones["dial"].angle', k["frame"])
 ops.armature.select_none()
 ops.armature.bone_add(name="corner", head_x="-3.0", head_y="-3.0", tail_x="-2.5", tail_y="-3.0")
 rig.select_bone("corner")
@@ -452,53 +300,6 @@ doc.frame_current = 0
 for k in list(rig.keyframes('bones["corner"].position')):
     if k["frame"]:
         rig.keyframe_delete('bones["corner"].position', k["frame"])
-
-# --- Letting go -----------------------------------------------------------------------------------------------------
-# A side emptied: the bone gets keys of its own, moving as it did.
-doc.frame_current = 30
-rig.select_bone("joy")
-rig.bone_set("joy", knob=(45.0, 0.0))
-doc.frame_current = 31
-doc.frame_current = 0
-assert side("RIGHT", "") == {'FINISHED'}
-assert "controller" not in bone("turn_r")
-assert [k["frame"] for k in rig.keyframes('bones["turn_r"].angle')] == [0, 30]
-doc.frame_current = 30
-settle()
-assert close(bone("turn_r")["angle"] - bone("turn_r")["setup_angle"], QUARTER / 2.0), bone("turn_r")
-doc.frame_current = 0
-
-# Picking it again: its keys move onto the knob, and the same pose shows.
-rig.select_bone("joy")
-assert side("RIGHT", "turn_r") == {'FINISHED'}
-assert not rig.keyframes('bones["turn_r"].angle')
-assert any(k["frame"] == 30 and close(k["value"], (45.0, 0.0)) for k in rig.keyframes('bones["joy"].position'))
-
-# Keys on both is one too many: it says so and keep says whose.
-assert side("RIGHT", "") == {'FINISHED'}
-rig.keyframe_insert('bones["joy"].position', 30)
-doc.frame_current = 30
-rig.select_bone("joy")
-rig.bone_set("joy", knob=(-20.0, 0.0))
-doc.frame_current = 31
-doc.frame_current = 0
-assert side("RIGHT", "turn_r") == {'CANCELLED'}, "both have keys"
-assert side("RIGHT", "turn_r", keep="THIS") == {'FINISHED'}
-assert any(k["frame"] == 30 and close(k["value"], (45.0, 0.0)) for k in rig.keyframes('bones["joy"].position'))
-
-# The controller deleted: its bones keep moving.
-doc.frame_current = 0
-rig.select_bone("joy")
-assert ops.armature.bone_delete() == {'FINISHED'}
-assert not any(b["name"] == "joy" for b in rig.bones)
-assert "controller" not in bone("turn_r") and "controller" not in bone("turn_l")
-doc.frame_current = 30
-settle()
-assert close(bone("turn_r")["angle"] - bone("turn_r")["setup_angle"], QUARTER / 2.0), bone("turn_r")
-doc.frame_current = 0
-for name in ("turn_r", "turn_l"):
-    for k in list(rig.keyframes(f'bones["{name}"].angle')):
-        rig.keyframe_delete(f'bones["{name}"].angle', k["frame"])
 
 # --- A dial converted: its actions go in Right and Left, its keys onto the knob, and back -----------------------------
 doc.frame_current = 0

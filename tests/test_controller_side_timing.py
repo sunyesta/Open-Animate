@@ -169,34 +169,6 @@ assert 60 in [k["frame"] for k in rig.keyframes(KNOB)], rig.keyframes(KNOB)
 assert ops.anim.action_set(name="") == {'FINISHED'}
 go(7)
 
-# The same for a dial (a bone named after the side's action): its turns there are which frame plays, not a pose.
-go(0)
-assert ops.armature.bone_add(name="eye_r", head_x="1", head_y="1", tail_x="1.5", tail_y="1") == {'FINISHED'}
-rig.bone_set("eye_r", strength=0.0)
-assert ops.anim.action_set(name="eye_r") == {'FINISHED'}
-doc.frame_current = 40
-rig.bone_set("eye_r", angle=bone("eye_r")["setup_angle"] + 1.0)
-go(40)
-DIAL = 'bones["eye_r"].angle'
-assert 40 in [k["frame"] for k in rig.keyframes(DIAL)], rig.keyframes(DIAL)
-assert ops.anim.action_set(name="") == {'FINISHED'}
-go(7)
-assert bone("eye_r")["controller"] == "eye", "a dial linked to the knob"
-mainline = (rig.keyframes(KNOB), rig.keyframes(DIAL))
-assert ops.anim.action_set(name="eye_r") == {'FINISHED'}
-go(40)
-assert ops.anim.keys_select(frame_start="40", frame_end="40") == {'FINISHED'}
-assert ops.anim.keys_copy() == {'FINISHED'}
-assert ops.anim.action_set(name="") == {'FINISHED'}
-go(120)
-assert ops.anim.keys_paste() == {'FINISHED'}
-right_after = pupil.shown()[0]
-assert (rig.keyframes(KNOB), rig.keyframes(DIAL)) == mainline, ("the dial's turn would play the action again", mainline,
-                                                                 rig.keyframes(KNOB), rig.keyframes(DIAL))
-assert 120 in [k["frame"] for k in pupil.keyframes("points[1].pos")], pupil.keyframes("points[1].pos")
-go(120)
-assert close(right_after, pupil.shown()[0], 1e-5), ("the frame shown after the paste", right_after, pupil.shown()[0])
-
 # Mainline keys of the knob pasted on the mainline move it there, shown at once.
 go(7)
 assert ops.anim.keys_select(frame_start="7", frame_end="7") == {'FINISHED'}

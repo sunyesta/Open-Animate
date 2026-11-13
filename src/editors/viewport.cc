@@ -10199,7 +10199,7 @@ static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &ar
     dl->AddCircle(at(keyed), CONTROLLER_KNOB_RADIUS, IM_COL32(0xff, 0xff, 0xff, 110), 0, 1.0f);
   }
   if (doc.frame_current != 0 && doc.action.empty()) {
-    const ImVec2 playing = at(controller_knob_playing(armature, bone));
+    const ImVec2 playing = at(controller_knob_played(armature, bone));
     const ImVec2 d = playing - knob_at;
     if (d.x * d.x + d.y * d.y > 9.0f) {
       dl->AddCircle(playing, CONTROLLER_KNOB_RADIUS, IM_COL32(0xff, 0xff, 0xff, 200), 0, 1.5f);
@@ -10421,18 +10421,6 @@ static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armatur
         const ImU32 col = ends[e] ? (active ? col_active : col_select) : IM_COL32(0x2a, 0x2a, 0x2a, 230);
         dl->AddCircleFilled(at[e], r, col);
         dl->AddCircle(at[e], r, COL_BONE_EDGE, 0, 1.0f);
-      }
-    }
-  }
-  /* A dial held at rest while a controller's knob is on the other side's. */
-  if (!ghost && doc.frame_current != 0 && doc.action.empty()) {
-    for (size_t i = 0; i < armature.bones.size(); i++) {
-      const Bone &bone = armature.bones[i];
-      if (bone_shown(armature, bone) && controller_dial_held(armature, bone)) {
-        const char *text = "held";
-        const ImVec2 at = sbs[i].tail + ImVec2(6.0f, -ImGui::GetFontSize() * 0.5f);
-        dl->AddText(at + ImVec2(1, 1), IM_COL32(0, 0, 0, 200), text);
-        dl->AddText(at, IM_COL32(0x60, 0xd0, 0xd0, 255), text);
       }
     }
   }

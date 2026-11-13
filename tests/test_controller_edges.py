@@ -1,4 +1,5 @@
-"""2 Axis Controllers with the rest of the rig tools: each case in a new document, a rig with two bones linked to a knob.
+"""2 Axis Controllers with the rest of the rig tools: each case in a new document, a rig with two bones a knob turns
+(through ordinary actions keying their turns, which then play the bones' own actions).
 
 Run with:  OpenAnimate --background --python tests/test_controller_edges.py
 """
@@ -35,6 +36,7 @@ class Rig:
         self.face.add_curve([(0.0, 0.0), (1.0, 0.0)])
         ops.layer.move_to_group(group=str(self.rig.id))
         self.layers.active = self.rig
+        self.turns = {}
 
     def bone(self, name):
         return next(b for b in self.rig.bones if b["name"] == name)
@@ -66,6 +68,16 @@ class Rig:
         self.face.set_point(0, moved)
         self.doc.frame_current = frames + 1
         self.mainline()
+        self.turns[name] = (frames, angle)
+
+    def drive(self, name, bone, frames, angle):
+        """Ordinary action `name` turning `bone` `angle` by `frames`: in a side, the knob turns the bone with it."""
+        self.layers.active = self.rig
+        assert ops.anim.action_new(name=name) == {'FINISHED'} and self.doc.action == name
+        self.doc.frame_current = frames
+        self.rig.bone_set(bone, angle=self.bone(bone)["setup_angle"] + angle)
+        self.doc.frame_current = frames + 1
+        self.mainline()
 
     def controller(self, name="joy", right="turn_r", left="turn_l"):
         ops.armature.select_none()
@@ -73,6 +85,12 @@ class Rig:
         self.rig.select_bone(name)
         assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
         for side, action in (("RIGHT", right), ("LEFT", left)):
+            if action in self.turns:
+                # A bone's own action: an ordinary one turning the bone goes in the side instead.
+                driver = name + " " + side.title()
+                self.drive(driver, action, *self.turns[action])
+                self.rig.select_bone(name)
+                action = driver
             if action:
                 assert ops.armature.controller_side(side=side, action=action) == {'FINISHED'}, (side, action)
 
@@ -105,7 +123,7 @@ assert not r.keys('bones["turn_r"].angle') and not r.keys('bones["turn_l"].angle
 assert not r.keys('bones["joy"].angle') and not r.keys('bones["joy"].scale'), "a controller has nothing to turn or scale"
 assert not any(f == 10 for f, _ in r.keys('bones["head"].angle')), "only the channel edited: no other bone keyed"
 
-# --- Key Together on a rig with a controller: the knob's keys stay (a linked dial gets no fillers to lose) -----------
+# --- Key Together on a rig with a controller: the knob's keys stay, and the bones it turns turn as before ------------
 r = Rig()
 r.standard()
 r.doc.auto_freeze_keys = False
@@ -113,6 +131,9 @@ r.knob_keyed(10, 45.0)
 r.doc.frame_current = 14
 r.rig.bone_set("head", angle=r.bone("head")["angle"] + 0.3)
 r.doc.frame_current = 15
+r.doc.frame_current = 10
+turned = r.turn_of("turn_r")
+assert turned > 0.1, turned
 r.mainline()
 frames_before = r.rig.key_frames
 knob_before = [r.keys('bones["joy"].position')]
@@ -123,7 +144,7 @@ r.doc.frame_current = 0
 assert r.rig.key_frames == frames_before, ("folding deletes no keys", frames_before, r.rig.key_frames)
 r.doc.frame_current = 10
 assert close(r.bone("joy")["knob"], (45.0, 0.0)), ("the knob holds on 10", r.bone("joy")["knob"])
-assert not r.keys('bones["turn_r"].angle') and not r.keys('bones["turn_l"].angle'), "a linked dial is the knob's"
+assert close(r.turn_of("turn_r"), turned), ("the knob still turns it", turned, r.turn_of("turn_r"))
 
 # --- Apply Pose as Rest Pose leaves the box where it rests ------------------------------------------------------------
 r = Rig()
@@ -166,21 +187,6 @@ head = r.bone("follower")["head"]
 r.knob(45.0)
 assert close(r.bone("follower")["head"], head), ("nothing follows a knob's frames", head, r.bone("follower")["head"])
 
-# --- A linked bone converted: its actions leave the other controller, its keys come along -----------------------------
-r = Rig()
-r.standard()
-r.knob_keyed(10, 45.0)
-shown = r.where()
-r.doc.frame_current = 0
-r.rig.select_bone("turn_r")
-assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
-assert r.bone("joy")["controller_actions"]["RIGHT"] == "", ("an action has one controller", r.bone("joy"))
-assert r.bone("turn_r")["controller_actions"]["RIGHT"] == "turn_r"
-assert any(f == 10 and close(v, (45.0, 0.0)) for f, v in r.keys('bones["turn_r"].position')), r.keys('bones["turn_r"].position')
-r.doc.frame_current = 10
-r.settle()
-assert close(r.where(), shown), ("nothing stops playing", r.where(), shown)
-
 # --- A knob set from Python on frame 0 is refused, the box left alone -------------------------------------------------
 r = Rig()
 r.standard()
@@ -206,7 +212,9 @@ r.rig.select_bone("root", extend=True)
 assert ops.armature.parent_set(type="CONNECTED") == {'FINISHED'}
 r.rig.select_bone("joy")
 assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
-assert ops.armature.controller_side(side="RIGHT", action="turn_r") == {'FINISHED'}
+r.drive("joy Right", "turn_r", 90, QUARTER)
+r.rig.select_bone("joy")
+assert ops.armature.controller_side(side="RIGHT", action="joy Right") == {'FINISHED'}
 r.doc.frame_current = 10
 r.rig.select_bone("joy")
 head = r.bone("joy")["head"]
@@ -214,30 +222,6 @@ assert r.rig.drag_bone_ends([(0.1, 0.0)])
 r.settle()
 assert r.bone("joy")["knob"][0] > 1.0, ("dragging moves a connected controller's knob", r.bone("joy")["knob"])
 assert close(r.bone("joy")["head"], head), "and the box stays on its parent's tip"
-
-# --- A bone that turns out and back: the knob's frame plays, not the first frame with that turn -----------------------
-r = Rig(dials=("wave",))
-r.dial_action("wave", 30, 1.0, (1.0, 0.0))
-r.doc.action = "wave"
-r.doc.frame_current = 60
-r.rig.bone_set("wave", angle=r.bone("wave")["setup_angle"] + 0.5)
-r.face.set_point(0, (5.0, 0.0))
-r.doc.frame_current = 61
-r.mainline()
-r.doc.action = "wave"
-r.doc.frame_current = 60
-at_60 = r.where()
-r.mainline()
-r.controller(right="wave", left=None)
-r.doc.frame_current = 10
-r.knob(60.0)
-assert close(r.where(), at_60), ("the knob at 60 shows frame 60", r.where(), at_60)
-assert close(r.bone("joy")["knob_playing"], (60.0, 0.0)), r.bone("joy")
-# Turned by hand it picks the first frame with that turn, as any action bone does.
-r.rig.select_bone("wave")
-r.rig.bone_set("wave", angle=r.bone("wave")["setup_angle"] + 0.4)
-r.settle()
-assert r.bone("joy")["knob"][0] < 30.0 and close(r.turn_of("wave"), 0.4), r.bone("joy")
 
 # --- A knob moved by an action another controller plays turns its bones ---------------------------------------------
 r = Rig()
@@ -269,8 +253,11 @@ r.rig.select_bone("stick_L", extend=True)
 assert ops.armature.symmetrize(action_bone_actions="1") == {'FINISHED'}
 other = r.bone("stick_R")
 assert other["type"] == "CONTROLLER_2D", other
-assert other["controller_actions"]["LEFT"] == "look_R", ("the mirrored action in the mirrored side", other)
-assert r.bone("look_R")["controller"] == "stick_R"
+assert other["controller_actions"]["LEFT"] == "stick_R Left", ("the mirrored action in the mirrored side", other)
+r.doc.frame_current = 10
+r.knob(-20.0, 0.0, "stick_R")
+assert close(abs(r.turn_of("look_R")), 1.0, 0.05), ("its knob turns the mirrored bone", r.turn_of("look_R"))
+r.doc.frame_current = 0
 
 # --- Keep Poses moving the box on frame 0 leaves its knob's keys -------------------------------------------------------
 r = Rig()
@@ -285,17 +272,14 @@ r.settle()
 assert close(r.bone("joy")["knob"], (45.0, 0.0)), ("frames stay frames", r.bone("joy")["knob"])
 assert close(r.turn_of("turn_r"), QUARTER / 2.0), r.turn_of("turn_r")
 
-# --- Back to Regular: what it did to linked bones is theirs, no moves of its own left ----------------------------------
+# --- Back to Regular: the knob's frames stay as moves, the bones it turned keep no keys -------------------------------
 r = Rig()
 r.standard()
 r.knob_keyed(10, 45.0)
 r.doc.frame_current = 0
 r.rig.select_bone("joy")
 assert ops.armature.bone_convert(type="REGULAR") == {'FINISHED'}
-assert not r.keys('bones["joy"].position'), ("its keys were the bones'", r.keys('bones["joy"].position'))
-assert [f for f, _ in r.keys('bones["turn_r"].angle')] == [0, 10]
-r.doc.frame_current = 10
-r.settle()
-assert close(r.turn_of("turn_r"), QUARTER / 2.0), r.turn_of("turn_r")
+assert [f for f, _ in r.keys('bones["joy"].position')] == [0, 10], r.keys('bones["joy"].position')
+assert not r.keys('bones["turn_r"].angle'), r.keys('bones["turn_r"].angle')
 
 print("controller edges ok")

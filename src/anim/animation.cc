@@ -620,10 +620,6 @@ template<typename T> static void evaluate(Channel<T> &ch, T &value, int frame)
 
 static void apply_action_bone_actions(Document &doc, int frame);
 static void controllers_rest(Document &doc);
-static void controllers_link(Document &doc, Layer &owner);
-static void controllers_fold_dials(Document &doc, Layer &owner);
-static float controller_dial_turn(const Layer &owner, const Bone &knob, const Bone &dial, float2 at);
-static bool controller_in_action(const Document &doc, const Layer &owner);
 
 /* --- The document's Simulation settings, animatable --------------------------------------------- */
 
@@ -1320,21 +1316,8 @@ std::vector<Layer *> key_together_layers(Document &doc, Layer &group)
  * opacity, its bones', and its drawing's shape (a whole drawing's channels one unit). */
 /* The channels of one layer that Key Together keys (see together_channels). */
 template<typename F>
-static void layer_together_channels(Layer &l, std::set<const void *> &seen, bool mainline, F &&f)
+static void layer_together_channels(Layer &l, std::set<const void *> &seen, F &&f)
 {
-  /* A linked dial's turn is its knob's on the mainline (controllers_fold_dials moves any key it gets onto the knob):
-   * keyed together it would lose its fillers each time, which would read as those frames deleted from them all. */
-  if (mainline && l.is_bone_layer()) {
-    for (const Bone &knob : l.bones) {
-      if (bone_is_controller(knob)) {
-        for (int side = 0; side < CONTROLLER_SIDES; side++) {
-          if (Bone *dial = controller_side_dial(l, knob, side)) {
-            seen.insert(&dial->angle_keys);
-          }
-        }
-      }
-    }
-  }
   KeyFilter filter;
   filter.kinds = KEY_LAYER_ANGLE | KEY_LAYER_TRANSFORM | KEY_OPACITY | KEY_BONE_ANGLE | KEY_BONE_TRANSFORM;
   for (const ChannelRef &ref : layer_filtered_channels(l, filter)) {
@@ -1357,7 +1340,7 @@ template<typename F> static void together_channels(Document &doc, Layer &group, 
 {
   std::set<const void *> seen;
   for (Layer *l : key_together_layers(doc, group)) {
-    layer_together_channels(*l, seen, !controller_in_action(doc, *l), f);
+    layer_together_channels(*l, seen, f);
   }
 }
 
@@ -1444,7 +1427,7 @@ static std::pair<int, int> key_together_leavers_release(Document &doc, Layer &gr
       [&](auto &&f) {
         std::set<const void *> seen;
         for (Layer *l : left) {
-          layer_together_channels(*l, seen, !controller_in_action(doc, *l), f);
+          layer_together_channels(*l, seen, f);
         }
       },
       [&](bool to_changes) { layers_changes(left, to_changes); });
@@ -1524,20 +1507,6 @@ void animation_record(Document &doc)
       doc.frame_current = doc.evaluated_frame;
       animation_refresh_action_bones(doc);
       doc.frame_current = now;
-    }
-  }
-  /* So is a linked dial's the knob's: an edit to it is the knob's to take or refuse, never a key of its own. */
-  for (const Layer *flat : document_layers_flat(doc)) {
-    if (flat->is_bone_layer()) {
-      Layer &owner = *layer_find(doc, flat->id);
-      if (doc.evaluated_frame != 0) {
-        controllers_link(doc, owner);
-      }
-      else {
-        /* The setup frame poses nothing, but keys put on a linked dial there (Insert Keyframe on it) are the knob's
-         * all the same: moved now, in the step that made them, not by the next frame shown (after it was stored). */
-        controllers_fold_dials(doc, owner);
-      }
     }
   }
   const int frame = doc.evaluated_frame;
@@ -2769,21 +2738,6 @@ static std::vector<std::pair<std::string, float>> action_bone_frames_for(const L
       continue;
     }
     const float turn = turns[size_t(driver - owner.bones.data())];
-    /* A linked bone turned only by its knob plays the knob's frame: a turn can stand for more than one frame of
-     * an action that turns out and back, and the knob says which. */
-    int side = 0;
-    if (const Bone *knob = controller_of_action(owner, name, &side);
-        knob && controller_side_dial(owner, *knob, side) == driver)
-    {
-      const float2 at = knobs[size_t(knob - owner.bones.data())];
-      if (std::fabs(turn - controller_dial_turn(owner, *knob, *driver, at)) < 1e-5f) {
-        const float along = (controller_side_axis(side) == 0 ? at.x : at.y) * controller_side_sign(side);
-        if (const float t = controller_side_frame(*knob, side, along); t > 0.0f) {
-          frames.push_back({name, t});
-        }
-        continue;
-      }
-    }
     /* The driving bone's keys are its Angle (the turn from its setup pose), so its action starts at
      * 0 and the bone's turn now picks the frame; turning an unkeyed bone plays it at once. */
     const float t = action_bone_frame(it->second, 0.0f,
@@ -2910,13 +2864,6 @@ static bool action_bone_action_turns(const Layer &owner, const std::string &by, 
       }
     }
     return false;
-  }
-  /* A linked bone turns as its knob moves: an action moving the knob turns it. */
-  int side = 0;
-  if (const Bone *knob = controller_of_action(owner, name, &side);
-      knob && controller_side_dial(owner, *knob, side) == bone && moves_knob(*knob))
-  {
-    return true;
   }
   const auto it = bone->angle_keys.actions.find(by);
   return !traced(*bone) && it != bone->angle_keys.actions.end() &&
@@ -3838,18 +3785,6 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
   if (frame == 0 || owner.actions.empty() || bones.size() != owner.bones.size()) {
     return;
   }
-  /* Dials linked to a controller have no keys: where they are on that frame is the knob's to say. */
-  for (const Bone &knob : owner.bones) {
-    if (!bone_is_controller(knob)) {
-      continue;
-    }
-    const float2 at = bone_transform_from_position(knob, bones[size_t(&knob - owner.bones.data())].position);
-    for (int side = 0; side < CONTROLLER_SIDES; side++) {
-      if (const Bone *dial = controller_side_dial(owner, knob, side)) {
-        bones[size_t(dial - owner.bones.data())].angle = dial->setup_angle + controller_dial_turn(owner, knob, *dial, at);
-      }
-    }
-  }
   /* Every driving bone's angle on that frame picks its action's frame first, as on the frame shown. */
   ActionOwnLengths lengths;
   const auto playing_now = [&] {
@@ -4082,7 +4017,6 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
       continue;
     }
     Layer &owner = *layer_find(doc, flat->id);
-    controllers_link(doc, owner);
     /* Every driving bone's angle picks its frame first, before any action moves bones (but those that
      * turn it: see action_bone_actions_in_order). */
     std::vector<std::pair<std::string, float>> frames;
@@ -4141,8 +4075,7 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
       }
     };
     const auto play = [&](const std::string &name, float t, const void *skip, bool skip_driving) {
-      /* A side's action keys its own knob's timing (how far out each frame plays): never a move of the knob. The
-       * action may be a linked dial's own, so the knob is the controller it is a side of. */
+      /* A side's action keys its own knob's timing (how far out each frame plays): never a move of the knob. */
       const Bone *by_knob = controller_of_action(owner, name, nullptr);
       const void *timing = by_knob ? static_cast<const void *>(&by_knob->position_keys) : nullptr;
       owner_for_each_channel_with(owner, name, [&](auto &ch, auto &value) {
@@ -4186,19 +4119,6 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
         doc.action_bones_applied = true;
       });
     };
-    /* What each linked bone's knob gave it as linked: an action that moves a knob (one a master controller plays)
-     * turns its bones on from there, before they pick their frames. */
-    std::vector<std::tuple<Bone *, Bone *, float>> given;
-    if (!controller_in_action(doc, owner)) {
-      for (Bone &knob : owner.bones) {
-        for (int side = 0; side < CONTROLLER_SIDES && bone_is_controller(knob); side++) {
-          Bone *dial = controller_side_dial(owner, knob, side);
-          if (dial && std::none_of(given.begin(), given.end(), [&](const auto &g) { return std::get<1>(g) == dial; })) {
-            given.emplace_back(&knob, dial, controller_dial_turn(owner, knob, *dial, controller_knob_played(owner, knob)));
-          }
-        }
-      }
-    }
     /* The fixes that follow bones, each from where what plays before it has put its bones (a bone another bone's action
      * moves too), and before what they move picks its frames (an independent knob riding a head a fix turns). Not the
      * one edited (its keys are the timeline). */
@@ -4262,19 +4182,6 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
       else {
         play(name, t, by ? static_cast<const void *>(&by->angle_keys) : nullptr, false);
       }
-      for (auto &[knob, dial, was] : given) {
-        const float now = controller_dial_turn(owner, *knob, *dial, controller_knob_played(owner, *knob));
-        if (now != was) {
-          Channel<float> &ch = dial->angle_keys;
-          ch.last += now - was;
-          ch.from_action_bones += now - was;
-          ch.has_last = true;
-          dial->turn += now - was;
-          dial->angle += now - was;
-          was = now;
-          doc.action_bones_applied = true;
-        }
-      }
     });
     /* A bone's position On Path (Channel::on_path) is where its keys hold from its first to its last: what the
      * actions added is left out there (its value and what it was recorded as alike, so an edit stays an edit). Not
@@ -4298,34 +4205,6 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
 }
 
 /* --- 2 Axis Controllers (anim/controller.hh) ------------------------------------------------------- */
-
-/* The dial's keys in a side's action: its angle from 0 at frame 0 on, what the knob's frames turn it to. */
-static const std::vector<Key<float>> &controller_side_curve(const Bone &dial, const std::string &action)
-{
-  return dial.angle_keys.actions.at(action);
-}
-
-/* The frame of a side's action a dial's turn stands for. */
-static float controller_frame_of_turn(const Bone &dial, const std::string &action, float turn)
-{
-  const std::vector<Key<float>> &curve = controller_side_curve(dial, action);
-  return action_bone_frame(curve, 0.0f, action_bone_turn_wrapped(curve, turn, action_bone_keys_full_turn(curve)));
-}
-
-static float controller_dial_turn(const Layer &owner, const Bone &knob, const Bone &dial, float2 at)
-{
-  float turn = 0.0f;
-  for (int side = 0; side < CONTROLLER_SIDES; side++) {
-    if (controller_side_dial(owner, knob, side) != &dial) {
-      continue;
-    }
-    const float along = (controller_side_axis(side) == 0 ? at.x : at.y) * controller_side_sign(side);
-    if (const float t = controller_side_frame(knob, side, along); t > 0.0f) {
-      turn += action_bone_sample(controller_side_curve(dial, knob.controller_actions[side]), 0.0f, t);
-    }
-  }
-  return turn;
-}
 
 /* A channel's keys go through `map` onto another, whatever else the key says kept, the key at frame 0 left to the
  * setup. Returns how many. */
@@ -4354,186 +4233,6 @@ static int controller_keys_copy(const std::vector<Key<From>> &keys, Channel<To> 
     count++;
   }
   return count;
-}
-
-/* A linked dial's keys on the mainline move to the knob (those it had when linked, or keyed by hand since). */
-static int controller_fold_dial_keys(Layer &owner, Bone &knob, Bone &dial)
-{
-  if (dial.angle_keys.keys.empty()) {
-    return 0;
-  }
-  int side_of[2] = {-1, -1};
-  int axis = 0;
-  for (int side = 0; side < CONTROLLER_SIDES; side++) {
-    if (controller_side_dial(owner, knob, side) == &dial) {
-      axis = controller_side_axis(side);
-      side_of[side % 2] = side;
-    }
-  }
-  const std::vector<Key<float>> keys = std::move(dial.angle_keys.keys);
-  dial.angle_keys.keys.clear();
-  dial.angle_keys.last -= dial.turn - dial.angle_keys.from_action_bones;
-  dial.turn = dial.angle_keys.from_action_bones;
-  dial.angle = dial.setup_angle + dial.turn;
-  return controller_keys_copy(keys, knob.position_keys, [&](int frame, float turn) {
-    float along = 0.0f;
-    for (const int side : side_of) {
-      if (side >= 0) {
-        const float t = controller_frame_of_turn(dial, knob.controller_actions[side], turn);
-        along = t > 0.0f ? controller_side_reach(knob, side, t) * controller_side_sign(side) : along;
-      }
-    }
-    float2 value = knob.position_keys.animated() ? knob.position_keys.evaluate(frame) : float2();
-    (axis == 0 ? value.x : value.y) = along;
-    return value;
-  });
-}
-
-/* Every linked dial's keys onto its knob, nothing else of the link (the setup frame's: it poses nothing). */
-static void controllers_fold_dials(Document &doc, Layer &owner)
-{
-  if (controller_in_action(doc, owner)) {
-    return;
-  }
-  for (Bone &knob : owner.bones) {
-    if (!bone_is_controller(knob)) {
-      continue;
-    }
-    for (int side = 0; side < CONTROLLER_SIDES; side++) {
-      if (Bone *dial = controller_side_dial(owner, knob, side)) {
-        controller_fold_dial_keys(owner, knob, *dial);
-      }
-    }
-  }
-}
-
-/* The dial gets keys of its own that move it as the knob does. */
-static void controller_bake_dial(const Layer &owner, const Bone &knob, Bone &dial)
-{
-  controller_keys_copy(knob.position_keys.keys, dial.angle_keys,
-                       [&](int, float2 at) { return controller_dial_turn(owner, knob, dial, at); });
-}
-
-static void report_held(const std::string &text)
-{
-  /* A drag that's refused goes on trying every update: said once, and again only after a moment. */
-  static std::string said;
-  static std::chrono::steady_clock::time_point when;
-  const auto now = std::chrono::steady_clock::now();
-  if (text != said || now - when > std::chrono::seconds(2)) {
-    report(ReportType::Warning, text);
-    said = text;
-    when = now;
-  }
-}
-
-/* Whether `owner`'s channels are part of the action being edited: it owns it, or sits inside what does. A fix that
- * follows bones is edited as the mainline is for this: its knobs turn their linked dials, so the actions the fix
- * corrects play under it as they will on the mainline. */
-static bool controller_in_action(const Document &doc, const Layer &owner)
-{
-  if (doc.action.empty()) {
-    return false;
-  }
-  const Layer *edited = layer_find(doc, doc.action_layer);
-  if (edited && bone_fix_find(*edited, doc.action)) {
-    return false;
-  }
-  const auto inside = [&](auto &&self, const Layer &layer) -> bool {
-    return layer.id == owner.id ||
-           std::any_of(layer.children.begin(), layer.children.end(), [&](const Layer &c) { return self(self, c); });
-  };
-  return edited && inside(inside, *edited);
-}
-
-/* The link, before actions play so a dial picks its frame from it. What the knob gives a dial is added as an action's
- * amount is: the dial's plain value stays its setup, so what other actions key on it (held at 0, most of them) goes on
- * meaning a change from there. An edit to a dial since it was last worked out goes into the knob, if the knob can take
- * it: it has one place on an axis, so a dial can't leave rest while the knob is on the other side's. Then every dial
- * goes where the knob says, so one refused goes back, and one turned past the ends of its action stops there. */
-static void controllers_link(Document &doc, Layer &owner)
-{
-  if (controller_in_action(doc, owner)) {
-    return;
-  }
-  for (Bone &knob : owner.bones) {
-    if (!bone_is_controller(knob)) {
-      continue;
-    }
-    bone_changes_from_values(knob);
-    bool moved = false;
-    for (int axis = 0; axis < 2; axis++) {
-      const int plus = axis * 2, minus = plus + 1;
-      Bone *dial[2] = {controller_side_dial(owner, knob, plus), controller_side_dial(owner, knob, minus)};
-      if (!dial[0] && !dial[1]) {
-        continue;
-      }
-      float &along = axis == 0 ? knob.transform.x : knob.transform.y;
-      bool edited[2] = {false, false};
-      /* What the knob gave each before, where it wants to go, and the frame of its action that is. */
-      float before[2] = {0.0f, 0.0f}, target[2] = {0.0f, 0.0f}, wants[2] = {0.0f, 0.0f};
-      for (int s = 0; s < 2; s++) {
-        if (dial[s]) {
-          controller_fold_dial_keys(owner, knob, *dial[s]);
-          bone_changes_from_values(*dial[s]);
-          before[s] = controller_dial_turn(owner, knob, *dial[s], knob.transform);
-          const float change = dial[s]->turn - dial[s]->angle_keys.last;
-          edited[s] = dial[s]->angle_keys.has_last && std::fabs(change) > 1e-5f;
-          if (edited[s]) {
-            target[s] = before[s] + change;
-            wants[s] = controller_frame_of_turn(*dial[s], knob.controller_actions[plus + s], target[s]);
-          }
-        }
-      }
-      if (dial[0] == dial[1]) {
-        /* One bone turning both ways can't disagree with itself. */
-        if (edited[0]) {
-          along = wants[0] > 0.0f ? controller_side_reach(knob, plus, wants[0]) : -controller_side_reach(knob, minus, wants[1]);
-          moved = true;
-        }
-      }
-      else if (edited[0] && edited[1] && std::fabs(target[0]) > 1e-5f && std::fabs(target[1]) > 1e-5f) {
-        /* Back to rest together is fine (Alt R), and falls through below. */
-        report_held(dial[0]->name + " and " + dial[1]->name + " can't both turn: the knob has one place on this axis");
-      }
-      else if (wants[0] > 0.0f && along < -1e-4f) {
-        report_held(dial[0]->name + " is held: the knob is on " + knob.controller_actions[minus]);
-      }
-      else if (wants[1] > 0.0f && along > 1e-4f) {
-        report_held(dial[1]->name + " is held: the knob is on " + knob.controller_actions[plus]);
-      }
-      else if (wants[0] > 0.0f) {
-        /* The frame it wants, as far out as the side's timing plays it. */
-        along = controller_side_reach(knob, plus, wants[0]);
-        moved = true;
-      }
-      else if (wants[1] > 0.0f) {
-        along = -controller_side_reach(knob, minus, wants[1]);
-        moved = true;
-      }
-      else if ((edited[0] && along > 0.0f) || (edited[1] && along < 0.0f)) {
-        along = 0.0f;
-        moved = true;
-      }
-      for (int s = 0; s < (dial[0] == dial[1] ? 1 : 2); s++) {
-        if (Bone *d = dial[s]) {
-          /* Worked out again (nothing added now), or on top of what was added, as recording finds it. */
-          Channel<float> &ch = d->angle_keys;
-          const float was = ch.from_action_bones != 0.0f ? before[s] : 0.0f;
-          const float now = controller_dial_turn(owner, knob, *d, knob.transform);
-          ch.last += now - was;
-          ch.from_action_bones += now - was;
-          ch.has_last = true;
-          d->turn = ch.last;
-          d->angle = d->setup_angle + d->turn;
-          doc.action_bones_applied = true;
-        }
-      }
-    }
-    if (moved) {
-      knob.position = bone_position_from_transform(knob, knob.transform);
-    }
-  }
 }
 
 void controllers_update(Document &doc)
@@ -4590,14 +4289,6 @@ void controllers_update(Document &doc)
         std::erase(keys, 0);
         std::sort(keys.begin(), keys.end());
         keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
-        /* A dial's action ends where the dial does. */
-        if (const Bone *dial = controller_side_dial(owner, knob, side)) {
-          const int end = controller_side_curve(*dial, action).back().frame;
-          std::erase_if(keys, [&](int frame) { return frame > end; });
-          if (keys.empty() || keys.back() != end) {
-            keys.push_back(end);
-          }
-        }
       }
       /* Its timing: its own keys in each side's action, how far out each frame plays (being edited, the action's keys
        * are the channel's own). A key at the rest point or going back is held where the one before was. */
@@ -4706,50 +4397,9 @@ float2 controller_knob_shown(const Document &doc, const Layer &owner, const Bone
   return at;
 }
 
-float2 controller_knob_playing(const Layer &owner, const Bone &knob)
-{
-  float2 at = controller_knob_played(owner, knob);
-  /* Only dials can differ: what the controller plays itself goes by the knob. */
-  const std::vector<std::pair<std::string, float>> playing = action_bone_actions_playing(owner);
-  for (int axis = 0; axis < 2; axis++) {
-    float along = 0.0f;
-    bool linked = false;
-    for (int side = axis * 2; side < axis * 2 + 2; side++) {
-      linked = linked || controller_side_dial(owner, knob, side);
-      for (const auto &[name, t] : playing) {
-        if (name == knob.controller_actions[side]) {
-          along += controller_side_reach(knob, side, t) * controller_side_sign(side);
-        }
-      }
-    }
-    if (linked) {
-      (axis == 0 ? at.x : at.y) = along;
-    }
-  }
-  return at;
-}
-
 void armature_knob_snap(const Layer & /*armature*/, Bone &knob)
 {
   controller_knob_snap(knob, {});
-}
-
-bool controller_dial_held(const Layer &owner, const Bone &dial)
-{
-  const Bone *knob = controller_of_dial(owner, dial);
-  if (!knob) {
-    return false;
-  }
-  const float2 at = controller_knob(*knob);
-  for (int side = 0; side < CONTROLLER_SIDES; side++) {
-    const Bone *here = controller_side_dial(owner, *knob, side);
-    const Bone *there = controller_side_dial(owner, *knob, controller_side_opposite(side));
-    const float along = (controller_side_axis(side) == 0 ? at.x : at.y) * controller_side_sign(side);
-    if (here == &dial && there != &dial && along < -1e-4f) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /* A bone's own action bone actions, the one that turns it the plain way first. */
@@ -4787,19 +4437,6 @@ std::string bone_convert_to_controller(Document &doc, uint64_t owner_id, uint64_
   }
   std::string note;
   const std::array<std::string, 2> own = own_actions(*owner, *bone);
-  /* Its actions are about to be its own sides: another controller playing them lets go first, its keys for them
-   * becoming the bone's (and then its knob's), so nothing stops playing. An action has one controller. */
-  for (const Bone &other : owner->bones) {
-    for (int side = 0; side < CONTROLLER_SIDES; side++) {
-      const std::string &action = other.controller_actions[side];
-      if (&other != bone && bone_is_controller(other) && !action.empty() && (action == own[0] || action == own[1])) {
-        std::string why, moved;
-        controller_side_set(doc, owner_id, other.id, side, "", "", &why, &moved);
-        note = action + " is no longer " + other.name + "'s " + controller_side_name(side) + ": it is " + bone->name +
-               "'s now";
-      }
-    }
-  }
   /* Actions that turn it have nothing left to turn. */
   for (const auto &[action, keys] : bone->angle_keys.actions) {
     if (action != own[0] && action != own[1] &&
@@ -4866,25 +4503,6 @@ std::string bone_convert_to_controller(Document &doc, uint64_t owner_id, uint64_
   return note;
 }
 
-void controller_release(Document &doc, uint64_t owner_id, uint64_t knob_id)
-{
-  Layer *owner = layer_find(doc, owner_id);
-  Bone *knob = owner ? bone_find(*owner, knob_id) : nullptr;
-  if (!knob || !bone_is_controller(*knob)) {
-    return;
-  }
-  std::vector<Bone *> dials;
-  for (int side = 0; side < CONTROLLER_SIDES; side++) {
-    Bone *dial = controller_side_dial(*owner, *knob, side);
-    if (dial && std::find(dials.begin(), dials.end(), dial) == dials.end()) {
-      dials.push_back(dial);
-    }
-  }
-  for (Bone *dial : dials) {
-    controller_bake_dial(*owner, *knob, *dial);
-  }
-}
-
 std::string bone_convert_to_regular(Document &doc, uint64_t owner_id, uint64_t bone_id)
 {
   Layer *owner = layer_find(doc, owner_id);
@@ -4897,11 +4515,6 @@ std::string bone_convert_to_regular(Document &doc, uint64_t owner_id, uint64_t b
   if (!bone || !bone_is_controller(*bone)) {
     return "";
   }
-  std::array<bool, CONTROLLER_SIDES> linked{};
-  for (int side = 0; side < CONTROLLER_SIDES; side++) {
-    linked[side] = controller_side_dial(*owner, *bone, side) != nullptr;
-  }
-  controller_release(doc, owner_id, bone_id);
   const std::array<std::string, 2> own = own_actions(*owner, *bone);
   const bool own_right = !own[0].empty() && bone->controller_actions[CONTROLLER_RIGHT] == own[0];
   const bool own_left = !own[1].empty() && bone->controller_actions[CONTROLLER_LEFT] == own[1];
@@ -4920,22 +4533,9 @@ std::string bone_convert_to_regular(Document &doc, uint64_t owner_id, uint64_t b
     bone->position_keys.keys.clear();
   }
   else {
-    /* What the knob did to linked bones is their keys now: only the frames of the other sides stay, as moves. */
-    bool dropped = false;
+    /* The knob's frames stay, as moves. */
     for (Key<float2> &k : bone->position_keys.keys) {
-      for (int side = 0; side < CONTROLLER_SIDES; side++) {
-        float &along = controller_side_axis(side) == 0 ? k.value.x : k.value.y;
-        if (linked[side] && along * controller_side_sign(side) > 0.0f) {
-          along = 0.0f;
-          dropped = true;
-        }
-      }
       k.value = k.value * bone->controller_frame_size;
-    }
-    if (dropped && std::all_of(bone->position_keys.keys.begin(), bone->position_keys.keys.end(),
-                               [](const Key<float2> &k) { return length(k.value) < 1e-9f; }))
-    {
-      bone->position_keys.keys.clear();
     }
   }
   /* Its keys in its sides' actions were their timing, never a move: as a bone they'd move it. So were its keys in the
@@ -4985,23 +4585,8 @@ std::string bone_convert_to_pin(Document &doc, uint64_t owner_id, uint64_t bone_
   return note;
 }
 
-bool controller_side_keys_clash(const Layer &owner, const Bone &knob, int side, const std::string &action)
-{
-  const Bone *mine = controller_dial_of_action(owner, action);
-  const auto keyed = [](const Bone *dial) {
-    return dial && std::any_of(dial->angle_keys.keys.begin(), dial->angle_keys.keys.end(),
-                               [](const Key<float> &k) { return k.frame != 0 && std::abs(k.value) > 1e-6f; });
-  };
-  const auto knob_keyed = [&] {
-    return std::any_of(knob.position_keys.keys.begin(), knob.position_keys.keys.end(), [&](const Key<float2> &k) {
-      return k.frame != 0 && std::abs(controller_side_axis(side) == 0 ? k.value.x : k.value.y) > 1e-6f;
-    });
-  };
-  return keyed(mine) && knob_keyed();
-}
-
 bool controller_side_set(Document &doc, uint64_t owner_id, uint64_t knob_id, int side, const std::string &action,
-                         const std::string &keep, std::string *r_why, std::string *r_note)
+                         std::string *r_why)
 {
   Layer *owner = layer_find(doc, owner_id);
   Bone *knob = owner ? bone_find(*owner, knob_id) : nullptr;
@@ -5030,52 +4615,81 @@ bool controller_side_set(Document &doc, uint64_t owner_id, uint64_t knob_id, int
       *r_why = action + " is already " + in->name + "'s " + controller_side_name(in_side);
       return false;
     }
-    if (const Bone *dial = controller_dial_of_action(*owner, action)) {
-      int axis = 0;
-      const Bone *linked = controller_of_dial(*owner, *dial, &axis);
-      if (linked && linked != knob) {
-        *r_why = dial->name + " is already linked to " + linked->name;
-        return false;
-      }
-      if (linked && axis != controller_side_axis(side)) {
-        *r_why = dial->name + " has one angle, so it can only be on one axis of " + knob->name;
-        return false;
-      }
-    }
-    if (keep != "THIS" && keep != "OTHER" && controller_side_keys_clash(*owner, *knob, side, action)) {
-      *r_why = "Both have keys, and the knob has one place on an axis: say which to keep";
+    /* A bone's own action plays as that bone turns: a knob drives it through an ordinary action keying the turn. */
+    if (const Bone *bone = controller_dial_of_action(*owner, action)) {
+      *r_why = action + " is " + bone->name + "'s own action: put an ordinary action that turns " + bone->name +
+               " in the side instead";
       return false;
     }
   }
-  const int axis = controller_side_axis(side);
-  const float sign = controller_side_sign(side);
-  /* What it held lets go, moving as it did, and those keys leave the knob. */
-  if (Bone *was = controller_side_dial(*owner, *knob, side)) {
-    controller_bake_dial(*owner, *knob, *was);
-    for (Key<float2> &k : knob->position_keys.keys) {
-      float &along = axis == 0 ? k.value.x : k.value.y;
-      along = along * sign > 0.0f ? 0.0f : along;
-    }
-  }
-  Bone *mine = action.empty() ? nullptr : controller_dial_of_action(*owner, action);
-  if (mine && keep == "THIS") {
-    for (Key<float2> &k : knob->position_keys.keys) {
-      (axis == 0 ? k.value.x : k.value.y) = 0.0f;
-    }
-  }
-  else if (mine && keep == "OTHER") {
-    mine->angle_keys.keys.clear();
-  }
   knob->controller_actions[side] = action;
   controllers_update(doc);
-  r_note->clear();
-  if (mine && controller_side_dial(*owner, *knob, side) == mine) {
-    if (const int moved = controller_fold_dial_keys(*owner, *knob, *mine); moved > 0) {
-      *r_note = "Moved " + std::to_string(moved) + (moved == 1 ? " key" : " keys") + " from " + mine->name + " onto " + knob->name;
-    }
-  }
   animation_evaluate(doc, doc.frame_current);
   return true;
+}
+
+int controller_links_undo(Document &doc)
+{
+  const auto linked = [](const Layer &owner) {
+    return std::any_of(owner.bones.begin(), owner.bones.end(), [&](const Bone &knob) {
+      return bone_is_controller(knob) &&
+             std::any_of(knob.controller_actions.begin(), knob.controller_actions.end(), [&](const std::string &a) {
+               return !a.empty() && controller_dial_of_action(owner, a);
+             });
+    });
+  };
+  const std::vector<const Layer *> flat = document_layers_flat(doc);
+  if (std::none_of(flat.begin(), flat.end(), [&](const Layer *l) { return l->is_bone_layer() && linked(*l); })) {
+    return 0;
+  }
+  /* The keys moved are the actions' as stored: an open action goes away while they move, and comes back. */
+  const std::string open = doc.action;
+  const uint64_t open_layer = doc.action_layer;
+  if (!open.empty()) {
+    document_set_action(doc, open_layer, "");
+  }
+  int count = 0;
+  for (const Layer *f : document_layers_flat(doc)) {
+    if (!f->is_bone_layer()) {
+      continue;
+    }
+    Layer &owner = *layer_find(doc, f->id);
+    for (Bone &knob : owner.bones) {
+      for (int side = 0; side < CONTROLLER_SIDES && bone_is_controller(knob); side++) {
+        const std::string old = knob.controller_actions[side];
+        Bone *dial = old.empty() ? nullptr : controller_dial_of_action(owner, old);
+        if (!dial) {
+          continue;
+        }
+        const std::string base = knob.name + " " + controller_side_name(side);
+        std::string name = base;
+        for (int i = 1; std::find(owner.actions.begin(), owner.actions.end(), name) != owner.actions.end(); i++) {
+          char suffix[16];
+          std::snprintf(suffix, sizeof(suffix), ".%03d", i);
+          name = base + suffix;
+        }
+        owner.actions.push_back(name);
+        /* The new action turns the dial as its own action did, so the dial goes on playing that by its turn. */
+        if (const auto it = dial->angle_keys.actions.find(old); it != dial->angle_keys.actions.end()) {
+          std::vector<Key<float>> turns = it->second;
+          dial->angle_keys.actions[name] = std::move(turns);
+        }
+        /* The knob's timing on that side moves with the side. */
+        if (const auto it = knob.position_keys.actions.find(old); it != knob.position_keys.actions.end()) {
+          std::vector<Key<float2>> timing = std::move(it->second);
+          knob.position_keys.actions.erase(it);
+          knob.position_keys.actions[name] = std::move(timing);
+        }
+        knob.controller_actions[side] = name;
+        count++;
+      }
+    }
+  }
+  if (!open.empty()) {
+    document_set_action(doc, open_layer, open);
+  }
+  controllers_update(doc);
+  return count;
 }
 
 std::vector<std::pair<Layer *, std::string>> layers_keyed_at(const std::vector<Layer *> &layers,
@@ -5364,26 +4978,11 @@ bool layer_channel(Layer &layer, const std::string &path, ChannelRef *r_ref)
   return false;
 }
 
-/* The angle channels of `layer`'s dials linked to a controller: what they turn is the knob's, so keying the layer keys
- * the knob, never them (a key on one is moved onto the knob, as a turn: one made from its plain value, nothing, would
- * take the knob back to rest). */
-static std::set<const void *> linked_dial_channels(const Layer &layer)
-{
-  std::set<const void *> dials;
-  for (const Bone &b : layer.bones) {
-    if (controller_of_dial(layer, b)) {
-      dials.insert(&b.angle_keys);
-    }
-  }
-  return dials;
-}
-
 int layer_insert_keys(Layer &layer, int frame)
 {
   int count = 0;
-  const std::set<const void *> dials = linked_dial_channels(layer);
   layer_for_each_channel(layer, [&](auto &ch, auto &value) {
-    if ((ch.keyed_by_hand && !ch.animated()) || dials.count(&ch)) {
+    if (ch.keyed_by_hand && !ch.animated()) {
       return;
     }
     /* Keys hold the value without what action bone actions add. */
@@ -5402,11 +5001,9 @@ int layer_insert_keys(Layer &layer, int frame)
 int layer_insert_filtered_keys(Layer &layer, const KeyFilter &filter, int frame)
 {
   int count = 0;
-  const std::set<const void *> dials = linked_dial_channels(layer);
   const auto key = [&](auto &ch, auto &value) {
-    /* As layer_insert_keys: a setting keyed only by hand (a mask's Reach) waits to be keyed so; a linked dial is its
-     * knob's. */
-    if ((ch.keyed_by_hand && !ch.animated()) || dials.count(&ch)) {
+    /* As layer_insert_keys: a setting keyed only by hand (a mask's Reach) waits to be keyed so. */
+    if (ch.keyed_by_hand && !ch.animated()) {
       return;
     }
     const auto base = value - ch.from_action_bones;
@@ -5812,33 +5409,6 @@ static std::vector<ChannelRef> layer_filtered_channels_all(Layer &layer, const K
   }
   if (filter.pinned_only) {
     return refs;
-  }
-  /* A dial linked to a controller keeps no keys of its own: asked for its angle, the knob's are the ones, so its row in
-   * the timeline is the same keys and an edit to them is an edit to both. */
-  for (const Bone &knob : layer.bones) {
-    if (!bone_is_controller(knob)) {
-      continue;
-    }
-    const std::string knob_path = "bones[\"" + knob.name + "\"].position";
-    for (int side = 0; side < CONTROLLER_SIDES; side++) {
-      const Bone *dial = controller_side_dial(layer, knob, side);
-      if (!dial) {
-        continue;
-      }
-      const std::string dial_path = "bones[\"" + dial->name + "\"].angle";
-      if (!(filter.kinds & channel_kind(dial_path)) || !key_filter_path_matches(filter, dial_path) ||
-          (filter.selected_only && !channel_thing_selected(layer, dial_path, filter)) ||
-          (filter.picked_bones_only && !channel_thing_selected(layer, dial_path, filter)) ||
-          std::any_of(refs.begin(), refs.end(), [&](const ChannelRef &r) { return r.path == knob_path; }))
-      {
-        continue;
-      }
-      for (const ChannelRef &ref : channels) {
-        if (ref.path == knob_path) {
-          refs.push_back(ref);
-        }
-      }
-    }
   }
   return refs;
 }
@@ -7216,9 +6786,9 @@ struct ClipboardChannel {
    * which changes as points are added or deleted). */
   uint64_t point = 0;
   int curve = -1;
-  /* A 2 Axis Controller's knob position, or its linked dial's angle, copied in one of its sides' own actions: the
-   * action. Those keys are the side's timing there (how far out or how far turned each frame plays), never a move of
-   * the knob or the dial, so they paste only into that action. Elsewhere they would play the action on top of the
+  /* A 2 Axis Controller's knob position copied in one of its sides' own actions: the action. Those keys are the
+   * side's timing there (how far out each frame plays), never a move of the knob, so they paste only into that
+   * action. Elsewhere they would play the action on top of the
    * pose pasted with them. */
   std::string knob_timing;
 };
@@ -7326,14 +6896,12 @@ static KeyClipboard clipboard_take(const Document &doc, const std::vector<Layer 
   int count = 0;
   int first = INT32_MAX;
   for (Layer *layer : layers) {
-    /* In a side's own action, the knob's position keys are its timing there, and the angle keys of the bone named after
-     * the action (a dial linked to that side) its curve: which frame each turn plays. */
+    /* In a side's own action, the knob's position keys are its timing there. */
     const Bone *timed = !doc.action.empty() && doc.action_layer == layer->id ? controller_of_action(*layer, doc.action, nullptr)
                                                                              : nullptr;
-    const Bone *dial = timed ? controller_dial_of_action(*layer, doc.action) : nullptr;
     for (const ChannelRef &ref : layer_channels(*layer)) {
       ClipboardChannel c{layer->id, layer->name, ref.path, {}, {}};
-      if ((timed && ref.vector == &timed->position_keys) || (dial && ref.scalar == &dial->angle_keys)) {
+      if (timed && ref.vector == &timed->position_keys) {
         c.knob_timing = doc.action;
       }
       const auto take = [&](const auto &channel, auto &into) {

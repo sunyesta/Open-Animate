@@ -178,26 +178,30 @@ assert not r.action("dial")["loops"] and close(r.action("dial")["frame"], 40.0, 
 
 # --- A controller's action: its Frame is where the knob has it, setting it moves the knob ---------------------------
 r = Rig()
-r.dial_action()
 r.wave()
+assert ops.anim.action_new(name="nod") == {'FINISHED'}
+r.doc.frame_current = 20
+r.face.set_point(0, (0.0, 2.0))
+r.doc.frame_current = 21
+r.mainline()
 ops.armature.select_none()
 ops.armature.bone_add(name="joy", head_x="-3.0", head_y="3.0", tail_x="-2.5", tail_y="3.0")
 r.rig.select_bone("joy")
 assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
-assert ops.armature.controller_side(side="UP", action="dial") == {'FINISHED'}
+assert ops.armature.controller_side(side="UP", action="nod") == {'FINISHED'}
 assert ops.armature.controller_side(side="RIGHT", action="wave") == {'FINISHED'}
-a = r.action("dial")
+a = r.action("nod")
 assert a["frame_by"] == "KNOB" and a["holder"] == "joy", a
 assert r.action("wave")["frame_by"] == "KNOB", "an action in a side is the knob's too"
 r.doc.frame_current = 10
 r.rig.select_bone("joy")
 r.rig.bone_set("joy", knob=(7.0, 0.0))
 r.settle()
-assert r.play("dial", frame=12) == {'FINISHED'}
+assert r.play("nod", frame=12) == {'FINISHED'}
 r.settle()
 assert close(r.bone("joy")["knob"], (7.0, 12.0)), ("along its side, the other axis kept", r.bone("joy")["knob"])
-assert close(r.action("dial")["frame"], 12.0), r.action("dial")
-r.play("dial", frame=500)
+assert close(r.action("nod")["frame"], 12.0), r.action("nod")
+r.play("nod", frame=500)
 r.settle()
 assert close(r.bone("joy")["knob"], (7.0, 20.0)), ("no further than the box's edge", r.bone("joy")["knob"])
 
