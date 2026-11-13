@@ -1,7 +1,6 @@
 """The timeline's action menu: Mainline on top, a filter, and two tabs. Actions: New first, then the ordinary actions.
-Bone actions: the selected bone's block first (with New while it has room), then each bone's in the order they were
-made (a controller's sides Right, Left, Up, Down; a bone's turns counterclockwise first), each with its arrow, then the
-fixes with how much each plays. The menu opens on the edited action's tab.
+Bone actions: each bone's in the order they were made (a controller's sides Right, Left, Up, Down; a bone's turns
+counterclockwise first), each with its arrow, then the fixes with how much each plays. The menu opens on the edited action's tab; a selected bone changes nothing.
 
 Run with:  OpenAnimate --background --python tests/test_action_menu.py
 """
@@ -102,34 +101,18 @@ assert [r["group_kind"] for r in bone_rows] == [1, 1, 1, 2, 2, 2, 2, 3], bone_ro
 assert [r["full_turn"] for r in bone_rows if r["group"] == "lid"] == [True], "lid's whole turn shows 360"
 assert not any(r["full_turn"] for r in bone_rows if r["group"] != "lid")
 assert [r["strength"] is not None for r in bone_rows] == [False] * 7 + [True], "only the fix has a share"
-assert not any(r["picked"] for r in all_rows), "nothing selected: no block"
 
-# --- The selected bone's block, first and red ---------------------------------------------------------------------------
-rig().select_bone("eye")
-picked = [(r["group"], r["name"], r["add"]) for r in rows() if r["picked"]]
-assert picked == [("eye", "eye Right", False), ("eye", "eye Left", False), ("eye", "eye Up", False),
-                  ("eye", "eye Down", False)], ("a controller: its sides, no New", picked)
-assert tab(1)[:4] == [("eye", "eye Right", "RIGHT"), ("eye", "eye Left", "LEFT"), ("eye", "eye Up", "UP"),
-                      ("eye", "eye Down", "DOWN")], tab(1)
-assert [g for g, _, _ in tab(1)].count("eye") == 4, "not listed twice"
-rig().select_bone("lid")
-assert [(r["name"], r["add"]) for r in rows() if r["picked"]] == [("lid", False)], "a whole turn has no room for more"
-rig().select_bone("arm")
-assert [(r["name"], r["add"]) for r in rows() if r["picked"]] == [("arm 2", False), ("arm", False)], "both ways made"
-rig().select_bone("leg")
-assert [(r["group"], r["name"], r["add"]) for r in rows() if r["picked"]] == [("leg", "", True)], \
-    "a bone with none: New alone"
-assert tab(1)[0] == ("leg", "", None), tab(1)
-# New makes it (as the row does), and it stays there while there is room the other way.
+# --- A selected bone changes nothing: no block of its own, no New in the Bone actions tab -------------------------------
+before = rows()
+for name in ("eye", "lid", "arm", "leg"):
+    rig().select_bone(name)
+    assert rows() == before, (name, rows())
+assert not any(r["add"] for r in before if r["tab"] == 1), "New bone action is gone"
+# An action bone action made elsewhere (the Bone tab) joins its bone's group, not the Actions tab.
 assert ops.anim.action_new(name="leg", action_bone="1") == {'FINISHED'} and doc.action == "leg"
 mainline()
-rig().select_bone("leg")
-assert [(r["name"], r["add"], r["arrow"]) for r in rows() if r["picked"]] == [("", True, None), ("leg", False, "LEFT")], \
-    rows()
+assert tab(1)[-2:-1] == [("leg", "leg", "LEFT")], tab(1)
 assert "leg" not in [r["name"] for r in rows() if r["tab"] == 0], "an action bone action isn't an ordinary action"
-# Two bones selected: no block.
-rig().select_bone("arm", extend=True)
-assert not any(r["picked"] for r in rows())
 ops.armature.select_none()
 
 # --- The filter: any case, a bone's name brings all its actions; New stays ----------------------------------------------

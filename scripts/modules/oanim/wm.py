@@ -781,7 +781,7 @@ def action_menu_rows(filter=""):
     """The timeline's action menu, top to bottom, as dicts: "tab" (-1 Mainline above the tabs, 0 Actions, 1 Bone
     actions), "rig" (the bone layer's id) and "rig_heading" (its name when it isn't the first listed), "group" (the
     bone's name, or "Fixes") and "group_kind" (1 a bone, 2 a 2 Axis Controller, 3 the fixes), "name" ("" for a New
-    row, "add" True), "picked" (in the selected bone's red block), "arrow" ("RIGHT", "LEFT", "UP", "DOWN" or None:
+    row, "add" True), "arrow" ("RIGHT", "LEFT", "UP", "DOWN" or None:
     a side, or the way a turn goes, LEFT counterclockwise), "full_turn" and "strength" (a fix's, else None). Only
     rows whose name or bone's name has `filter` in it, any case."""
     return _oanim.action_menu_rows(filter)

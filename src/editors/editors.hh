@@ -294,8 +294,6 @@ struct ActionMenuRow {
   /* The action; "" for a New row (`add`). */
   std::string name;
   bool add = false;
-  /* In the selected bone's block, at the top of the Bone actions tab (red). */
-  bool picked = false;
   /* Its arrow, by ControllerSide: a controller's side, or the way a bone's turn goes (Left counterclockwise, Right
    * clockwise); -1 for none. */
   int arrow = -1;

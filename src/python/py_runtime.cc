@@ -500,7 +500,6 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["group_kind"] = r.group_kind;
       d["name"] = r.name;
       d["add"] = r.add;
-      d["picked"] = r.picked;
       d["arrow"] = r.arrow >= 0 && r.arrow < 4 ? py::object(py::str(arrows[r.arrow])) : py::object(py::none());
       d["full_turn"] = r.full_turn;
       d["strength"] = r.strength >= 0.0f ? py::object(py::float_(r.strength)) : py::object(py::none());
