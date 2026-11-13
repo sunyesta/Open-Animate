@@ -771,6 +771,12 @@ def timeline_clear_question():
     return _oanim.timeline_clear_question()
 
 
+def timeline_paste_question():
+    """What Paste Timeline asks before it replaces the keys of the timeline being edited: "Replace all N keys on
+    <it> with the M keys copied from <the copied timeline>?"."""
+    return _oanim.timeline_paste_question()
+
+
 def timeline_row_details(as_shown=False):
     """The timeline's rows as dicts: depth, name, red, pinned, changed, layer (a layer's own row: its id,
     else 0), fold (a folding row's key: set_ui_open("Timeline/" + fold, open) folds it), open, summary, label (as

@@ -3035,11 +3035,13 @@ static std::vector<ChannelRow> rows_headed(std::vector<ChannelRow> rows)
 }
 
 /* Right-click on the timeline off any key: its menu, Clear Timeline (every key of the timeline being edited,
- * whatever is picked or shown), asking first with how many keys go, as Blender asks before deleting. */
+ * whatever is picked or shown), asking first with how many keys go, as Blender asks before deleting; Copy Timeline and
+ * Paste Timeline (which replaces them, asking first the same way). */
 static struct {
   int keys = 0;
   std::string line;
   bool ask = false;
+  bool ask_paste = false;
 } g_space_menu;
 
 static void timeline_space_menu_open(Document &doc)
@@ -3047,6 +3049,7 @@ static void timeline_space_menu_open(Document &doc)
   g_space_menu.keys = timeline_clear(doc, true);
   g_space_menu.line = timeline_edited_name(doc);
   g_space_menu.ask = false;
+  g_space_menu.ask_paste = false;
   ImGui::OpenPopup("##timeline_space");
 }
 
@@ -3055,6 +3058,15 @@ std::string timeline_clear_question(Document &doc)
   const int keys = timeline_clear(doc, true);
   return "Delete " + std::string(keys == 1 ? "the 1 key" : "all " + std::to_string(keys) + " keys") + " on " +
          timeline_edited_name(doc) + "?";
+}
+
+std::string timeline_paste_question(Document &doc)
+{
+  const int keys = timeline_clear(doc, true);
+  const int copied = timeline_clipboard_count();
+  return "Replace " + std::string(keys == 1 ? "the 1 key" : "all " + std::to_string(keys) + " keys") + " on " +
+         timeline_edited_name(doc) + " with the " + (copied == 1 ? std::string("1 key") : std::to_string(copied) + " keys") +
+         " copied from " + timeline_clipboard_name() + "?";
 }
 
 static void timeline_space_menus(Context &C)
@@ -3069,11 +3081,49 @@ static void timeline_space_menus(Context &C)
                             "%s has no keys",
                         g_space_menu.line.c_str());
     }
+    if (ui_menu_item("Copy Timeline", nullptr, false, g_space_menu.keys > 0)) {
+      operator_call(C, "anim.timeline_copy");
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::SetTooltip(g_space_menu.keys > 0 ? "Copy every key of %s, to paste as a whole into another timeline" :
+                                                "%s has no keys",
+                        g_space_menu.line.c_str());
+    }
+    const bool can_paste = !timeline_clipboard_empty();
+    if (ui_menu_item("Paste Timeline", nullptr, false, can_paste)) {
+      if (g_space_menu.keys > 0) {
+        g_space_menu.ask_paste = true;
+      }
+      else {
+        operator_call(C, "anim.timeline_paste");
+      }
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+      if (can_paste) {
+        ImGui::SetTooltip("Replace the keys of %s with %s's, on the same frames", g_space_menu.line.c_str(),
+                          timeline_clipboard_name().c_str());
+      }
+      else {
+        ImGui::SetTooltip("Copy a timeline first");
+      }
+    }
     ui_menu_end();
   }
   if (g_space_menu.ask && !ImGui::IsPopupOpen("##timeline_space")) {
     g_space_menu.ask = false;
     ImGui::OpenPopup("##timeline_clear_confirm");
+  }
+  if (g_space_menu.ask_paste && !ImGui::IsPopupOpen("##timeline_space")) {
+    g_space_menu.ask_paste = false;
+    ImGui::OpenPopup("##timeline_paste_confirm");
+  }
+  if (ui_menu_begin("##timeline_paste_confirm")) {
+    ImGui::TextUnformatted(timeline_paste_question(*C.document).c_str());
+    ImGui::Separator();
+    if (ui_menu_item("Paste Timeline")) {
+      operator_call(C, "anim.timeline_paste");
+    }
+    ui_menu_end();
   }
   if (ui_menu_begin("##timeline_clear_confirm")) {
     ImGui::TextUnformatted(timeline_clear_question(*C.document).c_str());

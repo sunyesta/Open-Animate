@@ -89,6 +89,13 @@ PENDING = [
      "A side's timing holds after its last key", 'tests/test_controller_side_timing.py'),
     ('src/anim/controller.cc', 'return controller_side_frame(knob, side, prev.y);', 't = prev.x + (along - prev.y);',
      "Past the last timing key's place the knob plays the frame it first got there", 'tests/test_controller.py'),
+    ('src/anim/animation.cc', '  timeline_clear(doc);', '  (void)0;',
+     "Paste Timeline replaces the timeline's own keys", 'tests/test_timeline_copy_paste.py'),
+    ('src/anim/animation.cc', 'timeline_edited_layers(doc), 0, true, nullptr, nullptr);',
+     'timeline_edited_layers(doc), 0, false, nullptr, nullptr);',
+     "Paste Timeline puts each key on its own frame", 'tests/test_timeline_copy_paste.py'),
+    ('src/ops/anim_ops.cc', '                        doc = was;', '                        (void)was;',
+     "Paste Timeline with nothing to paste here changes nothing", 'tests/test_timeline_copy_paste.py'),
 ]
 
 def build(root):

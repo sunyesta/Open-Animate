@@ -276,6 +276,9 @@ bool timeline_row_fold_at(Context &C, int row, bool open);
 bool timeline_row_chain_at(Context &C, int row);
 /* Clear Timeline's question before it deletes: "Delete all N keys on <Mainline or the action>?". */
 std::string timeline_clear_question(Document &doc);
+/* Paste Timeline's question when the timeline has keys: "Replace all N keys on <it> with the M keys copied from <the
+ * copied timeline>?". */
+std::string timeline_paste_question(Document &doc);
 /* An Alt click on `frame` of row `row` (as timeline_rows_list(as_shown=true) lists them), Shift held or not:
  * anim.timeline_stretch_pick on its channels. False when it did nothing. */
 bool timeline_row_alt_click(Context &C, int row, int frame, bool shift);

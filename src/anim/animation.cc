@@ -7318,7 +7318,9 @@ const Document *key_clipboard_source()
   return key_clipboard().source.get();
 }
 
-int layers_copy_selected_keys(const Document &doc, const std::vector<Layer *> &layers)
+/* The keys of `layers` that `wanted` takes, as a clipboard; `r_count` how many. */
+template<typename Wanted>
+static KeyClipboard clipboard_take(const Document &doc, const std::vector<Layer *> &layers, Wanted &&wanted, int &r_count)
 {
   KeyClipboard copied;
   int count = 0;
@@ -7336,7 +7338,7 @@ int layers_copy_selected_keys(const Document &doc, const std::vector<Layer *> &l
       }
       const auto take = [&](const auto &channel, auto &into) {
         for (const auto &key : channel.keys) {
-          if (key.selected) {
+          if (wanted(key)) {
             into.push_back(key);
             first = std::min(first, key.frame);
             count++;
@@ -7355,18 +7357,27 @@ int layers_copy_selected_keys(const Document &doc, const std::vector<Layer *> &l
       }
     }
   }
-  if (count == 0) {
-    return 0;
+  copied.first_frame = count > 0 ? first : 0;
+  r_count = count;
+  return copied;
+}
+
+int layers_copy_selected_keys(const Document &doc, const std::vector<Layer *> &layers)
+{
+  int count = 0;
+  KeyClipboard copied = clipboard_take(doc, layers, [](const auto &key) { return key.selected; }, count);
+  if (count > 0) {
+    key_clipboard() = std::move(copied);
   }
-  copied.first_frame = first;
-  key_clipboard() = std::move(copied);
   return count;
 }
 
-int layers_paste_keys(const Document &doc, const std::vector<Layer *> &layers, int frame,
-                      std::vector<std::pair<uint64_t, uint64_t>> *r_layers, std::vector<std::pair<int, int>> *r_frames)
+/* Pastes `clipboard` onto `layers`: its first key that pastes on `frame`, or each on its own frame with `same_frames`
+ * (see layers_paste_keys). */
+static int clipboard_paste(const KeyClipboard &clipboard, const Document &doc, const std::vector<Layer *> &layers,
+                           int frame, bool same_frames, std::vector<std::pair<uint64_t, uint64_t>> *r_layers,
+                           std::vector<std::pair<int, int>> *r_frames)
 {
-  const KeyClipboard &clipboard = key_clipboard();
   if (clipboard.channels.empty() || layers.empty()) {
     return 0;
   }
@@ -7423,7 +7434,7 @@ int layers_paste_keys(const Document &doc, const std::vector<Layer *> &layers, i
     return 0;
   }
   layers_deselect_keys(layers);
-  const int offset = frame - first_frame;
+  const int offset = same_frames ? 0 : frame - first_frame;
   int count = 0;
   /* The layers whose points or bones took a pose on the setup frame: their values follow the changes. */
   std::set<Layer *> posed_setup;
@@ -7541,6 +7552,81 @@ int layers_paste_keys(const Document &doc, const std::vector<Layer *> &layers, i
     }
   }
   return count;
+}
+
+int layers_paste_keys(const Document &doc, const std::vector<Layer *> &layers, int frame,
+                      std::vector<std::pair<uint64_t, uint64_t>> *r_layers, std::vector<std::pair<int, int>> *r_frames)
+{
+  return clipboard_paste(key_clipboard(), doc, layers, frame, false, r_layers, r_frames);
+}
+
+/* What Copy Timeline copied, apart from Copy Keys' clipboard: a whole timeline, pasted on its own frames. */
+static struct {
+  KeyClipboard keys;
+  std::string name;
+  int count = 0;
+} g_timeline_clipboard;
+
+/* The layers the timeline being edited keys (as Clear Timeline clears): in an action its bone layer and what is inside
+ * it; on the mainline every layer, the Simulation and the camera. */
+static std::vector<Layer *> timeline_edited_layers(Document &doc)
+{
+  std::vector<Layer *> out;
+  const auto add = [&](auto &self, Layer &l) -> void {
+    out.push_back(&l);
+    for (Layer &child : l.children) {
+      self(self, child);
+    }
+  };
+  if (!doc.action.empty()) {
+    if (Layer *owner = layer_find(doc, doc.action_layer)) {
+      add(add, *owner);
+    }
+    return out;
+  }
+  for (Layer &l : doc.layers) {
+    add(add, l);
+  }
+  out.push_back(&doc.simulation);
+  out.push_back(&document_camera(doc));
+  return out;
+}
+
+int timeline_copy(Document &doc)
+{
+  int count = 0;
+  KeyClipboard copied = clipboard_take(doc, timeline_edited_layers(doc), [](const auto &key) { return key.frame != 0; },
+                                       count);
+  if (count > 0) {
+    g_timeline_clipboard.keys = std::move(copied);
+    g_timeline_clipboard.name = timeline_edited_name(doc);
+    g_timeline_clipboard.count = count;
+  }
+  return count;
+}
+
+bool timeline_clipboard_empty()
+{
+  return g_timeline_clipboard.count == 0;
+}
+
+std::string timeline_clipboard_name()
+{
+  return g_timeline_clipboard.name;
+}
+
+int timeline_clipboard_count()
+{
+  return g_timeline_clipboard.count;
+}
+
+int timeline_paste(Document &doc)
+{
+  if (timeline_clipboard_empty()) {
+    return 0;
+  }
+  timeline_clear(doc);
+  return clipboard_paste(g_timeline_clipboard.keys, doc, timeline_edited_layers(doc), 0, true, nullptr, nullptr);
 }
 
 }  // namespace oanim

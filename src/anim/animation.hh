@@ -557,6 +557,17 @@ int layers_delete_selected_keys(const std::vector<Layer *> &layers);
  * action's (its bone layer and what is inside it), the mainline and the other actions left alone. With `count_only`
  * nothing changes. Returns how many keys (or would) go. */
 int timeline_clear(Document &doc, bool count_only = false);
+/* Copy Timeline: every key of the timeline being edited but frame 0's (the layers Clear Timeline clears), kept apart
+ * from Copy Keys' clipboard. Returns how many (none copied, the last copy kept). */
+int timeline_copy(Document &doc);
+bool timeline_clipboard_empty();
+/* The copied timeline's name ("Mainline" or the action's) and how many keys it holds. */
+std::string timeline_clipboard_name();
+int timeline_clipboard_count();
+/* Paste Timeline: the timeline being edited cleared (as Clear Timeline), then the copied timeline's keys put on their
+ * own frames, onto the same layers' channels (a layer not there matched by name, a knob's timing only back into its
+ * own action). Returns how many keys pasted; with none the timeline is cleared still (the caller puts it back). */
+int timeline_paste(Document &doc);
 /* What the timeline being edited is called: "Mainline", or the action's name. */
 std::string timeline_edited_name(const Document &doc);
 /* Copies the selected keys `offset` frames later (never below 1); the copies become the

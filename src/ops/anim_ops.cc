@@ -1425,6 +1425,47 @@ void anim_operators_register()
                                                    " from " + timeline_edited_name(doc));
                       return OpStatus::Finished;
                     });
+  anim_operator_add("anim.timeline_copy", "Copy Timeline",
+                    "Copy every key of the timeline being edited (the mainline, or the action being edited), whatever "
+                    "is selected or shown, to paste as a whole into another with Paste Timeline",
+                    OPTYPE_REGISTER, [](Context &C) {
+                      Document &doc = *C.document;
+                      animation_record(doc);
+                      const int copied = timeline_copy(doc);
+                      if (copied == 0) {
+                        report(ReportType::Warning, timeline_edited_name(doc) + " has no keys to copy");
+                        return OpStatus::Cancelled;
+                      }
+                      report(ReportType::Info, "Copied " + std::to_string(copied) + (copied == 1 ? " key" : " keys") +
+                                                   " from " + timeline_edited_name(doc));
+                      return OpStatus::Finished;
+                    });
+  anim_operator_add("anim.timeline_paste", "Paste Timeline",
+                    "Replace the keys of the timeline being edited with the copied timeline's, on the same frames and "
+                    "the same layers' channels; frame 0's setup pose stays",
+                    OPTYPE_REGISTER | OPTYPE_UNDO, [](Context &C) {
+                      Document &doc = *C.document;
+                      if (timeline_clipboard_empty()) {
+                        report(ReportType::Warning, "Copy a timeline first (Copy Timeline)");
+                        return OpStatus::Cancelled;
+                      }
+                      animation_record(doc);
+                      /* Put back as it was if nothing pastes here (none of the copied layers is in this timeline):
+                       * clearing alone isn't what was asked. */
+                      const Document was = doc;
+                      const int pasted = timeline_paste(doc);
+                      if (pasted == 0) {
+                        doc = was;
+                        report(ReportType::Warning, "None of " + timeline_clipboard_name() + "'s layers are in " +
+                                                        timeline_edited_name(doc));
+                        return OpStatus::Cancelled;
+                      }
+                      animation_evaluate(doc, doc.frame_current);
+                      report(ReportType::Info, "Pasted " + std::to_string(pasted) + (pasted == 1 ? " key" : " keys") +
+                                                   " from " + timeline_clipboard_name() + " into " +
+                                                   timeline_edited_name(doc));
+                      return OpStatus::Finished;
+                    });
   anim_operator_add("anim.keys_delete", "Delete Keys", "Delete the selected keys (frame-0 setup keys stay)",
                     OPTYPE_REGISTER | OPTYPE_UNDO, [](Context &C) {
                       animation_record(*C.document);
