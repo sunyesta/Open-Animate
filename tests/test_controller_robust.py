@@ -100,7 +100,7 @@ r.rig.bone_set("eye", knob=(0.0, 0.0))
 go(20)
 assert close(r.bone("eye")["knob_shown"], (0, 0)), ("a key at rest holds it there", r.bone("eye")["knob_shown"])
 go(30)
-assert close(r.bone("eye")["knob_shown"], (10, 0)), ("then evenly on", r.bone("eye")["knob_shown"])
+assert close(r.bone("eye")["knob_shown"], (0, 0)), ("and holds there after it", r.bone("eye")["knob_shown"])
 assert ops.anim.action_set(name="") == {'FINISHED'}
 
 # --- A linked dial goes through the timing -------------------------------------------------------------------------

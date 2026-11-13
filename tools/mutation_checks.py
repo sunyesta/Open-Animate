@@ -82,6 +82,13 @@ PENDING = [
      'A shape fit is worked out once a frame, not for every layer shown', 'tests/test_sweep_fuzz_guards.py'),
     ('src/anim/shape_limit.cc', 'const float2 at = {pose->knob.tx, pose->knob.ty};', 'const float2 at = pose->head;',
      "A controller's Whole Drawing footprint is measured about its knob", 'tests/test_sweep_fuzz_guards.py'),
+    ('src/anim/animation.cc', 'if (knob.controller_actions[side] == doc.action && !knob.controller_timing[side].empty()) {',
+     'if (knob.controller_actions[side] == doc.action) {',
+     "In a side's own action the knob rests until its first timing key", 'tests/test_controller_side_timing.py'),
+    ('src/anim/controller.cc', '  return prev.y;', '  return prev.y + (frame - prev.x);',
+     "A side's timing holds after its last key", 'tests/test_controller_side_timing.py'),
+    ('src/anim/controller.cc', 'return controller_side_frame(knob, side, prev.y);', 't = prev.x + (along - prev.y);',
+     "Past the last timing key's place the knob plays the frame it first got there", 'tests/test_controller.py'),
 ]
 
 def build(root):

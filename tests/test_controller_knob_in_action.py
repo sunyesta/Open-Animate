@@ -1,5 +1,5 @@
 """While one of a 2 Axis Controller's actions is edited (a side's, or a fix it drives), the knob sits at that action's
-frame, as Moho poses a smart bone in its action: what hangs from it (a layer parented to it) moves there as it will on
+frame through its timing keys there (with none it rests), as Moho poses a smart bone in its action: what hangs from it (a layer parented to it) moves there as it will on
 the mainline, so what an action shows is what the mainline plays. Back on the mainline the knob is where its keys put
 it.
 
@@ -69,6 +69,18 @@ assert size > 0
 rest_knob = bone("eye")["knob_head"]
 go(1)
 rest = pupil.shown()[0]
+
+# Each side's timing keyed in its action, evenly (frame N is N Frame Sizes out): before that the knob rests there.
+for action, end in (("go_r", 40), ("go_u", 20)):
+    assert ops.anim.action_set(name=action) == {'FINISHED'}
+    go(end)
+    assert close(bone("eye")["knob_shown"], (0, 0)), ("no timing keys yet: at rest", bone("eye")["knob_shown"])
+    doc.frame_current = end
+    rig.bone_set("eye", knob=(float(end), 0.0) if action == "go_r" else (0.0, float(end)))
+    go(end)
+assert ops.anim.action_set(name="") == {'FINISHED'}
+go(1)
+assert close(pupil.shown()[0], rest), "the timing keys move nothing on the mainline"
 
 # --- Inside a side's action: the knob at its frame, the pupil with it --------------------------------------------------
 assert ops.anim.action_set(name="go_r") == {'FINISHED'}

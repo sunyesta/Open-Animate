@@ -179,11 +179,11 @@ assert close(bone("stick")["knob"], (20.0, 0.0)), "and the key stays"
 playing = {name: (t, share) for name, t, share in rig.action_bone_actions_playing}
 assert close(playing["Look Right"], (15.0, 1.0)), ("and it counts as its last frame", playing)
 
-# Inside its own action the knob shows the frame, and isn't moved.
+# Inside its own action, with no timing keys there, the knob rests: it moves only where keyed.
 doc.frame_current = 0
 doc.action = "Look Right"
 doc.frame_current = 6
-assert close(bone("stick")["knob_shown"], (6.0, 0.0)), bone("stick")
+assert close(bone("stick")["knob_shown"], (0.0, 0.0)), bone("stick")
 mainline()
 
 # --- It bends nothing --------------------------------------------------------------------------------------------
@@ -526,13 +526,27 @@ doc.frame_current = 15
 settle()
 assert close(bone("nod")["knob"], (15.0, 0.0)), bone("nod")
 assert close(where(), (0.0, -0.5)), ("nothing stops playing", where())
+# Right's timing keyed to frame 15, held after; a mainline key past it (Contain Knob off) is a turn back as the frame
+# the knob first got that far, not one carried on past the last key.
+assert ops.anim.action_set(name="nod") == {'FINISHED'}
+doc.frame_current = 15
+rig.bone_set("nod", knob=(15.0, 0.0))
+doc.frame_current = 16
+assert ops.anim.action_set(name="") == {'FINISHED'}
+rig.bone_set("nod", contain_knob=False)
+doc.frame_current = 20
+rig.bone_set("nod", knob=(30.0, 0.0))
+doc.frame_current = 21
 doc.frame_current = 0
 assert ops.armature.bone_convert(type="REGULAR") == {'FINISHED'}
 assert bone("nod")["type"] == "REGULAR"
-assert [k["frame"] for k in rig.keyframes('bones["nod"].angle')] == [0, 15]
+assert [k["frame"] for k in rig.keyframes('bones["nod"].angle')] == [0, 15, 20]
 doc.frame_current = 15
 settle()
 assert close(bone("nod")["angle"] - bone("nod")["setup_angle"], 0.5) and close(where(), (0.0, -0.5)), where()
+doc.frame_current = 20
+settle()
+assert close(bone("nod")["angle"] - bone("nod")["setup_angle"], 0.5), ("past the last timing key: its frame", bone("nod"))
 doc.frame_current = 0
 
 # --- Make Left from Right -------------------------------------------------------------------------------------------

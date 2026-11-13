@@ -108,9 +108,10 @@ const Bone *controller_side_dial(const Layer &owner, const Bone &knob, int side)
 /* A side's action's length in frames: 0 for a side with no action. */
 float controller_side_frames(const Bone &knob, int side);
 /* How far along side `side` (in Frame Size units, from the rest point) the knob plays `frame` of its action: through
- * the knob's keys in that action (the side's timing), evenly past the last; with none, `frame`. */
+ * the knob's keys in that action (the side's timing), held after the last; with none, `frame`. */
 float controller_side_reach(const Bone &knob, int side, float frame);
-/* The frame of side `side`'s action the knob plays `along` that side out: the timing's inverse, held at its end. */
+/* The frame of side `side`'s action the knob plays `along` that side out: the timing's inverse (past the last key's place,
+ * the frame it first got there), held at the action's end. */
 float controller_side_frame(const Bone &knob, int side, float along);
 /* Each side's action frames (Right and Up positive) as a place in the box. */
 float2 controller_frames_place(const Bone &knob, float2 frames);

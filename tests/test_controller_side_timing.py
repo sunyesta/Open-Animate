@@ -1,8 +1,9 @@
 """A 2 Axis Controller side's timing: in that side's own action the knob moves along the side's axis only, and its keys
-there say how far out it is on each frame. On the mainline how far out the knob is picks the action's frame through
-those keys (straight between them, evenly past the last); with none, frame N is N Frame Sizes out. Keys never go back
-(a lower one is held at the one before), the box reaches where the knob plays the action's end, and the keys never move
-the knob on the mainline. Deleting them gives even timing back.
+there say how far out it is on each frame: at rest until the first, straight between them, held after the last. On the
+mainline how far out the knob is picks the action's frame through those keys (past the last one's place, the frame it
+first got there); with none, frame N is N Frame Sizes out. Keys never go back (a lower one is held at the one before),
+the box reaches where the knob plays the action's end, and the keys never move the knob on the mainline. Deleting them
+gives even timing back.
 
 Run with:  OpenAnimate --background --python tests/test_controller_side_timing.py
 """
@@ -63,6 +64,8 @@ assert close(hi(), (40, 0)), ("even timing: the box reaches the action's length"
 
 # --- In the side's own action: the knob keys along its axis only -----------------------------------------------------
 assert ops.anim.action_set(name="eye_r") == {'FINISHED'}
+go(10)
+assert close(bone("eye")["knob_shown"], (0, 0)), ("no keys yet: it rests, not moving by itself", bone("eye")["knob_shown"])
 doc.frame_current = 20
 rig.bone_set("eye", knob=(10.0, 5.0))
 go(20)
@@ -72,7 +75,7 @@ assert close(bone("eye")["knob_shown"], (10, 0)), ("keyed along its axis only", 
 go(10)
 assert close(bone("eye")["knob_shown"], (5, 0)), ("straight between keys", bone("eye")["knob_shown"])
 go(30)
-assert close(bone("eye")["knob_shown"], (20, 0)), ("evenly past the last key", bone("eye")["knob_shown"])
+assert close(bone("eye")["knob_shown"], (10, 0)), ("held past the last key", bone("eye")["knob_shown"])
 
 # Dragged, it goes along the axis from where it is shown.
 ops.armature.select_none()
@@ -83,22 +86,23 @@ assert bone("eye")["selected"], "free in its own side action: it stays picked"
 assert rig.drag_bone_ends([(0.0, 0.0), (5 * size, 5 * size)])
 go(30)
 assert 30 in [k["frame"] for k in rig.keyframes(KNOB)], rig.keyframes(KNOB)
-assert close(bone("eye")["knob_shown"], (25, 0)), ("dragged along its axis", bone("eye")["knob_shown"])
-assert close(hi(), (35, 0)), ("the box reaches where the action's end plays", hi())
+assert close(bone("eye")["knob_shown"], (15, 0)), ("dragged along its axis, from where it is held",
+                                                   bone("eye")["knob_shown"])
+assert close(hi(), (15, 0)), ("the box reaches where the action's end plays: the last key's place", hi())
 
 # A key going back is held at the one before.
 doc.frame_current = 35
-rig.bone_set("eye", knob=(15.0, 0.0))
+rig.bone_set("eye", knob=(5.0, 0.0))
 go(35)
-assert close(hi(), (30, 0)), ("never going back", hi())
-assert close(bone("eye")["knob_shown"], (25, 0)), bone("eye")["knob_shown"]
+assert close(hi(), (15, 0)), ("never going back", hi())
+assert close(bone("eye")["knob_shown"], (15, 0)), bone("eye")["knob_shown"]
 
 # --- The mainline: how far out picks the frame through the keys; they never move the knob -----------------------------
 assert ops.anim.action_set(name="") == {'FINISHED'}
 go(7)
 assert close(bone("eye")["knob"], (0, 0)), ("the action's keys don't move the knob", bone("eye")["knob"])
 assert close(playing("eye_r"), 0), playing("eye_r")
-for out, frame in ((5, 10), (10, 20), (16, 24), (25, 30), (30, 40), (50, 40)):
+for out, frame in ((5, 10), (10, 20), (12.5, 25), (15, 30), (20, 30), (50, 30)):
     rig.bone_set("eye", knob=(float(out), 0.0))
     go(7)
     assert close(playing("eye_r"), frame), ("%s out plays frame %s" % (out, frame), playing("eye_r"))

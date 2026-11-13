@@ -133,7 +133,7 @@ assert close(shown(), (5 + k[0], 0)), ("the look on top of its keys", shown())
 # Off while one of its actions is edited.
 assert ops.anim.action_set(name="eye_r") == {'FINISHED'}
 go(20)
-assert close(shown(), (20, 0)), ("in its action the knob sits at the frame", shown())
+assert close(shown(), (0, 0)), ("in its action the look is off: unkeyed there, the knob rests", shown())
 assert ops.anim.action_set(name="") == {'FINISHED'}
 rig.bone_constraint_set("eye", 0, enabled=False)
 go(10)
@@ -164,6 +164,7 @@ assert close(off, (10 * size * math.cos(0.5), 10 * size * math.sin(0.5))), ("the
 # Off while one of its actions is edited: the box doesn't turn there either.
 assert ops.anim.action_set(name="eye_r") == {'FINISHED'}
 doc.frame_current = 20
+rig.bone_set("eye", knob=(20.0, 0.0))
 rig.bone_set("turn", angle=bone("turn")["setup_angle"] + 0.5)
 go(20)
 eye = bone("eye")

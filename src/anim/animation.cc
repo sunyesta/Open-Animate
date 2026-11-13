@@ -4697,7 +4697,9 @@ float2 controller_knob_shown(const Document &doc, const Layer &owner, const Bone
     (controller_side_axis(side) == 0 ? at.x : at.y) = controller_side_reach(knob, side, frames) * controller_side_sign(side);
   };
   for (int side = 0; side < CONTROLLER_SIDES; side++) {
-    if (knob.controller_actions[side] == doc.action) {
+    /* At rest until its first key there: it moves only where keyed (with none, the mainline still plays frame N N
+     * Frame Sizes out). */
+    if (knob.controller_actions[side] == doc.action && !knob.controller_timing[side].empty()) {
       put(side, std::min(float(doc.frame_current), controller_side_frames(knob, side)));
     }
   }

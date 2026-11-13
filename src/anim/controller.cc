@@ -125,7 +125,8 @@ float controller_side_reach(const Bone &knob, int side, float frame)
     }
     prev = k;
   }
-  return prev.y + (frame - prev.x);
+  /* Held after the last, as any keys hold: the knob doesn't move where nothing keys it. */
+  return prev.y;
 }
 
 float controller_side_frame(const Bone &knob, int side, float along)
@@ -147,8 +148,9 @@ float controller_side_frame(const Bone &knob, int side, float along)
       }
       prev = k;
     }
+    /* Past the last key's place (held there to the action's end), the frame it first got there. */
     if (!found) {
-      t = prev.x + (along - prev.y);
+      return controller_side_frame(knob, side, prev.y);
     }
   }
   return std::min(t, controller_side_frames(knob, side));
