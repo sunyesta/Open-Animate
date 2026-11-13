@@ -279,6 +279,34 @@ std::string timeline_clear_question(Document &doc);
 /* Paste Timeline's question when the timeline has keys: "Replace all N keys on <it> with the M keys copied from <the
  * copied timeline>?". */
 std::string timeline_paste_question(Document &doc);
+
+/* A row of the timeline's action menu, top to bottom (oanim.wm.action_menu_rows). */
+struct ActionMenuRow {
+  /* -1 Mainline, above the tabs; 0 the Actions tab; 1 the Bone actions tab (action bone actions and fixes). */
+  int tab = 0;
+  /* The bone layer it belongs to, and its name when it isn't the first one listed (a heading over its rows). */
+  uint64_t rig = 0;
+  std::string rig_heading;
+  /* Its group in the Bone actions tab: the bone's name ("" for none) and what it is: 1 a bone, 2 a 2 Axis Controller,
+   * 3 the fixes ("Fixes"). */
+  std::string group;
+  int group_kind = 0;
+  /* The action; "" for a New row (`add`). */
+  std::string name;
+  bool add = false;
+  /* In the selected bone's block, at the top of the Bone actions tab (red). */
+  bool picked = false;
+  /* Its arrow, by ControllerSide: a controller's side, or the way a bone's turn goes (Left counterclockwise, Right
+   * clockwise); -1 for none. */
+  int arrow = -1;
+  bool full_turn = false;
+  /* A fix's strength now; -1 for anything else. */
+  float strength = -1.0f;
+};
+/* The rows, those whose name (or bone's name) has `filter` in it, any case. */
+std::vector<ActionMenuRow> action_menu_rows(Document &doc, const std::string &filter);
+/* The tab the menu opens on: the timeline being edited's, on the mainline the one used last. */
+int action_menu_tab_opening(Document &doc);
 /* An Alt click on `frame` of row `row` (as timeline_rows_list(as_shown=true) lists them), Shift held or not:
  * anim.timeline_stretch_pick on its channels. False when it did nothing. */
 bool timeline_row_alt_click(Context &C, int row, int frame, bool shift);

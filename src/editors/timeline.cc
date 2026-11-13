@@ -7,6 +7,8 @@
 #include "imgui_stdlib.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cfloat>
 #include <cmath>
 #include <functional>
 #include <map>
@@ -68,7 +70,7 @@ static constexpr ImU32 COL_FIX_ACTIVE = UI_FIX_ACTIVE_COLOR;
 static constexpr ImU32 COL_FIX_TEXT = UI_FIX_COLOR;
 static constexpr ImU32 COL_ACTION_TINT = IM_COL32(0xd0, 0x8a, 0x2e, 0x14);
 
-enum class Icon { Record, JumpStart, KeyPrev, PlayReverse, Play, Pause, KeyNext, JumpEnd, Stepped, Menu, Onion, Path, Chain, Pointer, Lock };
+enum class Icon { Record, JumpStart, KeyPrev, PlayReverse, Play, Pause, KeyNext, JumpEnd, Stepped, Menu, Onion, Path, Chain, Pointer, Lock, Actions, Bone, Knob, Mainline };
 
 /* Where a button sits in a row of joined buttons (Blender's aligned buttons): only the row's outer
  * corners are round. */
@@ -193,6 +195,42 @@ static void icon_draw(ImDrawList *dl, Icon icon, ImVec2 c, float s, bool on)
       (void)on;
       chain_draw(dl, c, s, col);
       break;
+    case Icon::Actions: {
+      /* A strip of film: the actions, each a timeline of its own. */
+      (void)on;
+      dl->AddRect(c + ImVec2(-s * 0.85f, -s * 0.65f), c + ImVec2(s * 0.85f, s * 0.65f), col, 1.5f, 0, 1.3f);
+      for (int i = 0; i < 3; i++) {
+        const float x = -s * 0.5f + float(i) * s * 0.5f;
+        dl->AddRectFilled(c + ImVec2(x - s * 0.12f, -s * 0.5f), c + ImVec2(x + s * 0.12f, -s * 0.3f), col);
+        dl->AddRectFilled(c + ImVec2(x - s * 0.12f, s * 0.3f), c + ImVec2(x + s * 0.12f, s * 0.5f), col);
+      }
+      break;
+    }
+    case Icon::Bone: {
+      /* A bone as the viewport draws one: a long kite from its head (a round joint) to its tail. */
+      (void)on;
+      const ImVec2 head = c + ImVec2(-s * 0.62f, s * 0.62f), tail = c + ImVec2(s * 0.8f, -s * 0.8f);
+      const ImVec2 along = (tail - head) * 0.22f, side(-(tail - head).y * 0.16f, (tail - head).x * 0.16f);
+      const ImVec2 pts[4] = {head, head + along + side, tail, head + along - side};
+      dl->AddPolyline(pts, 4, col, ImDrawFlags_Closed, 1.3f);
+      dl->AddCircleFilled(head, s * 0.24f, col, 10);
+      break;
+    }
+    case Icon::Knob: {
+      /* A 2 Axis Controller: its box with the knob inside. */
+      (void)on;
+      dl->AddRect(c + ImVec2(-s * 0.75f, -s * 0.75f), c + ImVec2(s * 0.75f, s * 0.75f), col, 1.5f, 0, 1.3f);
+      dl->AddCircleFilled(c + ImVec2(s * 0.15f, -s * 0.1f), s * 0.28f, col, 10);
+      break;
+    }
+    case Icon::Mainline: {
+      /* A timeline with its keys. */
+      (void)on;
+      dl->AddLine(c + ImVec2(-s, 0.0f), c + ImVec2(s, 0.0f), col, 1.3f);
+      diamond(dl, c + ImVec2(-s * 0.5f, 0.0f), s * 0.38f, col);
+      diamond(dl, c + ImVec2(s * 0.5f, 0.0f), s * 0.38f, col);
+      break;
+    }
     case Icon::Stepped: {
       /* Stairs: the motion held from key to key. */
       (void)on;
@@ -203,6 +241,20 @@ static void icon_draw(ImDrawList *dl, Icon icon, ImVec2 c, float s, bool on)
       break;
     }
   }
+}
+
+/* An arrow pointing to a ControllerSide (right, left, up or down) about `c`, `s` from the middle to its tip. */
+static void arrow_draw(ImDrawList *dl, ImVec2 c, float s, int side, ImU32 col)
+{
+  const ImVec2 d = side == CONTROLLER_RIGHT ? ImVec2(1.0f, 0.0f)
+                   : side == CONTROLLER_LEFT ? ImVec2(-1.0f, 0.0f)
+                   : side == CONTROLLER_UP   ? ImVec2(0.0f, -1.0f)
+                                             : ImVec2(0.0f, 1.0f);
+  const ImVec2 n(-d.y, d.x), tip = c + d * s;
+  const float t = std::max(1.3f, s * 0.2f);
+  dl->AddLine(c - d * s, tip, col, t);
+  dl->AddLine(tip, tip - d * (s * 0.6f) + n * (s * 0.55f), col, t);
+  dl->AddLine(tip, tip - d * (s * 0.6f) - n * (s * 0.55f), col, t);
 }
 
 /* A Blender header button: its fill (grey, blue when on; a menu's arrow half darker), its outline, and
@@ -305,12 +357,186 @@ static void frame_field(Context &C, const char *id, int *value, const char *form
   }
 }
 
+/* --- The action menu's rows --------------------------------------------------------------------------------------- */
+
+/* The tab the menu was last on (the mainline opens on it). */
+static int g_action_tab = 0;
+
+static bool action_menu_match(const std::string &name, const std::string &filter)
+{
+  if (filter.empty()) {
+    return true;
+  }
+  const auto low = [](std::string text) {
+    for (char &ch : text) {
+      ch = char(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return text;
+  };
+  return low(name).find(low(filter)) != std::string::npos;
+}
+
+/* The bone layer whose actions the menu adds to: the one being edited, else the one the active layer is in. */
+static Layer *action_menu_owner(Document &doc)
+{
+  Layer *owner = doc.action.empty() ? action_owner(doc, doc.active_layer) : layer_find(doc, doc.action_layer);
+  return owner ? owner : action_owner(doc, doc.active_layer);
+}
+
+/* Its one bone selected (a joint of it counts), or null. */
+static const Bone *action_menu_picked_bone(const Layer *owner)
+{
+  if (!owner) {
+    return nullptr;
+  }
+  const Bone *single = nullptr;
+  for (const Bone &b : owner->bones) {
+    if (b.selected || b.select_head || b.select_tail) {
+      if (single) {
+        return nullptr;
+      }
+      single = &b;
+    }
+  }
+  return single;
+}
+
+std::vector<ActionMenuRow> action_menu_rows(Document &doc, const std::string &filter)
+{
+  std::vector<ActionMenuRow> rows;
+  ActionMenuRow mainline;
+  mainline.tab = -1;
+  rows.push_back(mainline);
+  Layer *owner = action_menu_owner(doc);
+  /* The bone layer it's in, and those around it: their actions animate this one too. */
+  std::vector<Layer *> rigs = action_owners(doc, doc.active_layer);
+  if (owner && std::find(rigs.begin(), rigs.end(), owner) == rigs.end()) {
+    rigs.insert(rigs.begin(), owner);
+  }
+  const auto heading = [&](const Layer *rig) { return rig == rigs.front() ? std::string() : rig->name; };
+
+  /* The Actions tab: New at the top, then each bone layer's ordinary actions. */
+  if (owner) {
+    ActionMenuRow add;
+    add.rig = owner->id;
+    add.add = true;
+    rows.push_back(add);
+  }
+  for (Layer *rig : rigs) {
+    for (const std::string &name : rig->actions) {
+      if (!action_bone_of(*rig, name) && !bone_fix_find(*rig, name) && action_menu_match(name, filter)) {
+        ActionMenuRow row;
+        row.rig = rig->id;
+        row.rig_heading = heading(rig);
+        row.name = name;
+        rows.push_back(row);
+      }
+    }
+  }
+
+  /* The Bone actions tab: the selected bone's first, then each bone's in the order they were made, then the fixes. */
+  const Bone *picked = action_menu_picked_bone(owner);
+  const auto bone_rows = [&](Layer &rig, const Bone &bone, bool in_block) {
+    const bool knob = bone_is_controller(bone);
+    const BoneTurnSlots slots = knob ? BoneTurnSlots() : bone_turn_slots(doc, rig, bone);
+    const bool bone_matches = action_menu_match(bone.name, filter);
+    std::vector<ActionMenuRow> own;
+    int count = 0;
+    for (const std::string &name : rig.actions) {
+      if (action_bone_of(rig, name) != &bone || bone_fix_find(rig, name)) {
+        continue;
+      }
+      count++;
+      if (!bone_matches && !action_menu_match(name, filter)) {
+        continue;
+      }
+      ActionMenuRow row;
+      row.tab = 1;
+      row.rig = rig.id;
+      row.rig_heading = heading(&rig);
+      row.group = bone.name;
+      row.group_kind = knob ? 2 : 1;
+      row.name = name;
+      row.picked = in_block;
+      int side = -1;
+      if (knob && controller_of_action(rig, name, &side) == &bone) {
+        row.arrow = side;
+      }
+      else if (!knob) {
+        row.arrow = name == slots.action[0] ? CONTROLLER_LEFT : name == slots.action[1] ? CONTROLLER_RIGHT : -1;
+      }
+      row.full_turn = action_bone_action_full_turn(rig, name);
+      own.push_back(row);
+    }
+    /* A controller's sides in their order (Right, Left, Up, Down); a bone's turns counterclockwise first. */
+    const auto order = [&](const ActionMenuRow &row) {
+      return row.arrow < 0 ? CONTROLLER_SIDES : knob ? row.arrow : row.arrow == CONTROLLER_LEFT ? 0 : 1;
+    };
+    std::stable_sort(own.begin(), own.end(),
+                     [&](const ActionMenuRow &a, const ActionMenuRow &b) { return order(a) < order(b); });
+    /* The selected bone's block starts with New while it has room: an action each way, one for a whole turn. */
+    if (in_block && !knob && count < (slots.full_turn ? 1 : 2)) {
+      ActionMenuRow add;
+      add.tab = 1;
+      add.rig = rig.id;
+      add.rig_heading = heading(&rig);
+      add.group = bone.name;
+      add.group_kind = 1;
+      add.add = true;
+      add.picked = true;
+      own.insert(own.begin(), add);
+    }
+    rows.insert(rows.end(), own.begin(), own.end());
+  };
+  for (Layer *rig : rigs) {
+    if (rig == owner && picked) {
+      bone_rows(*rig, *picked, true);
+    }
+    std::vector<const Bone *> seen;
+    for (const std::string &name : rig->actions) {
+      const Bone *bone = bone_fix_find(*rig, name) ? nullptr : action_bone_of(*rig, name);
+      if (bone && !(rig == owner && bone == picked) && std::find(seen.begin(), seen.end(), bone) == seen.end()) {
+        seen.push_back(bone);
+        bone_rows(*rig, *bone, false);
+      }
+    }
+    for (const std::string &name : rig->actions) {
+      const BoneFix *fix = bone_fix_find(*rig, name);
+      if (!fix || !action_menu_match(name, filter)) {
+        continue;
+      }
+      ActionMenuRow row;
+      row.tab = 1;
+      row.rig = rig->id;
+      row.rig_heading = heading(rig);
+      row.group = "Fixes";
+      row.group_kind = 3;
+      row.name = name;
+      row.strength = bone_fix_play(*rig, *fix, doc.action == name && doc.action_layer == rig->id).strength;
+      rows.push_back(row);
+    }
+  }
+  return rows;
+}
+
+int action_menu_tab_opening(Document &doc)
+{
+  if (!doc.action.empty()) {
+    for (const ActionMenuRow &row : action_menu_rows(doc, "")) {
+      if (!row.add && row.tab >= 0 && row.name == doc.action && row.rig == doc.action_layer) {
+        return row.tab;
+      }
+    }
+  }
+  return g_action_tab;
+}
+
 /* Which timeline is edited: the mainline, or an action of the bone layer the active layer is in or of
  * one around it, like Moho's switch between the mainline and an action. The + next to it adds an action.
  *
- * The list, top to bottom: what the moment calls for first (the selected bone's action bone actions; the action bone
- * actions playing together now, with the fix for them or a new one), then Mainline, Actions, Action Bone
- * Actions and Fix Actions. Right-click an action to rename or delete it. */
+ * The list: Mainline on top, a filter, then two tabs: Actions (New first), and Bone actions (the selected bone's
+ * block first, in red, with New while it has room; then each bone's, with arrows for the way each goes; then the
+ * fixes, with how much each plays now). Right-click an action to rename or delete it. */
 static void action_menu(Context &C, float width)
 {
   Document &doc = *C.document;
@@ -355,32 +581,80 @@ static void action_menu(Context &C, float width)
   /* Right-click Rename: the action, and the name being typed. */
   static std::string renaming, rename_to;
   static uint64_t renaming_layer = 0;
+  static char new_name[64] = "Action";
+  bool want_new = false;
   if (open) {
     std::string doomed;
     uint64_t doomed_layer = 0;
-    const auto action_item = [&](const Layer &rig, const std::string &name, const std::string &label, const std::string &right,
-                                 ImU32 right_col) {
-      ImGui::PushID(int(rig.id));
-      ImGui::PushID(name.c_str());
-      const bool here = in_action && doc.action == name && doc.action_layer == rig.id;
-      if (ImGui::Selectable(label.c_str(), here)) {
-        operator_call(C, "anim.action_set", {{"name", name}, {"layer", std::to_string(rig.id)}});
+    static std::string filter;
+    const ImGuiStyle &style = ImGui::GetStyle();
+    const float h = ImGui::GetTextLineHeight();
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    const bool appearing = ImGui::IsWindowAppearing();
+    int force_tab = -1;
+    if (appearing) {
+      filter.clear();
+      force_tab = action_menu_tab_opening(doc);
+    }
+    const auto percent = [](float share) { return std::to_string(int(std::lround(share * 100.0f))) + "%"; };
+
+    /* An action's row: its name, and at the right its tag (360\xC2\xB0, a fix's share) and arrow. */
+    const auto action_item = [&](const ActionMenuRow &row) {
+      Layer *rig = layer_find(doc, row.rig);
+      if (!rig) {
+        return;
       }
-      if (!right.empty()) {
-        const float rw = ImGui::CalcTextSize(right.c_str()).x;
-        ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - rw));
-        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(right_col), "%s", right.c_str());
+      const std::string &name = row.name;
+      ImGui::PushID(int(rig->id));
+      ImGui::PushID(name.c_str());
+      const bool here = in_action && doc.action == name && doc.action_layer == rig->id;
+      if (ImGui::Selectable(name.c_str(), here)) {
+        operator_call(C, "anim.action_set", {{"name", name}, {"layer", std::to_string(rig->id)}});
+      }
+      const bool hovered = ImGui::IsItemHovered();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        if (row.strength >= 0.0f) {
+          std::string bones;
+          for (const uint64_t id : bone_fix_find(*rig, name)->follows) {
+            if (const Bone *b = bone_find(*rig, id)) {
+              bones += (bones.empty() ? "" : " and ") + b->name;
+            }
+          }
+          ImGui::SetTooltip("Follows %s along its line (%s now)", bones.c_str(), percent(row.strength).c_str());
+        }
+        else if (row.arrow >= 0) {
+          const char *way = row.group_kind == 2 ? controller_side_name(row.arrow)
+                            : row.arrow == CONTROLLER_LEFT ? "Turns counterclockwise"
+                                                            : "Turns clockwise";
+          ImGui::SetTooltip("%s%s", way, row.full_turn ? ", a whole turn round and round" : "");
+        }
+      }
+      const std::string tag = row.strength > 0.0f ? percent(row.strength) : row.full_turn ? "360\xC2\xB0" : "";
+      const float arrow_w = row.arrow >= 0 ? h * 1.2f : 0.0f;
+      const float tag_w = tag.empty() ? 0.0f : ImGui::CalcTextSize(tag.c_str()).x + (arrow_w > 0.0f ? h * 0.3f : 0.0f);
+      if (arrow_w + tag_w > 0.0f) {
+        ImGui::SameLine(std::max(ImGui::GetCursorPosX() + h * 0.5f, ImGui::GetWindowContentRegionMax().x - arrow_w - tag_w));
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const ImU32 col = row.strength > 0.0f ? COL_FIX_TEXT : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        if (!tag.empty()) {
+          dl->AddText(p, col, tag.c_str());
+        }
+        if (row.arrow >= 0) {
+          arrow_draw(dl, ImVec2(p.x + tag_w + arrow_w * 0.5f, p.y + h * 0.5f), h * 0.36f, row.arrow,
+                     ImGui::GetColorU32(ImGuiCol_Text));
+        }
+        ImGui::Dummy(ImVec2(arrow_w + tag_w, h));
       }
       /* Right-click: the action's own menu. */
-      if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+      if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
         ImGui::OpenPopup("##action_menu");
       }
       if (ui_menu_begin("##action_menu")) {
         /* A controller's own actions aren't named after anything. */
-        const bool is_action_bone_action = controller_dial_of_action(rig, name) != nullptr;
+        const bool is_action_bone_action = controller_dial_of_action(*rig, name) != nullptr;
         if (ui_menu_item("Rename...", nullptr, false, !is_action_bone_action)) {
           renaming = name;
-          renaming_layer = rig.id;
+          renaming_layer = rig->id;
           rename_to = name;
         }
         if (is_action_bone_action && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -388,114 +662,148 @@ static void action_menu(Context &C, float width)
         }
         if (ui_menu_item("Delete")) {
           doomed = name;
-          doomed_layer = rig.id;
+          doomed_layer = rig->id;
         }
         ui_menu_end();
       }
       ImGui::PopID();
       ImGui::PopID();
     };
-    const auto percent = [](float share) { return std::to_string(int(std::lround(share * 100.0f))) + "%"; };
-    const ImU32 dim = ImGui::GetColorU32(ImGuiCol_TextDisabled);
 
-    /* At the top, with one bone selected: its action bone actions, and a new one while it has fewer
-     * than two (the second turns the other way). */
-    const Bone *single = nullptr;
-    if (owner) {
-      int picked = 0;
-      for (const Bone &b : owner->bones) {
-        if (b.selected || b.select_head || b.select_tail) {
-          picked++;
-          single = &b;
-        }
+    /* Mainline, always on top: a row like the actions, with a line under it. */
+    {
+      const ImVec2 p = ImGui::GetCursorScreenPos();
+      const float text_x = h * 1.6f;
+      ImGui::Dummy(ImVec2(text_x + ImGui::CalcTextSize("Mainline").x, 0.0f));
+      ImGui::SetCursorScreenPos(p);
+      if (ImGui::Selectable("##mainline", !in_action)) {
+        operator_call(C, "anim.action_set", {{"name", ""}});
       }
-      if (picked != 1) {
-        single = nullptr;
+      icon_draw(dl, Icon::Mainline, ImVec2(p.x + h * 0.65f, p.y + h * 0.5f), h * 0.42f, false);
+      dl->AddText(ImVec2(p.x + text_x, p.y), ImGui::GetColorU32(ImGuiCol_Text), "Mainline");
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip("The scene's own timeline, outside every action");
       }
     }
-    if (single) {
-      ImGui::PushID("selected");
-      ImGui::SeparatorText(("Selected: " + single->name).c_str());
-      int count = 0;
-      for (const std::string &name : owner->actions) {
-        if (action_bone_of(*owner, name) == single) {
-          /* A 360 action bone action (its bone keyed a whole turn) goes round and round: say so. */
-          action_item(*owner, name, name, action_bone_action_full_turn(*owner, name) ? "360Â°" : "", dim);
-          count++;
-        }
-      }
-      if (count < 2) {
-        if (ImGui::Selectable(count == 0 ? "+ New Bone Action" : "+ New Bone Action (other way)")) {
-          operator_call(C, "anim.action_new", {{"name", single->name}, {"action_bone", "1"}, {"layer", std::to_string(owner->id)}});
-        }
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-          ImGui::SetTooltip("An action named after the bone: key the bone turning, and what it should move. Then "
-                            "turning the bone anywhere else plays the action that far (Moho's smart bones). A "
-                            "second one covers turning the other way");
-        }
-      }
-      ImGui::PopID();
-    }
-
     ImGui::Separator();
-    if (ImGui::Selectable("Mainline", !in_action)) {
-      operator_call(C, "anim.action_set", {{"name", ""}});
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (appearing) {
+      ImGui::SetKeyboardFocusHere();
     }
-    /* The bone layer it's in, and those around it: their actions animate this one too. */
-    std::vector<Layer *> rigs = action_owners(doc, doc.active_layer);
-    if (owner && std::find(rigs.begin(), rigs.end(), owner) == rigs.end()) {
-      rigs.insert(rigs.begin(), owner);
-    }
-    for (Layer *rig : rigs) {
-      if (rig->actions.empty()) {
-        continue;
+    const bool typed = ImGui::InputTextWithHint("##action_filter", "Filter", &filter);
+    const std::vector<ActionMenuRow> rows = action_menu_rows(doc, filter);
+    int count[2] = {0, 0};
+    for (const ActionMenuRow &row : rows) {
+      if (row.tab >= 0 && !row.add) {
+        count[row.tab]++;
       }
-      const std::string above = rig == rigs.front() ? "" : rig->name + ": ";
-      const auto section = [&](const char *title, auto &&wanted, auto &&item) {
-        bool any = false;
-        for (const std::string &name : rig->actions) {
-          if (!wanted(name)) {
-            continue;
-          }
-          if (!any) {
-            ImGui::SeparatorText((above + title).c_str());
-            any = true;
-          }
-          item(name);
-        }
+    }
+    /* Typing: over to the other tab when only it has what was typed. */
+    if (typed && count[g_action_tab] == 0 && count[1 - g_action_tab] > 0) {
+      force_tab = 1 - g_action_tab;
+    }
+
+    /* A tab's rows, under headings for the bone layers after the first and for each bone (or the fixes); the
+     * selected bone's block on red. */
+    const auto tab_rows = [&](int tab) {
+      uint64_t last_rig = 0;
+      const std::string none = "\x01";
+      const std::string *last_group = &none;
+      bool block = false;
+      float block_top = 0.0f;
+      const float x0 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x - style.ItemSpacing.x * 0.5f;
+      const float x1 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x + style.ItemSpacing.x * 0.5f;
+      const auto block_end = [&]() {
+        dl->ChannelsSetCurrent(0);
+        const float bottom = ImGui::GetCursorScreenPos().y - style.ItemSpacing.y * 0.5f;
+        dl->AddRectFilled(ImVec2(x0, block_top), ImVec2(x1, bottom), (COL_RECORD & 0x00ffffffu) | 0x30000000u, 3.0f);
+        dl->AddRect(ImVec2(x0, block_top), ImVec2(x1, bottom), (COL_RECORD & 0x00ffffffu) | 0xb0000000u, 3.0f);
+        dl->ChannelsMerge();
+        block = false;
       };
-      const auto plain = [&](const std::string &name) { action_item(*rig, name, name, "", 0); };
-      section("Actions", [&](const std::string &n) { return !action_adds(*rig, n) && !bone_fix_find(*rig, n); }, plain);
-      section("Action Bone Actions", [&](const std::string &n) { return action_bone_of(*rig, n) != nullptr; },
-              [&](const std::string &name) {
-                action_item(*rig, name, name, action_bone_action_full_turn(*rig, name) ? "360Â°" : "", dim);
-              });
-      section("Fix Actions",
-              [&](const std::string &n) { return bone_fix_find(*rig, n) != nullptr; },
-              [&](const std::string &name) {
-                /* How much plays now, and which bones it follows. */
-                const BoneFix *bf = bone_fix_find(*rig, name);
-                const bool open = doc.action == name && doc.action_layer == rig->id;
-                const float strength = bone_fix_play(*rig, *bf, open).strength;
-                action_item(*rig, name, name, strength > 0.0f ? percent(strength) : "", strength > 0.0f ? COL_FIX_TEXT : dim);
-                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-                  std::string bones;
-                  for (const uint64_t id : bf->follows) {
-                    if (const Bone *b = bone_find(*rig, id)) {
-                      bones += (bones.empty() ? "" : " and ") + b->name;
-                    }
-                  }
-                  ImGui::SetTooltip("Follows %s along its line (%s now)", bones.c_str(), percent(strength).c_str());
-                }
-              });
-    }
-    if (owner && !single) {
-      ImGui::Separator();
-      ImGui::TextDisabled("Select one bone for its actions.");
-    }
-    else if (!owner) {
-      ImGui::Separator();
-      ImGui::TextDisabled("Select a bone layer, or a layer in one,\nto add and edit its actions.");
+      for (const ActionMenuRow &row : rows) {
+        if (row.tab != tab) {
+          continue;
+        }
+        if (block && !row.picked) {
+          block_end();
+        }
+        if (row.rig != last_rig) {
+          last_rig = row.rig;
+          last_group = &none;
+          if (!row.rig_heading.empty()) {
+            ImGui::SeparatorText(row.rig_heading.c_str());
+          }
+        }
+        if (row.picked && !block) {
+          dl->ChannelsSplit(2);
+          dl->ChannelsSetCurrent(1);
+          block = true;
+          block_top = ImGui::GetCursorScreenPos().y - style.ItemSpacing.y * 0.5f;
+        }
+        if (row.group != *last_group) {
+          last_group = &row.group;
+          if (!row.group.empty()) {
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            const Icon icon = row.group_kind == 2 ? Icon::Knob : row.group_kind == 3 ? Icon::Chain : Icon::Bone;
+            icon_draw(dl, icon, ImVec2(p.x + h * 0.5f, p.y + h * 0.5f), h * 0.36f, false);
+            ImGui::SetCursorScreenPos(ImVec2(p.x + h * 1.2f, p.y));
+            ImGui::PushStyleColor(ImGuiCol_Text, row.picked ? COL_RECORD : ImGui::GetColorU32(ImGuiCol_TextDisabled));
+            ImGui::TextUnformatted(row.group.c_str());
+            ImGui::PopStyleColor();
+          }
+        }
+        if (!row.group.empty()) {
+          ImGui::Indent(h);
+        }
+        if (row.add && tab == 0) {
+          if (ImGui::Selectable("+ New action##new_action_row")) {
+            want_new = true;
+          }
+          if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::SetTooltip("New action for \"%s\"", owner ? owner->name.c_str() : "");
+          }
+        }
+        else if (row.add) {
+          if (ImGui::Selectable("+ New bone action##new_bone_action_row")) {
+            operator_call(C, "anim.action_new", {{"name", row.group}, {"action_bone", "1"}, {"layer", std::to_string(row.rig)}});
+          }
+          if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::SetTooltip("An action named after the bone: key the bone turning, and what it should move. Then "
+                              "turning the bone anywhere else plays the action that far (Moho's smart bones). A "
+                              "second one covers turning the other way");
+          }
+        }
+        else {
+          action_item(row);
+        }
+        if (!row.group.empty()) {
+          ImGui::Unindent(h);
+        }
+      }
+      if (block) {
+        block_end();
+      }
+    };
+
+    /* The two tabs, as icons with how many each holds. */
+    if (ImGui::BeginTabBar("##action_tabs")) {
+      for (int tab = 0; tab < 2; tab++) {
+        const std::string label = "      " + std::to_string(count[tab]) + (tab == 0 ? "###actions" : "###bone_actions");
+        const bool shown = ImGui::BeginTabItem(label.c_str(), nullptr, force_tab == tab ? ImGuiTabItemFlags_SetSelected : 0);
+        const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+        icon_draw(dl, tab == 0 ? Icon::Actions : Icon::Bone,
+                  ImVec2(a.x + style.FramePadding.x + h * 0.55f, (a.y + b.y) * 0.5f), h * 0.42f, false);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+          ImGui::SetTooltip(tab == 0 ? "Actions" : "Bone actions: action bone actions and fixes");
+        }
+        if (shown) {
+          g_action_tab = tab;
+          tab_rows(tab);
+          ImGui::EndTabItem();
+        }
+      }
+      ImGui::EndTabBar();
     }
     /* After drawing the list, which the deletion changes. */
     if (!doomed.empty()) {
@@ -528,8 +836,7 @@ static void action_menu(Context &C, float width)
     return;
   }
   ImGui::SameLine(0, 2.0f);
-  static char new_name[64] = "Action";
-  if (ImGui::Button("+##new_action", ImVec2(plus_w, 0))) {
+  if (ImGui::Button("+##new_action", ImVec2(plus_w, 0)) || want_new) {
     std::snprintf(new_name, sizeof(new_name), "%s", "Action");
     ImGui::OpenPopup("##new_action_popup");
   }

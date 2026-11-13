@@ -488,6 +488,27 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   m.def("timeline_row_chain", [](int row) { return timeline_row_chain_at(current_context(), row); });
   m.def("timeline_clear_question", []() { return timeline_clear_question(*current_context().document); });
   m.def("timeline_paste_question", []() { return timeline_paste_question(*current_context().document); });
+  m.def("action_menu_rows", [](const std::string &filter) {
+    static const char *const arrows[] = {"RIGHT", "LEFT", "UP", "DOWN"};
+    py::list out;
+    for (const ActionMenuRow &r : action_menu_rows(*current_context().document, filter)) {
+      py::dict d;
+      d["tab"] = r.tab;
+      d["rig"] = r.rig;
+      d["rig_heading"] = r.rig_heading;
+      d["group"] = r.group;
+      d["group_kind"] = r.group_kind;
+      d["name"] = r.name;
+      d["add"] = r.add;
+      d["picked"] = r.picked;
+      d["arrow"] = r.arrow >= 0 && r.arrow < 4 ? py::object(py::str(arrows[r.arrow])) : py::object(py::none());
+      d["full_turn"] = r.full_turn;
+      d["strength"] = r.strength >= 0.0f ? py::object(py::float_(r.strength)) : py::object(py::none());
+      out.append(d);
+    }
+    return out;
+  }, py::arg("filter") = "");
+  m.def("action_menu_tab", []() { return action_menu_tab_opening(*current_context().document); });
   m.def("timeline_double_click_keys", [](bool double_click, bool alt) { return timeline_double_click_keys(double_click, alt); });
   /* An Alt click (Shift Alt with shift=True) on `frame` of row `row` of timeline_rows(True). */
   m.def("timeline_row_alt_click", [](int row, int frame, bool shift) {
