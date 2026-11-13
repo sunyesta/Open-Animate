@@ -80,6 +80,8 @@ PENDING = [
     ('src/data/bones.cc', 'if (f.head == head && f.footprint == footprint && f.region == c.shape_region) {',
      'if (false && f.head == head && f.footprint == footprint && f.region == c.shape_region) {',
      'A shape fit is worked out once a frame, not for every layer shown', 'tests/test_sweep_fuzz_guards.py'),
+    ('src/anim/shape_limit.cc', 'const float2 at = {pose->knob.tx, pose->knob.ty};', 'const float2 at = pose->head;',
+     "A controller's Whole Drawing footprint is measured about its knob", 'tests/test_sweep_fuzz_guards.py'),
 ]
 
 def build(root):

@@ -2,7 +2,8 @@
 smoothing's strength grew past what the solve could hold, 1e17, and wrote NaN into them); a look target's Depth, never
 keyed, changed on a posed frame, the eyes measured from where they rested; a controller's look target moved by the Bone
 panel's fields, the knob's actions played again; a Whole Drawing fit that can't fit worked out once a frame, not once
-for every layer shown. Each section failed on the build before.
+for every layer shown; a controller's knob fitted Whole Drawing measured about the knob. Each section failed on the
+build before.
 
 Run with:  OpenAnimate --background --python tests/test_sweep_fuzz_guards.py
 """
@@ -184,5 +185,34 @@ for lay in L.all():
 fits = wm.deform_counts()["shape_fits"]
 print("shape fits", fits)
 assert fits <= 8, ("each layer shown worked the eyes' fits out again", fits)
+
+# --- A 2 Axis Controller's knob fitted Whole Drawing inside its Eye Shape: what it carries is measured about the knob,
+# not the box's head (the knob's own way from the head was in it, holding the knob back by as much: the frame swung
+# between two places and showed whichever the frame before left it on)
+rig, pupil = knob_rig()
+ops.layer.new()
+disc = L.active
+assert ops.layer.move_to_group(group=str(rig.id)) == {'FINISHED'}
+disc = next(x for x in L.all() if x.id == disc.id)
+disc.add_curve([(0.02 * math.cos(math.pi * k / 8), 0.02 * math.sin(math.pi * k / 8)) for k in range(16)], closed=True,
+               fill=True)
+L.active = disc
+assert ops.layer.parent_bone_set(bone="eye") == {'FINISHED'}
+L.active = rig
+rig.bone_constraint_set("eye", 0, fit="WHOLE")
+D().frame_current = 10
+rig.bone_set("look", position=(5.0, 0.0))
+D().frame_current = 11
+knob = lambda: tuple(next(b for b in rig.bones if b["name"] == "eye")["knob_head"])
+seen = []
+for before in (0, 9, 11, 30, 0):
+    D().frame_current = before
+    D().frame_current = 10
+    seen.append(knob())
+spread = max(math.dist(seen[0], k) for k in seen)
+assert spread < 1e-4, ("frame 10's knob hung on the frame shown before it", seen)
+# Inside by what it carries, the disc and the pupil's line its actions stretch out to 0.05: short of 0.196, unheld.
+assert 0.14 < seen[0][0] < 0.16 and abs(seen[0][1]) < 1e-4, ("looking far aside, the knob stops what it carries inside",
+                                                              seen[0])
 
 print("test_sweep_fuzz_guards: all passed")

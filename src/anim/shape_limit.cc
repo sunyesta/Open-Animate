@@ -128,6 +128,10 @@ void shape_limits_update(Document &doc)
         if (!pose) {
           continue;
         }
+        /* About the place the fit tests: a 2 Axis Controller's knob, which carries the drawings, not its box's head
+         * (the knob's own way from the head was in the footprint, holding it back by as much: the frame swung between
+         * two places and showed whichever the frame before left it on). The head for any other bone. */
+        const float2 at = {pose->knob.tx, pose->knob.ty};
         std::vector<float2> carried;
         OANIM_PROFILE("shape_limit_footprint");
         for (const Layer *l : document_layers_flat(doc)) {
@@ -144,7 +148,7 @@ void shape_limits_update(Document &doc)
               continue;
             }
             for (const float2 p : points) {
-              carried.push_back(lt.apply(p) - pose->head);
+              carried.push_back(lt.apply(p) - at);
             }
           }
         }
