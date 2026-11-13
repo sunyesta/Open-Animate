@@ -13559,7 +13559,10 @@ static OpStatus bones_transform_exec(Context &C, char kind)
     else if (kind == 'S') {
       const int axis = std::clamp(op_arg_int(C, "axis", 0), 0, 2);
       const bool squash = op_arg_bool(C, "squash") && !setup;
-      armature_scale_selected(*armature, start, op_arg_float(C, "scale", 1.0f), setup, axis, squash);
+      /* Held to its option's range: by ten thousand each drawing's deform work took seconds, by INT_MAX it never
+       * ended. */
+      armature_scale_selected(*armature, start, std::clamp(op_arg_float(C, "scale", 1.0f), -1e3f, 1e3f), setup, axis,
+                              squash);
       C.undo_name = setup ? "Resize Bones" : squash ? "Squash & Stretch" : "Scale Bones";
     }
     else if (kind == 'C') {
@@ -14330,7 +14333,7 @@ static void transform_operators_register()
   add("armature.resize", "Scale Bones",
       "Scale the selected bones by scale= (as S does; axis=1 or 2 along the bones' X or Y, squash=1 squash and "
       "stretch); only_bones= as Move Bones",
-      {panel_float("scale", "Scale", "How much bigger", "1", -1e4f, 1e4f, 0.01f), only_bones_option(),
+      {panel_float("scale", "Scale", "How much bigger", "1", -1e3f, 1e3f, 0.01f), only_bones_option(),
        without_children_option(), keep_bones},
       bones_poll,
       [](Context &C) { return bones_transform_exec(C, 'S'); });

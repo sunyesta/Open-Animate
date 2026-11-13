@@ -107,8 +107,9 @@ float op_arg_float(const Context &C, const std::string &name, float fallback)
   const std::string value = op_arg(C, name);
   char *end = nullptr;
   const float v = std::strtof(value.c_str(), &end);
-  /* "nan" and "inf" parse, but no setting means them: they'd spread through whatever they're mixed into. */
-  return (!value.empty() && end && *end == 0 && std::isfinite(v)) ? v : fallback;
+  /* "nan" and "inf" parse, but no setting means them: they'd spread through whatever they're mixed into. Nor one past
+   * ten million (a bone moved or scaled by 1e30 posed its drawings out of float's range, every point inf). */
+  return (!value.empty() && end && *end == 0 && std::isfinite(v) && std::abs(v) <= 1e7f) ? v : fallback;
 }
 
 /* oanim.ops.wm.open_mainfile(filepath="walk.oanim"), for the Info log. */

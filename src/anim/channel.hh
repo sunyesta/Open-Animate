@@ -260,6 +260,13 @@ template<typename T> struct Channel {
     bool known = false;
     bool operator==(const ActionSlope &) const { return true; }
   } action_slope;
+  /* An action bone action or fix plays into it now, moving it or holding it where its keys are (an action keys every
+   * bone, most held still): with Auto Keying off an edit to it lands only by the slope above. Never saved, never
+   * compared. */
+  struct ActionPlayed {
+    bool on = false;
+    bool operator==(const ActionPlayed &) const { return true; }
+  } action_played;
   /* A bone's position On Path (the Motion Path tool's: edited on its path while actions move it): from its first key
    * to its last on the mainline its keys hold where it is, the path as seen, and what the actions would add is left
    * out there, so its handles, control points and brushes shape the path itself. Before its first key and after its

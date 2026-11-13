@@ -34,6 +34,13 @@ const Layer *switch_child(const Layer &sw, float value)
       return &child;
     }
   }
+  /* A reference of a switch keeps its original's keys, naming the original's children: its own are references of
+   * them (it showed none). */
+  for (const Layer &child : sw.children) {
+    if (sw.is_reference() && child.reference_source == id) {
+      return &child;
+    }
+  }
   return nullptr;
 }
 
@@ -800,7 +807,13 @@ static void resolve(Document &doc, std::vector<Layer> &layers, int frame, bool o
     /* Linked by name: the group's keys are the lead's, and hold entries. */
     SwitchLink *link = nullptr;
     const Layer *lead = layer.switch_link ? lead_of(doc, layer, &link) : nullptr;
-    const Layer &keyed = lead ? *lead : layer;
+    /* A reference of a switch with no picks of its own shows its original's (made with none, it showed no child). */
+    const Layer *original = !lead && layer.is_reference() && !layer.switch_keys.animated() &&
+                                    !switch_child(layer, layer.switch_value) ?
+                                layer_find(doc, layer.reference_source) :
+                                nullptr;
+    original = original && original->is_switch() ? original : nullptr;
+    const Layer &keyed = lead ? *lead : original ? *original : layer;
     float value;
     const Channel<float> &keys = keyed.switch_keys;
     if (frame > 0 && keys.animated() && !is_rig(keyed.switch_value) &&
@@ -824,7 +837,7 @@ static void resolve(Document &doc, std::vector<Layer> &layers, int frame, bool o
       /* A child that is gone shows the default, and the default gone shows none. */
       shown = switch_child(layer, value);
       if (!shown && value_id(value)) {
-        shown = switch_child(layer, switch_default(layer));
+        shown = switch_child(layer, switch_default(keyed));
       }
     }
     layer.switch_shown = shown ? shown->id : 0;

@@ -2955,9 +2955,20 @@ std::vector<float> slid_speeds(const std::vector<float> &s, int k0, float want, 
     return j <= 0 || j >= n || !(u[size_t(j - 1)] <= u[size_t(j)] && u[size_t(j)] <= u[size_t(j + 1)]);
   };
   if (turns(k0)) {
-    /* On an overshoot's turn or its way back: it alone, between the dots either side. */
-    const float a = u[size_t(k0 - 1)], b = u[size_t(k0 + 1)];
-    u[size_t(k0)] = std::clamp(want, std::min(a, b), std::max(a, b));
+    /* On an overshoot's way back: it alone, between the dots either side. On its turn (both of them on one side of it):
+     * that side is the only one it can't cross, so it stays where it is when slid there, or turns further out (held
+     * between them, it was pulled onto one). */
+    const float a = u[size_t(k0 - 1)], b = u[size_t(k0 + 1)], at = u[size_t(k0)];
+    float least = std::min(a, b), most = std::max(a, b);
+    if (at >= most) {
+      least = most;
+      most = 2.0f;
+    }
+    else if (at <= least) {
+      most = least;
+      least = -1.0f;
+    }
+    u[size_t(k0)] = std::clamp(want, least, most);
     return progress_speeds(u);
   }
   int lo = k0 - 1, hi = k0 + 1;

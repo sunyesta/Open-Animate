@@ -482,6 +482,12 @@ add_test(NAME controller_look_from
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_look_from.py)
 add_test(NAME drag_settles_actions
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_drag_settles_actions.py)
+add_test(NAME autokey_off_held
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_autokey_off_held.py)
+add_test(NAME sweep_key_guards
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sweep_key_guards.py)
+add_test(NAME sweep_path_guards
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sweep_path_guards.py)
 add_test(NAME controller_robust
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_robust.py)
 add_test(NAME motion_path_robust

@@ -1168,7 +1168,11 @@ void anim_operators_register()
                         layers_deselect_keys(layers);
                       }
                       else {
-                        layers_select_keys(layers, 0, 1 << 30, true);
+                        /* The keys the rows show: with Only Selected (not locked) an unpicked bone's are on no row, and
+                         * picked there they went with the next Delete. */
+                        KeyFilter filter;
+                        filter.picked_bones_only = C.document->timeline_only_selected && !C.document->timeline_lock;
+                        layers_select_keys(layers, 0, 1 << 30, true, filter);
                       }
                       return OpStatus::Finished;
                     });
@@ -1183,9 +1187,10 @@ void anim_operators_register()
                     "(dragging between two selected keys)",
                     OPTYPE_REGISTER | OPTYPE_UNDO, [](Context &C) {
                       const bool ripple = op_arg(C, "ripple", "0") == "1";
-                      const int frames = op_arg_bool(C, "slide") ?
-                                             keys_offset_clamp(timeline_layers(C), op_arg_int(C, "frames", 0), ripple) :
-                                             op_arg_int(C, "frames", 0);
+                      /* Past every frame there is, f + frames wraps round the int (INT_MAX moved keys left). */
+                      const int asked = std::clamp(op_arg_int(C, "frames", 0), -KEY_FRAME_LAST, KEY_FRAME_LAST);
+                      const int frames = op_arg_bool(C, "slide") ? keys_offset_clamp(timeline_layers(C), asked, ripple) :
+                                                                   asked;
                       if (frames == 0) {
                         return OpStatus::Cancelled;
                       }
@@ -1383,11 +1388,24 @@ void anim_operators_register()
                     OPTYPE_REGISTER | OPTYPE_UNDO, [](Context &C) {
                       const float factor = op_arg_float(C, "factor", 1.0f);
                       const int center = C.document->frame_current;
+                      /* By 1 nothing moves: no undo step, as Move Keys by 0 (Time Together's widening picked keys). */
+                      if (factor == 1.0f) {
+                        return OpStatus::Cancelled;
+                      }
                       animation_record(*C.document);
-                      keys_moved_report(keys_move_selected(
+                      const std::vector<Layer> was = C.document->layers;
+                      const int followed = keys_move_selected(
                           *C.document, timeline_layers(C),
-                          [&](int f) { return int(std::lround(float(center) + float(f - center) * factor)); },
-                          op_arg(C, "ripple", "0") == "1", op_arg(C, "together", "1") != "0"));
+                          [&](int f) {
+                            /* In double and held to twice the frames there are: a big factor wrapped round the int. */
+                            const double to = double(center) + double(f - center) * double(factor);
+                            return int(std::lround(std::clamp(to, -2.0 * KEY_FRAME_LAST, 2.0 * KEY_FRAME_LAST)));
+                          },
+                          op_arg(C, "ripple", "0") == "1", op_arg(C, "together", "1") != "0");
+                      if (C.document->layers == was) {
+                        return OpStatus::Cancelled;
+                      }
+                      keys_moved_report(followed);
                       animation_evaluate(*C.document, C.document->frame_current);
                       return OpStatus::Finished;
                     });

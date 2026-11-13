@@ -205,7 +205,7 @@ template<typename P, typename F> static void layers_for_each_channel_if(std::vec
 
 /* A channel with something an action bone action added to take off (or marked as played into). */
 static constexpr auto action_bones_added = [](const auto &ch) {
-  return ch.action_bone_live || ch.action_slope.known ||
+  return ch.action_bone_live || ch.action_played.on || ch.action_slope.known ||
          !(ch.from_action_bones == std::decay_t<decltype(ch.from_action_bones)>{});
 };
 
@@ -571,7 +571,8 @@ static bool record_with(Channel<T> &ch, const T &value, int frame, bool auto_key
   }
   /* Unkeyed, the edit goes into the setup, which the actions blend from: by as much more as keeps it where it was put
    * (none more where the actions take it whole). */
-  if (frame != 0 && !ch.animated() && ch.action_slope.known && ch.action_bone_live) {
+  /* Held still by one counts as much as moved: it blends from the setup either way. */
+  if (frame != 0 && !ch.animated() && ch.action_slope.known && ch.action_played.on) {
     const float keep = 1.0f + ch.action_slope.slope;
     if (keep > 0.05f && keep < 0.999f) {
       ch.from_action_bones += (value - ch.last) * (1.0f - 1.0f / keep);
@@ -611,6 +612,7 @@ template<typename T> static void evaluate(Channel<T> &ch, T &value, int frame)
   }
   ch.from_action_bones = T{};
   ch.action_bone_live = false;
+  ch.action_played = {};
   ch.action_slope = {};
   ch.last = value;
   ch.has_last = true;
@@ -1514,7 +1516,7 @@ void animation_record(Document &doc)
   if (doc.evaluated_frame != 0) {
     bool unknown = false;
     layers_for_each_channel_if(doc.layers, action_bones_added, [&](auto &ch, auto &value) {
-      unknown = unknown || (!ch.animated() && !ch.constant && ch.has_last && ch.action_bone_live &&
+      unknown = unknown || (!ch.animated() && !ch.constant && ch.has_last && ch.action_played.on &&
                             !ch.action_slope.known && !(value == ch.last));
     });
     if (unknown) {
@@ -1978,6 +1980,7 @@ bool animation_inputs_only(Document &doc)
     ch.last = T{};
     ch.has_last = false;
     ch.action_bone_live = false;
+    ch.action_played = {};
   };
   const auto one = [&](Layer &l) {
     for (const Bone &b : l.bones) {
@@ -2064,6 +2067,7 @@ void layer_strip_keys(Layer &layer, bool from_now, bool keep_actions)
     }
     ch.from_action_bones = T{};
     ch.action_bone_live = false;
+    ch.action_played = {};
     ch.last = value;
     ch.has_last = true;
   });
@@ -2088,6 +2092,7 @@ void animation_strip_action_bones(Document &doc)
     ch.last -= ch.from_action_bones;
     ch.from_action_bones = {};
     ch.action_bone_live = false;
+    ch.action_played = {};
     ch.action_slope = {};
   });
   doc.action_bones_applied = false;
@@ -3975,6 +3980,7 @@ void animation_refresh_action_bones(Document &doc)
     ch.last -= ch.from_action_bones;
     ch.from_action_bones = {};
     ch.action_bone_live = false;
+    ch.action_played = {};
     ch.action_slope = {};
   });
   doc.action_bones_applied = false;
@@ -4150,6 +4156,7 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
         value += delta;
         ch.last += delta;
         ch.from_action_bones += delta;
+        ch.action_played.on = true;
         /* Pink only where the action moves it somewhere: an action keys every bone, most held still. */
         ch.action_bone_live = ch.action_bone_live ||
                               std::any_of(it->second.begin(), it->second.end(), [&](const auto &k) {
@@ -4218,6 +4225,7 @@ static void apply_action_bone_actions_playing(Document &doc, int frame)
         ch.last += delta;
         ch.from_action_bones += delta;
         ch.action_bone_live = ch.action_bone_live || !(delta == setup - setup);
+        ch.action_played.on = true;
         doc.action_bones_applied = true;
       });
     };
@@ -6504,9 +6512,29 @@ static int keys_lift(const std::vector<Layer *> &layers, const std::function<int
   return lift;
 }
 
-int keys_duplicate_offset(const std::vector<Layer *> &layers, int offset)
+/* How far a move must go back for no selected key to land past the last frame there is (1048574, the playhead's
+ * last): the keys stop there together, as at frame 1. */
+static int keys_drop(const std::vector<Layer *> &layers, const std::function<int(int)> &to, bool setup)
 {
-  return offset + keys_lift(layers, [offset](int f) { return f + offset; }, true);
+  int drop = 0;
+  for (Layer *layer : layers) {
+    layer_for_each_channel<false>(*layer, [&](auto &ch, auto & /*value*/) {
+      for (const auto &k : ch.keys) {
+        if (k.selected && (setup || k.frame != 0)) {
+          drop = std::max(drop, to(k.frame) - KEY_FRAME_LAST);
+        }
+      }
+    });
+  }
+  return drop;
+}
+
+int keys_duplicate_offset(const std::vector<Layer *> &layers, int offset_asked)
+{
+  /* An offset past every frame there is would wrap round the int (INT_MAX put the copies on the left). */
+  const int offset = std::clamp(offset_asked, -KEY_FRAME_LAST, KEY_FRAME_LAST);
+  const int lifted = offset + keys_lift(layers, [offset](int f) { return f + offset; }, true);
+  return lifted - keys_drop(layers, [lifted](int f) { return f + lifted; }, true);
 }
 
 int keys_move_selected(Document &doc, const std::vector<Layer *> &layers_picked, const std::function<int(int)> &to_asked,
@@ -6514,7 +6542,13 @@ int keys_move_selected(Document &doc, const std::vector<Layer *> &layers_picked,
 {
   const std::vector<Layer *> layers = together_picks_widen(doc, layers_picked);
   const int lift = keys_lift(layers, to_asked, false);
-  const std::function<int(int)> to = lift == 0 ? to_asked : [&to_asked, lift](int f) { return to_asked(f) + lift; };
+  const std::function<int(int)> lifted = lift == 0 ? to_asked : [&to_asked, lift](int f) { return to_asked(f) + lift; };
+  const int drop = keys_drop(layers, lifted, false);
+  /* Spread past every frame there is (scaled by a million): they'd pile up on the ends, keys lost. */
+  if (drop > 0 && lift > 0) {
+    return 0;
+  }
+  const std::function<int(int)> to = drop == 0 ? lifted : [&lifted, drop](int f) { return lifted(f) - drop; };
   std::vector<Stretch> sts;
   std::vector<AnyChannel> linked;
   if (together && doc.time_together) {
@@ -7408,8 +7442,21 @@ int layers_paste_keys(const Document &doc, const std::vector<Layer *> &layers, i
     /* A point's, handle's or bone's keys hold the change from the setup pose, so on the setup frame
      * (where the change is nothing) a key pasted is a pose to take: its change goes into the value, as
      * a move there would (animation_record makes it the setup; Keep Poses keeps the other frames). */
+    /* A 2 Axis Controller's position holds the knob (in frames): on the setup frame, where controllers rest, it pastes
+     * nothing (taken as a pose there, its box jumped by the knob's frames). */
+    const auto controller_position = [&] {
+      const size_t open = ref.path.find("[\""), close = ref.path.find("\"]");
+      if (open == std::string::npos || close == std::string::npos || close < open + 2) {
+        return false;
+      }
+      const Bone *b = bone_find_by_name(*found, ref.path.substr(open + 2, close - open - 2));
+      return b && bone_is_controller(*b);
+    };
+    const bool knob = ref.path.rfind("bones[", 0) == 0 && ref.path.size() > 9 &&
+                      ref.path.compare(ref.path.size() - 9, 9, ".position") == 0 && controller_position();
     const bool change = ref.path.rfind("bones[", 0) == 0
-                            ? (ref.path.size() > 9 && ref.path.compare(ref.path.size() - 9, 9, ".position") == 0) ||
+                            ? (ref.path.size() > 9 && ref.path.compare(ref.path.size() - 9, 9, ".position") == 0 &&
+                               !knob) ||
                                   (ref.path.size() > 6 && ref.path.compare(ref.path.size() - 6, 6, ".angle") == 0)
                             : (ref.path.rfind("points[", 0) == 0 && ref.path.size() > 4 &&
                                ref.path.compare(ref.path.size() - 4, 4, ".pos") == 0) ||
@@ -7427,7 +7474,7 @@ int layers_paste_keys(const Document &doc, const std::vector<Layer *> &layers, i
     const auto put = [&](auto &channel, const auto &keys, auto *value) {
       for (const auto &key : keys) {
         const int at = key.frame + offset;
-        if (at < 0) {
+        if (at < 0 || (at == 0 && knob)) {
           continue;
         }
         if (at == 0 && change && owner && value) {
@@ -7444,6 +7491,11 @@ int layers_paste_keys(const Document &doc, const std::vector<Layer *> &layers, i
           }
           count++;
           continue;
+        }
+        /* Not keyed yet, its setup is keyed first, as keying it by hand does: a lone key holds on every frame,
+         * frame 0's setup pose too. */
+        if (!channel.animated() && at != 0 && value) {
+          channel.set_key(0, (channel.has_last ? channel.last : *value) - channel.from_action_bones);
         }
         auto &placed = channel.set_key(at, key.value);
         placed = key;

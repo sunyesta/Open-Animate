@@ -151,7 +151,11 @@ may name one), a new invariant, a harness pitfall below, a better brief. The ski
 
 ## Load
 
-Keep the machine's load moderate: about three heavy jobs at once (a build, a probe, a mutation lane each count). A
+Keep the machine's load moderate: about three heavy jobs at once (a build, a probe, a mutation lane each count), and
+count every app process a probe starts, not the probe: four probes each running three copies of the app (twelve, each
+bending drawings on all its threads) cut the power within half an hour. Brief each probe to run one app at a time, and
+run the area probes one or two at a time, the next started as one reports (SendMessage resumes a stopped one from its
+transcript). A
 sweep with five mutation lanes, four fix builds and probes running for hours ended with the computer switching off,
 and the power cut zeroed a source file a mutation check had open (the runner now syncs its backup first; after a
 crash, check every folder for files of zero bytes and broken .pdb/.obj files before building).
@@ -195,5 +199,9 @@ not a bug, check the times against the shutdown before shrinking.
 - **`mpath` changes the selection** to pick its targets: restore it after, or the next op's "changed" check blames the op.
 - **A name the operators refuse** (a fix renamed to a bone's turn action, "turn 2") can still come from an old file:
   test it by editing the saved file's JSON and reopening it.
+- **A promise a stretch can't keep.** "Every dot stays" can't hold for a key put where a Bounce touches its end key
+  mid-stretch (the dots after it go back along the curve to the same place: no key and stretch pair shows that without
+  control points) or Convert to Key behind such a bounce: what plays is Moho's (both halves the stretch's
+  interpolation). Report it as a design question, not a bug to fix.
 - **A rig loop** (a bone's IK target riding on the chain, a constraint fed by what it moves) can make a pose depend on
   history by design: report it as a question, don't fix it as a bug.

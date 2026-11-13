@@ -113,15 +113,15 @@ for far in ("2147483647", "1048575"):
 assert [k["frame"] for k in a.keyframes("position")] == frames
 assert ops.anim.motion_path_key_add(frame="200", layer=str(a.id)) == {'FINISHED'}, "past the scene's end is fine"
 
-# --- The timing graph's points and handles stay within reach ---------------------------------------------------------
+# --- The timing graph's points and handles stay within reach (numbers past ten million are refused as nan is) ---------------------------------------------------------
 a = scene()
 for f, (x, y) in ((10, (0.0, 0.0)), (30, (1.0, 0.5))):
     assert ops.anim.motion_path_move(frame=str(f), x=str(x), y=str(y), layer=str(a.id)) == {'FINISHED'}
 assert ops.anim.motion_path_slide(frame="20", x="0.3", y="0.15", layer=str(a.id)) == {'FINISHED'}
 pts = next(k for k in a.keyframes("position") if k["frame"] == 30)["timing"]
 mid = str(min(range(1, len(pts) - 1), key=lambda i: abs(pts[i][0] - 0.5)))
-for call in (lambda: ops.anim.timing_point_move(frame="20", index=mid, y="1e30", layer=str(a.id)),
-             lambda: ops.anim.timing_handle_move(frame="20", index=mid, side="IN", x="-0.05", y="3.4e38", free="1",
+for call in (lambda: ops.anim.timing_point_move(frame="20", index=mid, y="1e6", layer=str(a.id)),
+             lambda: ops.anim.timing_handle_move(frame="20", index=mid, side="IN", x="-0.05", y="9e6", free="1",
                                                  layer=str(a.id))):
     assert call() == {'FINISHED'}
     far = 0.0

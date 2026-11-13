@@ -34,7 +34,35 @@ CMAKE = (r"C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/Common7/
 EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
-PENDING = []
+PENDING = [
+    ('src/anim/animation.cc', 'if (frame != 0 && !ch.animated() && ch.action_slope.known && ch.action_played.on) {',
+     'if (frame != 0 && !ch.animated() && ch.action_slope.known && ch.action_bone_live) {',
+     'Auto Keying off: an edit to a value an action holds still lands where it was put', 'tests/test_autokey_off_held.py'),
+    ('src/ops/operator.cc', 'std::isfinite(v) && std::abs(v) <= 1e7f) ? v : fallback;', 'std::isfinite(v)) ? v : fallback;',
+     'Numbers past ten million are refused as nan is', 'tests/test_sweep_key_guards.py'),
+    ('src/editors/viewport.cc', 'std::clamp(op_arg_float(C, "scale", 1.0f), -1e3f, 1e3f)', 'op_arg_float(C, "scale", 1.0f)',
+     'Bones scale at most a thousand times', 'tests/test_sweep_key_guards.py'),
+    ('src/anim/animation.cc', 'if (at < 0 || (at == 0 && knob)) {', 'if (at < 0) {',
+     'A knob key pasted on frame 0 leaves its controller at rest', 'tests/test_sweep_key_guards.py'),
+    ('src/anim/animation.cc', 'if (!channel.animated() && at != 0 && value) {', 'if (false) {',
+     'Keys pasted onto an unkeyed channel key its setup first', 'tests/test_sweep_key_guards.py'),
+    ('src/ops/anim_ops.cc', 'filter.picked_bones_only = C.document->timeline_only_selected && !C.document->timeline_lock;', 'filter.picked_bones_only = false;',
+     'Select All with Only Selected picks only the keys the rows show', 'tests/test_sweep_key_guards.py'),
+    ('src/ops/anim_ops.cc', 'std::clamp(op_arg_int(C, "frames", 0), -KEY_FRAME_LAST, KEY_FRAME_LAST)', 'op_arg_int(C, "frames", 0)',
+     'Move Keys by INT_MAX does not wrap round', 'tests/test_sweep_key_guards.py'),
+    ('src/anim/animation.cc', 'const int drop = keys_drop(layers, lifted, false);', 'const int drop = 0;',
+     'Key moves stop at the last frame', 'tests/test_sweep_key_guards.py'),
+    ('src/anim/animation.cc', 'const int offset = std::clamp(offset_asked, -KEY_FRAME_LAST, KEY_FRAME_LAST);', 'const int offset = offset_asked;',
+     'Duplicate Keys by INT_MAX does not wrap round', 'tests/test_sweep_key_guards.py'),
+    ('src/ops/anim_ops.cc', 'if (factor == 1.0f) {', 'if (false) {',
+     'Scale Keys by 1 is CANCELLED with no undo step', 'tests/test_sweep_key_guards.py'),
+    ('src/ops/file_ops.cc', '    width = stem.size() - digits_at;', '    width = std::max<size_t>(width, stem.size() - digits_at);',
+     'Save Incremental keeps the digit count', 'tests/test_sweep_key_guards.py'),
+    ('src/anim/switch.cc', 'original = original && original->is_switch() ? original : nullptr;', 'original = nullptr;',
+     "A switch reference shows its original's picks", 'tests/test_sweep_key_guards.py'),
+    ('src/anim/motion_path.cc', '    if (at >= most) {\n      least = most;', '    if (false) {\n      least = most;',
+     "A dot slid to itself at an overshoot's turn stays", 'tests/test_sweep_path_guards.py'),
+]
 
 def build(root):
     return subprocess.run([CMAKE, "--build", "--preset", "release"], cwd=root, capture_output=True,

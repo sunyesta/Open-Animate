@@ -15,7 +15,8 @@ run tools/mutation_checks.py.
   `tests/` shows how to drive every operator from Python.
 - App: `<EXE>` (a frozen copy; another session rebuilds the real one). Run scripts headless:
   `<EXE> --background --python <script.py>`; it exits 1 if the script raises; a crash dies without a traceback (note
-  the exit code). Run several in parallel.
+  the exit code). Run ONE app process at a time: never several in parallel, never background fan-outs (four probes
+  running three each cut the computer's power twice).
 - File: `<FILE>` (a private copy). Never save over it: save copies only to `<OUT>`.
 - Harness: `<SKILL>/scripts/harness.py` (load, run, rebase, order_check, roundtrip, snap/diff/edits, summary) and
   `<SKILL>/scripts/fuzz.py`. Set `OA_SWEEP_FILE=<FILE>` and `OA_SWEEP_TMP=<OUT>`. Read the harness's notes: Python data

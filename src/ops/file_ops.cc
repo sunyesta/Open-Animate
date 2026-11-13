@@ -384,7 +384,8 @@ static std::string incremented_path(const std::string &path)
   size_t width = 3;
   if (digits_at < stem.size()) {
     number = std::atoll(stem.c_str() + digits_at);
-    width = std::max<size_t>(width, stem.size() - digits_at);
+    /* As many digits as it has (take_09 -> take_10, not take_010, which sorts before it); three for a first. */
+    width = stem.size() - digits_at;
     stem.resize(digits_at);
   }
   else {
