@@ -62,6 +62,13 @@ PENDING = [
      "A switch reference shows its original's picks", 'tests/test_sweep_key_guards.py'),
     ('src/anim/motion_path.cc', '    if (at >= most) {\n      least = most;', '    if (false) {\n      least = most;',
      "A dot slid to itself at an overshoot's turn stays", 'tests/test_sweep_path_guards.py'),
+    ('src/anim/motion_path.cc', '  const bool shaped = interp_timed_by_mode(b.interp);\n',
+     '  bool shaped = interp_timed_by_mode(b.interp);\n  if constexpr (std::is_same_v<T, float2>) {\n'
+     '    shaped = shaped && b.path_controls.empty();\n  }\n',
+     'A Bounce stretch through a control point is timed by its mode', 'tests/test_sweep_path_guards.py'),
+    ('src/anim/motion_path.cc', 'order_progress(u, k0, 0.02f / float(n), 0, -1, ch.keys[i - 1].interval);',
+     'order_progress(u, k0, 0.02f / float(n), 0, -1, 1);',
+     "Alt S keeps a step's frames together on 2s", 'tests/test_sweep_path_guards.py'),
 ]
 
 def build(root):

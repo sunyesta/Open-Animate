@@ -2681,11 +2681,9 @@ template<typename T> std::vector<float> stretch_speeds(const Channel<T> &ch, siz
 {
   const Key<T> &b = ch.keys[i];
   std::vector<float> s(size_t(n), 1.0f);
-  /* Timed by its mode alone (a controlled stretch is timed by how it moves). */
-  bool shaped = interp_timed_by_mode(b.interp);
-  if constexpr (std::is_same_v<T, float2>) {
-    shaped = shaped && b.path_controls.empty();
-  }
+  /* Timed by its mode alone, through control points too: they play its progress along their path by length
+   * (controls_evaluate). Measured by where its frames fall instead, a Bounce backing up along them read as going on. */
+  const bool shaped = interp_timed_by_mode(b.interp);
   if (b.interp == Interp::Custom && !b.timing.empty()) {
     /* Its curve at each frame (whatever length the stretch is now: the curve stretches with it). */
     s = timing_speeds(b.timing, n);
@@ -2887,21 +2885,25 @@ std::vector<float> progress_speeds(const std::vector<float> &u);
 
 /* Progress `u` (0 at the stretch's start to 1 at its key, a value a frame) put back in order around dot `k0`, which
  * stays: none passing another or the dots `lo` and `hi` that bound them (the keys, by default), each frame at least
- * `gap` on. */
-void order_progress(std::vector<float> &u, int k0, float gap, int lo = 0, int hi = -1)
+ * `gap` on. On 2s or 3s (`interval`) the frames of one step hold one pose: kept together, the gap only between steps
+ * (held apart, a spacing scaled by 1 moved a step's pose by the gap). */
+void order_progress(std::vector<float> &u, int k0, float gap, int lo = 0, int hi = -1, int interval = 1)
 {
   hi = hi < 0 ? int(u.size()) - 1 : hi;
+  const int last = int(u.size()) - 1;
+  /* The gap from frame k-1 to frame k. */
+  auto step = [&](int k) { return interval <= 1 || k % interval == 0 || k == last ? gap : 0.0f; };
   for (int k = k0 + 1; k < hi; k++) {
-    u[size_t(k)] = std::max(u[size_t(k)], u[size_t(k - 1)] + gap);
+    u[size_t(k)] = std::max(u[size_t(k)], u[size_t(k - 1)] + step(k));
   }
   for (int k = k0 - 1; k > lo; k--) {
-    u[size_t(k)] = std::min(u[size_t(k)], u[size_t(k + 1)] - gap);
+    u[size_t(k)] = std::min(u[size_t(k)], u[size_t(k + 1)] - step(k + 1));
   }
   for (int k = hi - 1; k > k0; k--) {
-    u[size_t(k)] = std::min(u[size_t(k)], u[size_t(k + 1)] - gap);
+    u[size_t(k)] = std::min(u[size_t(k)], u[size_t(k + 1)] - step(k + 1));
   }
   for (int k = lo + 1; k < k0; k++) {
-    u[size_t(k)] = std::max(u[size_t(k)], u[size_t(k - 1)] + gap);
+    u[size_t(k)] = std::max(u[size_t(k)], u[size_t(k - 1)] + step(k));
   }
 }
 
@@ -3033,7 +3035,7 @@ template<typename T> int scale_stretches(Channel<T> &ch, int pivot, float factor
       u[size_t(k)] = at + (u[size_t(k)] - at) * (1.0f + (factor - 1.0f) * w);
     }
     if (ordered) {
-      order_progress(u, k0, 0.02f / float(n));
+      order_progress(u, k0, 0.02f / float(n), 0, -1, ch.keys[i - 1].interval);
     }
     key_speeds_set(ch.keys, i, progress_speeds(u));
     changed++;

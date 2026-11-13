@@ -1,6 +1,7 @@
 """Motion path guards from a bug sweep: a dot slid to where it already is changes nothing, also where an overshoot turns
 (an Elastic stretch's swing past its key: held between its two neighbours, both on one side of it, it was pulled onto
-one, 0.25 off) and slid again and again on a Custom stretch that turns. Each section failed on the build before.
+one, 0.25 off) and slid again and again on a Custom stretch that turns; a Bounce stretch through a control point and a
+stepped Smooth one (2s, 3s) left as they are by edits asking no change. Each section failed on the build before.
 
 Run with:  OpenAnimate --background --python tests/test_sweep_path_guards.py
 """
@@ -98,5 +99,40 @@ for n in range(20):
 now = {g: loc(lay, g) for g in base}
 worst, at = max((math.dist(base[g], now[g]), g) for g in base)
 assert worst < 1e-3, ("Custom: twenty slides to where they are drifted a dot", at, worst)
+
+# --- A Bounce stretch shaped by a control point, its spacing scaled by 1 (Alt S) and a dot slid to itself: nothing moves
+# (read by where its frames fall along the control line, its bounce backing up was taken for going on)
+for how in ("scale", "slide"):
+    start()
+    lay = path_layer(KEYS, "BOUNCE")
+    D().frame_current = 15
+    assert ops.anim.motion_path_control_add(frame="25", layer=str(lay.id)) == {'FINISHED'}
+    assert ops.anim.motion_path_control_move(frame="32", index="0", x="1.6", y="0.8", layer=str(lay.id)) == {'FINISHED'}
+    lay = reopen(lay.id)
+    before = {f: loc(lay, f) for f in range(20, 33)}
+    if how == "scale":
+        assert ops.anim.motion_path_scale_spacing(frame="25", factor="1", layer=str(lay.id)) == {'FINISHED'}
+    else:
+        x, y = before[23]
+        assert ops.anim.motion_path_slide(frame="23", x=repr(x), y=repr(y), layer=str(lay.id)) == {'FINISHED'}
+    after = {f: loc(lay, f) for f in before}
+    worst, at = max((math.dist(before[f], after[f]), f) for f in before)
+    assert worst < 1e-3, ("Bounce through a control point: an edit asking no change moved a dot", how, at, worst)
+
+# --- A Smooth stretch on 2s and on 3s, its spacing scaled by 1: a step's frames stay together, so its pose stays
+for interval in (2, 3):
+    start()
+    keys = dict(KEYS)
+    keys[40] = (2.5, 0.3)
+    lay = path_layer(keys, "SMOOTH")
+    for f in keys:
+        lay.keyframe_set("position", f, interval=interval)
+    lay = reopen(lay.id)
+    before = {f: loc(lay, f) for f in range(20, 33)}
+    length = sum(math.dist(before[f], before[f + 1]) for f in range(20, 32))
+    assert ops.anim.motion_path_scale_spacing(frame="23", factor="1", layer=str(lay.id)) == {'FINISHED'}
+    after = {f: loc(lay, f) for f in before}
+    worst, at = max((math.dist(before[f], after[f]), f) for f in before)
+    assert worst < 4e-4 * length, ("Alt S by 1 on a stepped stretch moved a dot", interval, at, worst / length)
 
 print("test_sweep_path_guards: all passed")
