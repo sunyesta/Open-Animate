@@ -69,6 +69,17 @@ PENDING = [
     ('src/anim/motion_path.cc', 'order_progress(u, k0, 0.02f / float(n), 0, -1, ch.keys[i - 1].interval);',
      'order_progress(u, k0, 0.02f / float(n), 0, -1, 1);',
      "Alt S keeps a step's frames together on 2s", 'tests/test_sweep_path_guards.py'),
+    ('src/anim/sculpt.cc', 'std::min(std::pow(double(lump) / (2.0 * double(PI) * step), 6.0), 1e12);',
+     'std::pow(double(lump) / (2.0 * double(PI) * step), 6.0);',
+     'Surface Smooth over a tiny segment keeps its points numbers', 'tests/test_sweep_fuzz_guards.py'),
+    ('src/data/bones.cc', 'poses[ti].setup_head,\n                                                        setup_value(t->depth_keys, t->depth, setup_frame));',
+     'poses[ti].setup_head,\n                                                        t->depth);',
+     "Look At's rest takes an unkeyed Depth from before the edit", 'tests/test_sweep_fuzz_guards.py'),
+    ('src/anim/animation.cc', '                mix_bone(*t);', '                (void)mix_bone;',
+     "A knob's look target moved by the panel plays its actions again", 'tests/test_sweep_fuzz_guards.py'),
+    ('src/data/bones.cc', 'if (f.head == head && f.footprint == footprint && f.region == c.shape_region) {',
+     'if (false && f.head == head && f.footprint == footprint && f.region == c.shape_region) {',
+     'A shape fit is worked out once a frame, not for every layer shown', 'tests/test_sweep_fuzz_guards.py'),
 ]
 
 def build(root):

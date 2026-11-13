@@ -810,9 +810,13 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     d["side_tests"] = c.side_tests;
     d["builds"] = c.builds;
     d["builds_shared"] = c.builds_shared;
+    d["shape_fits"] = bone_shape_fits_count();
     return d;
   });
-  m.def("deform_counts_clear", []() { vector_deform_counts_clear(); });
+  m.def("deform_counts_clear", []() {
+    vector_deform_counts_clear();
+    bone_shape_fits_count_clear();
+  });
   m.def("motion_path_places", []() {
     const MotionPathPlaces c = motion_path_places();
     py::dict d;

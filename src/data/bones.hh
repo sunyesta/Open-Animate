@@ -100,6 +100,10 @@ const BonePose *bone_pose_find(const std::vector<BonePose> &poses, uint64_t id);
 /* Limit to Shape: where a head (bone layer space) is kept, inside the constraint's shape as last worked
  * out (anim/shape_limit.hh); `head` itself when it fits or there is no shape. */
 float2 bone_shape_limit(const BoneConstraint &c, float2 head);
+/* How many times a Look At's or Limit to Shape's fit was worked out (not taken from the ones kept), since the last
+ * clear: oanim.wm.deform_counts()["shape_fits"]. */
+long long bone_shape_fits_count();
+void bone_shape_fits_count_clear();
 /* Affect Transform: a bone just moved (its position differs from what its keys give) past its Limit to
  * Shape edge is put back where the limit holds it, on a posed frame, before the move is recorded. */
 void bone_shape_limit_affect(const Layer &armature, Bone &bone);

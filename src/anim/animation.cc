@@ -2101,8 +2101,8 @@ void animation_strip_action_bones(Document &doc)
 static uint64_t g_frame_changes = 0;
 
 /* What action bone actions are worked out from, as one number: the frame, the timeline being edited, each layer as it
- * is
- * (its revision: an edit the app can't follow touches every layer), and the action bones' angles. */
+ * is (its revision: an edit the app can't follow touches every layer), the action bones' angles and what moves the
+ * controllers' knobs. */
 static uint64_t action_bone_inputs(const Document &doc)
 {
   uint64_t h = 0xcbf29ce484222325ull;
@@ -2123,10 +2123,25 @@ static uint64_t action_bone_inputs(const Document &doc)
             mix(uint64_t(std::bit_cast<uint32_t>(b->turn)));
           }
         }
+        const auto mix_bone = [&](const Bone &b) {
+          for (const float v : {b.position.x, b.position.y, b.angle, b.scale.x, b.scale.y, b.depth}) {
+            mix(uint64_t(std::bit_cast<uint32_t>(v)));
+          }
+        };
         for (const Bone &b : layer.bones) {
           if (bone_is_controller(b)) {
             mix(uint64_t(std::bit_cast<uint32_t>(b.position.x)));
             mix(uint64_t(std::bit_cast<uint32_t>(b.position.y)));
+            /* What moves its knob: its constraints' targets and the bones they hang from (a look target moved by
+             * the Bone panel's fields moves the knob as surely as a knob dragged). */
+            for (const BoneConstraint &c : b.constraints) {
+              int guard = 0;
+              for (const Bone *t = c.target ? bone_find(layer, c.target) : nullptr; t && guard++ < 64;
+                   t = t->parent ? bone_find(layer, t->parent) : nullptr)
+              {
+                mix_bone(*t);
+              }
+            }
           }
         }
       }

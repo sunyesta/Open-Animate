@@ -237,6 +237,18 @@ float2 bone_look_gaze(float face, float2 eye, float2 target, float target_depth)
   return {std::atan2(d.x, z), std::atan2(d.y, std::sqrt(d.x * d.x + z * z))};
 }
 
+static std::atomic<long long> g_shape_fits{0};
+
+long long bone_shape_fits_count()
+{
+  return g_shape_fits;
+}
+
+void bone_shape_fits_count_clear()
+{
+  g_shape_fits = 0;
+}
+
 float2 bone_shape_limit(const BoneConstraint &c, float2 head)
 {
   if (c.shape_region.size() < 3) {
@@ -263,7 +275,32 @@ float2 bone_shape_limit(const BoneConstraint &c, float2 head)
       }
     }
   }
-  const float2 held = shape_fit_head(c.shape_region, footprint, head);
+  /* One frame poses the rig many times over (each layer it bends asks), with the same shape, footprint and head
+   * each time: the fit, up to fifty passes over every footprint point against every edge, done once. Kept by
+   * exact inputs, so what it gives is what working it out gives. (A pupil too big for its eye took the slow way
+   * every time: seconds a frame.) */
+  struct Fit {
+    std::vector<float2> region, footprint;
+    float2 head, held;
+  };
+  thread_local std::vector<Fit> fits;
+  float2 held;
+  bool found = false;
+  for (const Fit &f : fits) {
+    if (f.head == head && f.footprint == footprint && f.region == c.shape_region) {
+      held = f.held;
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    g_shape_fits.fetch_add(1, std::memory_order_relaxed);
+    held = shape_fit_head(c.shape_region, footprint, head);
+    if (fits.size() >= 8) {
+      fits.erase(fits.begin());
+    }
+    fits.push_back({c.shape_region, footprint, head, held});
+  }
   if (soft <= 0.0f) {
     return held;
   }
@@ -570,7 +607,7 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
                   const float face = look_face;
                   const float2 gaze = bone_look_gaze(face, look_from, poses[ti].head, t->depth);
                   const float2 rest_gaze = bone_look_gaze(0.0f, parent_setup.apply(setup_position), poses[ti].setup_head,
-                                                          value_at(t->depth_keys, t->depth, 0));
+                                                          setup_value(t->depth_keys, t->depth, setup_frame));
                   const float half_turn = 1.5707964f;
                   const float2 look = gaze - rest_gaze;
                   const float2 turn = {std::clamp(look.x, -half_turn, half_turn), std::clamp(look.y, -half_turn, half_turn)};
@@ -601,7 +638,7 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
                 const float2 keyed = parent_pose.apply_vector(position - bone.setup_position);
                 const float2 gaze = bone_look_gaze(face, look_from, poses[ti].head, t->depth);
                 const float2 rest_gaze = bone_look_gaze(0.0f, parent_setup.apply(bone.setup_position), poses[ti].setup_head,
-                                                        value_at(t->depth_keys, t->depth, 0));
+                                                        setup_value(t->depth_keys, t->depth, setup_frame));
                 const float half_turn = 1.5707964f;
                 const float2 look = gaze - rest_gaze;
                 const float2 turn = {std::clamp(look.x, -half_turn, half_turn), std::clamp(look.y, -half_turn, half_turn)};

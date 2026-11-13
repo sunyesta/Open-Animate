@@ -488,6 +488,8 @@ add_test(NAME sweep_key_guards
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sweep_key_guards.py)
 add_test(NAME sweep_path_guards
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sweep_path_guards.py)
+add_test(NAME sweep_fuzz_guards
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sweep_fuzz_guards.py)
 add_test(NAME controller_robust
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_robust.py)
 add_test(NAME motion_path_robust

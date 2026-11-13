@@ -252,7 +252,9 @@ static void smooth_span(const SculptStroke::Curve &c, int first, int last, bool 
     ys.push_back(q.y);
   }
   /* The cutoff: the smoother halves a wiggle whose wavelength is 2 pi lambda^(1/6) samples. */
-  const double lambda = std::pow(double(lump) / (2.0 * double(PI) * step), 6.0);
+  /* At most a trillion: a span far shorter than the lump (two points nearly on top of each other) is smoothed to its
+   * limit long before, and past it the solve runs out of digits (1e17 gave NaN points). */
+  const double lambda = std::min(std::pow(double(lump) / (2.0 * double(PI) * step), 6.0), 1e12);
   if (loop) {
     /* Round a loop: smoothed with copies of itself either side (far enough that its open ends don't reach), then
      * the middle round taken. */
