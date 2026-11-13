@@ -519,10 +519,12 @@ static void action_menu(Context &C, float width)
   const float plus_w = owner ? ImGui::GetFrameHeight() : 0.0f;
   /* Drawn as a combo, its list a popup that always opens above it (ImGui's combo picks above or below by the room). */
   bool open = false;
+  float button_w = 0.0f;
   {
     const ImGuiStyle &style = ImGui::GetStyle();
     const float frame_h = ImGui::GetFrameHeight();
     const ImVec2 a = ImGui::GetCursorScreenPos(), b = a + ImVec2(width - plus_w - (owner ? 2.0f : 0.0f), frame_h);
+    button_w = b.x - a.x;
     const bool pressed = ImGui::InvisibleButton("##action", b - a);
     const bool hovered = ImGui::IsItemHovered();
     if (pressed && !ImGui::IsPopupOpen("##action_list")) {
@@ -579,6 +581,7 @@ static void action_menu(Context &C, float width)
     static std::string filter;
     const ImGuiStyle &style = ImGui::GetStyle();
     const float h = ImGui::GetTextLineHeight();
+    /* Where rows draw: the popup's, then the scrolling list's. */
     ImDrawList *dl = ImGui::GetWindowDrawList();
     const bool appearing = ImGui::IsWindowAppearing();
     int force_tab = -1;
@@ -752,7 +755,14 @@ static void action_menu(Context &C, float width)
         }
         if (shown) {
           g_action_tab = tab;
+          /* The list is always the same size: seven rows, scrolling past them, blank below fewer. */
+          const float list_w = std::max(button_w - style.WindowPadding.x * 2.0f, ImGui::GetFontSize() * 13.0f);
+          ImGui::BeginChild("##action_rows", ImVec2(list_w, ImGui::GetTextLineHeightWithSpacing() * 7.0f));
+          ImDrawList *const popup_dl = dl;
+          dl = ImGui::GetWindowDrawList();
           tab_rows(tab);
+          dl = popup_dl;
+          ImGui::EndChild();
           ImGui::EndTabItem();
         }
       }
