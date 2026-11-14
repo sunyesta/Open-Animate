@@ -104,6 +104,21 @@ PENDING = [
      "A controller side refuses a bone's own action", 'tests/test_controller_link_open.py'),
     ('src/io/oanim_file.cc', '  controller_links_undo(doc);', '  (void)doc;',
      "An old file's linked controller sides open as ordinary actions keying the bone's turn", 'tests/test_controller_link_open.py'),
+    ('src/ops/motion_path_ops.cc', '  if (C.document->path_show_all || all.size() < 2 || !motion_path_active(C, all, active)) {',
+     '  if (true || C.document->path_show_all || all.size() < 2 || !motion_path_active(C, all, active)) {',
+     "Show All Paths off: only the active path is drawn and edited", 'tests/test_motion_path_one.py'),
+    ('src/ops/motion_path_ops.cc', '      wm->path_active_set = false;',
+     '      (void)wm;',
+     "A path chosen is let go once another bone is made active, so making the first active again shows its tip", 'tests/test_motion_path_one.py'),
+    ('src/ops/motion_path_ops.cc', '    if (find(tip) || find(head)) {',
+     '    if (false) {',
+     "With none chosen the active bone\'s tip is shown", 'tests/test_motion_path_one.py'),
+    ('src/ops/motion_path_ops.cc', '    return !t.same(a) && !t.same(owner) && !(origin && t.drawing && t.layer == a.layer);',
+     '    return false && !t.same(a) && !t.same(owner) && !(origin && t.drawing && t.layer == a.layer);',
+     "The timing chart shows only the path shown\'s timing", 'tests/test_motion_path_one.py'),
+    ('src/ops/motion_path_ops.cc', '  return t.bone ? (find(position) || find(!position)) : find(false);',
+     '  return t.bone ? (find(false) || find(true)) : find(false);',
+     "A bone\'s Transform row shows its head\'s path", 'tests/test_motion_path_one.py'),
 ]
 
 def build(root):

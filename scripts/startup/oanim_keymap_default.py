@@ -215,6 +215,9 @@ KEYMAP = (
     ("Motion Path", "anim.motion_path_handles_reset", "DEL", {}),
     ("Motion Path", "anim.motion_path_keys_delete", "X", {}),
     ("Motion Path", "anim.motion_path_keys_delete", "DEL", {}),
+    # One path shown at a time: [ and ] step through the others traced (with one, the switch layers' [ ]).
+    ("Motion Path", "anim.motion_path_active_previous", "LEFT_BRACKET", {}),
+    ("Motion Path", "anim.motion_path_active_next", "RIGHT_BRACKET", {}),
     ("Draw", "draw.width_adjust", "F", {}),
     ("Draw", "draw.opacity_adjust", "F", {"shift": True}),
     ("Draw", "draw.presets_popup", "SPACE", {"shift": True}),

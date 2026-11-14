@@ -155,6 +155,8 @@ target_compile_definitions(OpenAnimate PRIVATE
 
 if(MSVC)
   target_compile_options(OpenAnimate PRIVATE /W4 /utf-8 /permissive-)
+  # The Python module's bindings outgrow an object file's usual count of sections.
+  set_source_files_properties(src/python/py_runtime.cc PROPERTIES COMPILE_OPTIONS /bigobj)
 endif()
 
 # A windowed app (no console window when opened from a shortcut) that still uses main().
@@ -626,6 +628,8 @@ add_test(NAME motion_path_kept
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_kept.py)
 add_test(NAME motion_path_from_keys
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_from_keys.py)
+add_test(NAME motion_path_one
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_one.py)
 add_test(NAME motion_path_fix_line
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_fix_line.py)
 add_test(NAME motion_path_edit_fast

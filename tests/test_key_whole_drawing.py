@@ -13,6 +13,7 @@ import shutil
 import tempfile
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 ops = oanim.ops
 layers = oanim.data.layers
@@ -220,6 +221,7 @@ try:
     path = os.path.join(folder, "whole.oanim")
     assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
     assert ops.wm.open_mainfile(filepath=path) == {'FINISHED'}
+    oanim.data.document.path_show_all = True
     kept = {l.name: l.key_whole_drawing for l in oanim.data.layers}
     assert kept[line.name] is True and kept[loose.name] is False, kept
     opened = next(l for l in oanim.data.layers if l.name == line.name)
@@ -240,6 +242,7 @@ def nudge():
 
 # --- The Stroke Eraser cutting it on frame 0: a point gone and two cut ends new, no pose lost -------------------------
 assert ops.wm.read_homefile() == {'FINISHED'}
+oanim.data.document.path_show_all = True
 doc = oanim.data.document
 layers = oanim.data.layers
 doc.auto_key = True

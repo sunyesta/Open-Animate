@@ -12,6 +12,7 @@ Run with:  OpenAnimate --background --python tests/test_sweep_rig_guards.py
 import math
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 ops, doc, layers, wm = oanim.ops, oanim.data.document, oanim.data.layers, oanim.wm
 
@@ -24,6 +25,7 @@ def settle():
 def rig_with_knob():
     """A rig whose knob plays an action carrying the ear across."""
     ops.wm.read_homefile()
+    oanim.data.document.path_show_all = True
     doc.auto_key = True
     ops.layer.new_bone()
     rig_id = layers.active.id
@@ -132,6 +134,7 @@ assert gap < 1e-5, ("the fix moved a bone it follows", playing, muted)
 
 # --- A reference of a group: inside, as the original, a deform's shape in a group with deforms ----------------------
 ops.wm.read_homefile()
+oanim.data.document.path_show_all = True
 doc.auto_key = True
 doc.frame_current = 0
 anchor = layers.active
@@ -236,6 +239,7 @@ assert gap < 1e-5, ("the fix moved an action bone", playing, muted)
 
 # --- Auto Keying off: an edit to an unkeyed point an action moves lands where it was put --------------------------------
 ops.wm.read_homefile()
+oanim.data.document.path_show_all = True
 doc.auto_key = True
 ops.layer.new_bone()
 rig_id = layers.active.id
@@ -288,6 +292,7 @@ for how in ("translate", "grab"):
 
 # --- Key Together turned on: every pose stays ----------------------------------------------------------------------------
 ops.wm.read_homefile()
+oanim.data.document.path_show_all = True
 doc.auto_key = True
 doc.frame_current = 0
 anchor = layers.active

@@ -14,9 +14,11 @@ import tempfile
 import zipfile
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 ops, doc, layers, wm = oanim.ops, oanim.data.document, oanim.data.layers, oanim.wm
 ops.wm.read_homefile()
+oanim.data.document.path_show_all = True
 doc.frame_current = 0
 ops.layer.new_bone()
 rig = layers.active
@@ -121,6 +123,7 @@ folder = pathlib.Path(tempfile.mkdtemp(prefix="oanim_pins_"))
 path = str(folder / "pins.oanim")
 assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
 assert ops.wm.open_mainfile(filepath=path, confirmed="1") == {'FINISHED'}
+oanim.data.document.path_show_all = True
 rig = next(l for l in layers if l.type == "BONE")
 assert bone("arm")["type"] == "PIN" and bone("hand")["type"] == "REGULAR"
 
@@ -134,6 +137,7 @@ with zipfile.ZipFile(path) as zin, zipfile.ZipFile(old, "w") as zout:
             data = text.encode("utf-8")
         zout.writestr(item, data)
 assert ops.wm.open_mainfile(filepath=old, confirmed="1") == {'FINISHED'}
+oanim.data.document.path_show_all = True
 rig = next(l for l in layers if l.type == "BONE")
 assert bone("arm")["type"] == "PIN" and bone("arm")["shape"] == "BONE", ("the old Pin shape is the Pin type", bone("arm"))
 

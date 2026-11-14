@@ -13,6 +13,7 @@ Run with:  OpenAnimate --background --python tests/test_motion_path_offsets_othe
 import math
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 ops, doc, layers, wm = oanim.ops, oanim.data.document, oanim.data.layers, oanim.wm
 
@@ -25,6 +26,7 @@ def go(frame):
 
 def build(reference=False, limit_shape=False):
     ops.wm.read_homefile()
+    oanim.data.document.path_show_all = True
     doc.auto_key = True
     go(0)
     ops.layer.new_bone()

@@ -7,6 +7,7 @@ Run with:  OpenAnimate --background --python tests/test_key_together_path_pick.p
 """
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 ops, layers, wm = oanim.ops, oanim.data.layers, oanim.wm
 
@@ -22,6 +23,7 @@ def vec(name, y):
 def scene(fold=True, nest=False):
     """G holds A (keys 10, 20) and B (keys 10, 30), folded; A and B traced, the tool on, on frame 15."""
     assert ops.wm.read_homefile(confirmed="1") == {'FINISHED'}
+    oanim.data.document.path_show_all = True
     doc = oanim.data.document
     doc.auto_key = True
     doc.auto_freeze_keys = False

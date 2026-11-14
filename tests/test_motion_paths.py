@@ -11,6 +11,7 @@ import shutil
 import tempfile
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 oanim.data.document.auto_freeze_keys = False  # keyed channel by channel here, not holding the poses either side
 
@@ -178,9 +179,11 @@ try:
     path = os.path.join(folder, "paths.oanim")
     assert oanim.ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
     assert oanim.ops.wm.read_homefile() == {'FINISHED'}
+    oanim.data.document.path_show_all = True
     oanim.data.document.auto_freeze_keys = False  # keyed channel by channel here, not holding the poses either side
     assert not oanim.data.document.motion_paths
     assert oanim.ops.wm.open_mainfile(filepath=path) == {'FINISHED'}
+    oanim.data.document.path_show_all = True
     doc = oanim.data.document
     assert doc.motion_paths and (doc.path_before, doc.path_after, doc.path_step) == (3, 2, 2)
     assert not doc.path_lines and doc.path_dot_colors == "SPEED" and doc.path_relative == "CAMERA"

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include <tuple>
 
 #include "anim/animation.hh"
 #include "anim/motion_path.hh"
@@ -33,14 +34,169 @@ struct PathToolSync {
   }
 };
 
-std::vector<MotionPathTarget> motion_path_targets(Context &C)
+std::vector<MotionPathTarget> motion_path_targets_all(Context &C)
 {
   return motion_path_targets(*C.document, editable_layers(C), C.wm && C.wm->tool_settings.path_edit_layer);
 }
 
+static uint64_t active_bone_now(const Document &doc)
+{
+  const Layer *layer = layer_find(doc, doc.active_layer);
+  return layer && layer->is_bone_layer() ? layer->active_bone : 0;
+}
+
+bool motion_path_active(Context &C, const std::vector<MotionPathTarget> &all, MotionPathTarget &r_active)
+{
+  if (all.empty()) {
+    return false;
+  }
+  const Document &doc = *C.document;
+  const auto find = [&](const MotionPathTarget &want) {
+    for (const MotionPathTarget &t : all) {
+      if (t.same(want)) {
+        r_active = t;
+        return true;
+      }
+    }
+    return false;
+  };
+  /* Chosen: until another bone or layer is made active, which says to follow it instead (let go then, so making
+   * the first one active again doesn't bring the choice back). */
+  if (WindowManager *wm = C.wm; wm && wm->path_active_set) {
+    if (wm->path_active_layer != doc.active_layer || wm->path_active_bone != active_bone_now(doc)) {
+      wm->path_active_set = false;
+    }
+    else if (find(wm->path_active)) {
+      return true;
+    }
+  }
+  /* The active bone's tip, or its head where it has no tip (a pin) or the tip isn't traced. */
+  if (const uint64_t bone = active_bone_now(doc)) {
+    MotionPathTarget tip{doc.active_layer, bone, 0};
+    MotionPathTarget head = tip;
+    head.head = true;
+    if (find(tip) || find(head)) {
+      return true;
+    }
+  }
+  for (const MotionPathTarget &t : all) {
+    if (t.layer == doc.active_layer) {
+      r_active = t;
+      return true;
+    }
+  }
+  r_active = all.front();
+  return true;
+}
+
+void motion_path_active_choose(Context &C, const MotionPathTarget &target)
+{
+  if (!C.wm) {
+    return;
+  }
+  WindowManager &wm = *C.wm;
+  wm.path_active_set = true;
+  wm.path_active = target;
+  wm.path_active_layer = C.document->active_layer;
+  wm.path_active_bone = active_bone_now(*C.document);
+}
+
+OpArgs motion_path_target_args(const Document &doc, const MotionPathTarget &t)
+{
+  OpArgs args = {{"layer", std::to_string(t.layer)}};
+  if (const Layer *l = layer_find(doc, t.layer)) {
+    for (const Bone &b : l->bones) {
+      if (b.id == t.bone) {
+        args["bone"] = b.name;
+      }
+    }
+  }
+  if (t.point) {
+    args["point"] = std::to_string(t.point);
+  }
+  if (t.head) {
+    args["head"] = "1";
+  }
+  if (t.drawing) {
+    args["drawing"] = "1";
+  }
+  return args;
+}
+
+bool motion_path_of_channel(Context &C, const Layer &layer, const std::string &path, MotionPathTarget &r_target)
+{
+  MotionPathTarget t;
+  t.layer = layer.id;
+  bool position = false;
+  if (path.rfind("bones[\"", 0) == 0) {
+    const size_t close = path.find("\"]", 7);
+    if (close == std::string::npos) {
+      return false;
+    }
+    const std::string name = path.substr(7, close - 7);
+    for (const Bone &b : layer.bones) {
+      if (b.name == name) {
+        t.bone = b.id;
+      }
+    }
+    position = path.compare(close + 2, std::string::npos, ".position") == 0;
+  }
+  else if (path.rfind("points[", 0) == 0) {
+    const size_t i = size_t(std::strtoul(path.c_str() + 7, nullptr, 10));
+    if (!layer.has_drawing() || i >= layer.drawing.points.size()) {
+      return false;
+    }
+    t.point = layer.drawing.points[i].id;
+  }
+  if (!t.bone && !t.point) {
+    return false;
+  }
+  const std::vector<MotionPathTarget> all = motion_path_targets_all(C);
+  const auto find = [&](bool head) {
+    MotionPathTarget want = t;
+    want.head = head;
+    for (const MotionPathTarget &o : all) {
+      if (o.same(want)) {
+        r_target = o;
+        return true;
+      }
+    }
+    return false;
+  };
+  return t.bone ? (find(position) || find(!position)) : find(false);
+}
+
+std::vector<MotionPathTarget> motion_path_targets(Context &C)
+{
+  std::vector<MotionPathTarget> all = motion_path_targets_all(C);
+  MotionPathTarget active;
+  if (C.document->path_show_all || all.size() < 2 || !motion_path_active(C, all, active)) {
+    return all;
+  }
+  return {active};
+}
+
 std::vector<MotionPathTarget> motion_path_timing_targets(Context &C)
 {
-  return motion_path_timing_targets(*C.document, editable_layers(C), C.wm && C.wm->tool_settings.path_edit_layer);
+  const Document &doc = *C.document;
+  std::vector<MotionPathTarget> out = motion_path_timing_targets(doc, editable_layers(C),
+                                                                 C.wm && C.wm->tool_settings.path_edit_layer);
+  if (doc.path_show_all) {
+    return out;
+  }
+  /* One path shown: its own timing, or the one it is timed by (a whole drawing's, a folded group's); and with a
+   * layer's origin shown, its drawing's (its own row left out when the layer doesn't move itself). */
+  const std::vector<MotionPathTarget> shown = motion_path_targets(C);
+  if (shown.size() != 1) {
+    return out;
+  }
+  const MotionPathTarget &a = shown.front();
+  const MotionPathTarget owner = motion_path_timing_owner(doc, a);
+  const bool origin = !a.bone && !a.point && !a.drawing;
+  std::erase_if(out, [&](const MotionPathTarget &t) {
+    return !t.same(a) && !t.same(owner) && !(origin && t.drawing && t.layer == a.layer);
+  });
+  return out;
 }
 
 std::vector<MotionPathTarget> motion_path_key_pick_targets(Context &C)
@@ -594,6 +750,61 @@ void motion_path_operators_register()
         MotionPathTarget &style = motion_path_style_ensure(*C.document, t);
         style.pinned = op_has_arg(C, "pinned") ? op_arg_bool(C, "pinned") : !style.pinned;
       }
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
+  {
+    OperatorType ot;
+    ot.idname = "anim.motion_path_active_set";
+    ot.name = "Show Motion Path";
+    ot.description = "Show this path, the others traced hidden (layer=id with bone=name, head=1 for its head, or "
+                     "point=id); it stays the one shown until another bone or layer is made active";
+    ot.flag = OPTYPE_REGISTER;
+    ot.poll = [](Context &C) { return C.document != nullptr && C.wm != nullptr; };
+    ot.exec = [](Context &C) {
+      std::vector<MotionPathTarget> targets;
+      if (!op_has_arg(C, "layer") || !op_targets(C, targets)) {
+        return OpStatus::Cancelled;
+      }
+      const std::vector<MotionPathTarget> all = motion_path_targets_all(C);
+      if (std::none_of(all.begin(), all.end(), [&](const MotionPathTarget &t) { return t.same(targets.front()); })) {
+        report(ReportType::Warning, motion_path_label(*C.document, targets.front()) + " isn't traced now");
+        return OpStatus::Cancelled;
+      }
+      motion_path_active_choose(C, targets.front());
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
+  for (const auto &[idname, name, step] : {std::tuple{"anim.motion_path_active_next", "Next Motion Path", 1},
+                                           std::tuple{"anim.motion_path_active_previous", "Previous Motion Path", -1}})
+  {
+    OperatorType ot;
+    ot.idname = idname;
+    ot.name = name;
+    ot.description = step > 0 ? "Show the next of the paths traced, the others hidden"
+                              : "Show the previous of the paths traced, the others hidden";
+    ot.flag = OPTYPE_REGISTER;
+    /* Only with more than one path to step through: else [ and ] go on to the switch layers'. */
+    ot.poll = [](Context &C) {
+      return C.document && C.wm && !C.document->path_show_all && motion_path_targets_all(C).size() > 1;
+    };
+    const int dir = step;
+    ot.exec = [dir](Context &C) {
+      const std::vector<MotionPathTarget> all = motion_path_targets_all(C);
+      MotionPathTarget active;
+      if (all.size() < 2 || !motion_path_active(C, all, active)) {
+        return OpStatus::Cancelled;
+      }
+      const int n = int(all.size());
+      int at = 0;
+      for (int i = 0; i < n; i++) {
+        if (all[size_t(i)].same(active)) {
+          at = i;
+        }
+      }
+      motion_path_active_choose(C, all[size_t(((at + dir) % n + n) % n)]);
       return OpStatus::Finished;
     };
     operators().add(std::move(ot));

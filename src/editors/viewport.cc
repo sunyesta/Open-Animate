@@ -673,26 +673,6 @@ static float arc_fraction(const std::vector<float2> &arc, float2 at)
   return total > 1e-9f ? best_along / total : 0.0f;
 }
 
-/* Arguments naming a target for the motion path operators. */
-static OpArgs motion_path_target_args(const Document &doc, const MotionPathTarget &t)
-{
-  OpArgs args = {{"layer", std::to_string(t.layer)}};
-  if (const Layer *l = layer_find(doc, t.layer)) {
-    for (const Bone &b : l->bones) {
-      if (b.id == t.bone) {
-        args["bone"] = b.name;
-      }
-    }
-  }
-  if (t.point) {
-    args["point"] = std::to_string(t.point);
-  }
-  if (t.head) {
-    args["head"] = "1";
-  }
-  return args;
-}
-
 /* A selected position key's path handles as drawn: where its key and handle ends show (where the path is drawn). */
 struct PathHandlesShown {
   MotionPathTarget target;
@@ -5982,6 +5962,30 @@ static void motion_path_header(Context &C)
    * in the timeline's Motion Paths popover. */
   {
     Document &doc = *C.document;
+    /* The one path shown (Show All Paths off), chosen from those traced. */
+    if (!doc.path_show_all) {
+      const std::vector<MotionPathTarget> all = motion_path_targets_all(C);
+      MotionPathTarget active;
+      if (motion_path_active(C, all, active)) {
+        ImGui::SetNextItemWidth(h * 6.0f);
+        ImGui::BeginDisabled(all.size() < 2);
+        if (ImGui::BeginCombo("##path_active", motion_path_label(doc, active).c_str())) {
+          for (size_t i = 0; i < all.size(); i++) {
+            ImGui::PushID(int(i));
+            if (ImGui::Selectable(motion_path_label(doc, all[i]).c_str(), all[i].same(active))) {
+              operator_call(C, "anim.motion_path_active_set", motion_path_target_args(doc, all[i]));
+            }
+            ImGui::PopID();
+          }
+          ImGui::EndCombo();
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+          ImGui::SetTooltip("The path shown, the others traced hidden ([ and ] step through them)");
+        }
+        ImGui::SameLine();
+      }
+    }
     bool own = doc.path_own_motion;
     if (ImGui::Checkbox("Own Motion", &own)) {
       doc.path_own_motion = own;

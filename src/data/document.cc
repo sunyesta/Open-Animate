@@ -105,6 +105,10 @@ const rna::StructRNA &Document::rna()
                           &Document::path_step, 1, 100),
         def_bool<Document>("path_lines", "Lines", "Join the dots with a line in the path's colour",
                            &Document::path_lines),
+        def_bool<Document>("path_show_all", "Show All Paths",
+                           "Draw the path of everything traced at once. Off: only the active path, chosen with [ and ] "
+                           "or from the list, the others hidden and left alone by edits",
+                           &Document::path_show_all),
         def_bool<Document>("path_own_motion", "Own Motion",
                            "In the Motion Path tool, paths show only their own motion: whatever else moves them (a bone, "
                            "a parent, a group, their own constraints) held as on this frame. Off: the real paths",

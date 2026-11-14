@@ -7,6 +7,7 @@ import os
 import tempfile
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 ops, doc, layers = oanim.ops, oanim.data.document, oanim.data.layers
 
@@ -31,6 +32,7 @@ def real_path(label):
 
 
 ops.wm.read_homefile()
+oanim.data.document.path_show_all = True
 assert doc.path_own_motion, "on by default"
 doc.auto_key = True
 doc.frame_current = 0
@@ -217,9 +219,11 @@ try:
     file = os.path.join(folder, "own.oanim")
     assert ops.wm.save_as_mainfile(filepath=file) == {'FINISHED'}
     ops.wm.read_homefile()
+    oanim.data.document.path_show_all = True
     assert not oanim.wm.motion_path_dots(), "nothing picked on the old document's paths carries over"
     assert oanim.data.document.path_own_motion
     assert ops.wm.open_mainfile(filepath=file) == {'FINISHED'}
+    oanim.data.document.path_show_all = True
     assert not oanim.data.document.path_own_motion
     # (A control point picked as the file is opened again: let go the same.)
     eye = next(l for l in layers.all() if str(l.id) == pupil["layer"])
@@ -228,6 +232,7 @@ try:
     assert ops.anim.motion_path_handle_select(frame="10", control="0", **pupil) == {'FINISHED'}
     assert oanim.wm.motion_path_handle_picks()
     assert ops.wm.open_mainfile(filepath=file) == {'FINISHED'}
+    oanim.data.document.path_show_all = True
     assert not oanim.wm.motion_path_handle_picks(), "nothing picked on the old document's paths carries over"
 finally:
     for name in os.listdir(folder):

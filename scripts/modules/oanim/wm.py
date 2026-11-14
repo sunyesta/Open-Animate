@@ -333,6 +333,17 @@ def onion_frames():
     return _oanim.onion_frames()
 
 
+def motion_paths_traced():
+    """The labels of every path traced now, shown or not: with doc.path_show_all off only the active one is drawn
+    (motion_path_active), and anim.motion_path_active_set, _next and _previous choose it."""
+    return list(_oanim.motion_paths_traced())
+
+
+def motion_path_active():
+    """The label of the active path: the one shown with doc.path_show_all off. None with nothing traced."""
+    return _oanim.motion_path_active()
+
+
 def motion_paths(kept=False):
     """The motion paths drawn now (none with doc.motion_paths off): dicts with label, layer, pinned, head, color,
     first (the frame of points[0]), points (where it is on each frame, as drawn: relative to doc.path_relative),
@@ -763,6 +774,13 @@ def timeline_row_chain(row):
     together (chain "TOGETHER") turns Key Together off, a Drawing row keying the whole drawing ("DRAWING") turns
     Key Whole Drawing off, as an undo step. False when the row has no chain."""
     return _oanim.timeline_row_chain(int(row))
+
+
+def timeline_row_path_show(row):
+    """Click the name of the timeline's row `row` for its path: a bone's or point's row shows that path (a bone's
+    Transform row its head's, its other rows its tip's), one path being shown at a time (doc.path_show_all off).
+    False when there is no such row."""
+    return _oanim.timeline_row_path_show(int(row))
 
 
 def timeline_clear_question():

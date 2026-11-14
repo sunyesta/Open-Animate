@@ -271,6 +271,8 @@ void timeline_row_fold(const std::string &key, bool fold_default, bool holds_pic
 void tool_follow_active_layer(Context &C);
 /* The same for row `row` as timeline_rows_list(as_shown=true) lists them; false when it doesn't fold. */
 bool timeline_row_fold_at(Context &C, int row, bool open);
+/* Clicking row `row`'s name for its path (a bone's or point's row shows its path, one shown at a time). */
+bool timeline_row_path_show_at(Context &C, int row);
 /* Clicks row `row`'s chain (as timeline_rows_list(as_shown=true) lists them): its Key Together or Key Whole Drawing
  * turned off, an undo step. False when it has none. */
 bool timeline_row_chain_at(Context &C, int row);

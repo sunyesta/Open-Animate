@@ -15,6 +15,7 @@ import os
 import tempfile
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 oanim.data.document.auto_freeze_keys = False  # keyed channel by channel here, not holding the poses either side
 
@@ -43,6 +44,7 @@ def finite(v):
 def start(timing=False):
     """A fresh document with the Motion Path tool; `timing` as the timing tests have it (the Edit brush, no falloff)."""
     assert ops.wm.read_homefile() == {'FINISHED'}
+    oanim.data.document.path_show_all = True
     oanim.data.document.auto_freeze_keys = False  # keyed channel by channel here, not holding the poses either side
     doc.motion_paths = True
     doc.path_before, doc.path_after = 3, 3
@@ -552,6 +554,7 @@ other = other_layer()
 file = os.path.join(tempfile.mkdtemp(prefix="oanim_motion_path_robust_"), "drawing_style.oanim")
 assert ops.wm.save_mainfile(filepath=file) == {'FINISHED'}
 assert ops.wm.open_mainfile(filepath=file) == {'FINISHED'}
+oanim.data.document.path_show_all = True
 face = next(layer for layer in layers.all() if layer.name == face.name)
 other = next(layer for layer in layers.all() if layer.name == other.name)
 only(other)

@@ -8,6 +8,7 @@ Run with:  OpenAnimate --background --python tests/test_motion_path_from_keys.py
 """
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 doc = oanim.data.document
 layers = oanim.data.layers
@@ -57,6 +58,7 @@ def frames_worked(kept=False):
 
 
 ops.wm.read_homefile()
+oanim.data.document.path_show_all = True
 doc.auto_key = False
 doc.motion_paths = True
 doc.path_all = True

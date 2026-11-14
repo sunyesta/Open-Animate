@@ -2322,6 +2322,7 @@ static void timeline_header(Area &area, Context &C)
       ui_prop_check(C, ptr, "path_all", path, "Range");
       ui_prop(C, ptr, "path_step", path);
       ui_prop_check(C, ptr, "path_lines", path, "Display");
+      ui_prop_check(C, ptr, "path_show_all", path);
       ui_prop(C, ptr, "path_dot_colors", path);
       ui_prop(C, ptr, "path_relative", path);
       if (doc.path_relative == PathRelative::Parent) {
@@ -2347,25 +2348,16 @@ static void timeline_header(Area &area, Context &C)
       ImGui::EndTable();
     }
     if (doc.motion_paths) {
-      /* Each path traced now: its colour, a pin, and for a bone which end. */
-      const std::vector<MotionPathTarget> targets = motion_path_targets(C);
+      /* Each path traced now: its colour, a pin, and for a bone which end; with one shown at a time, clicking its
+       * name shows it. */
+      const std::vector<MotionPathTarget> targets = motion_path_targets_all(C);
+      MotionPathTarget shown;
+      const bool one = !doc.path_show_all && motion_path_active(C, targets, shown);
       for (size_t i = 0; i < targets.size() && i < 12; i++) {
         const MotionPathTarget &t = targets[i];
         ImGui::PushID(int(i));
-        OpArgs args = {{"layer", std::to_string(t.layer)}};
-        if (const Layer *l = layer_find(doc, t.layer)) {
-          for (const Bone &b : l->bones) {
-            if (b.id == t.bone) {
-              args["bone"] = b.name;
-            }
-          }
-        }
-        if (t.point) {
-          args["point"] = std::to_string(t.point);
-        }
-        if (t.head) {
-          args["head"] = "1";
-        }
+        OpArgs args = motion_path_target_args(doc, t);
+        args.erase("drawing");
         const Color c = motion_path_color(doc, t, i);
         float rgba[4] = {c.r, c.g, c.b, 1.0f};
         bool finished = false;
@@ -2381,7 +2373,14 @@ static void timeline_header(Area &area, Context &C)
           operator_call(C, "anim.motion_path_pin", set);
         }
         ImGui::SameLine();
-        ImGui::TextUnformatted(motion_path_label(doc, t).c_str());
+        if (one) {
+          if (ImGui::Selectable(motion_path_label(doc, t).c_str(), t.same(shown))) {
+            operator_call(C, "anim.motion_path_active_set", args);
+          }
+        }
+        else {
+          ImGui::TextUnformatted(motion_path_label(doc, t).c_str());
+        }
         ImGui::PopID();
       }
       if (ImGui::Button(wm.path_snapshot.empty() ? "Snapshot" : "New Snapshot", ImVec2(seg_w, 0.0f))) {
@@ -2876,6 +2875,17 @@ struct ChannelRow {
            (!summary && !media && filter.kinds != 0 && !filter.path.empty() && filter.path.back() != '.');
   }
 };
+
+/* Clicking a bone's or point's row name (not its arrow) shows its path, one being shown at a time. */
+static void path_of_row_show(Context &C, const ChannelRow &row, bool on_arrow)
+{
+  MotionPathTarget t;
+  if (!on_arrow && !C.document->path_show_all && row.layers.size() == 1 && !row.filter.path.empty() &&
+      motion_path_of_channel(C, *row.layers.front(), row.filter.path, t))
+  {
+    operator_call(C, "anim.motion_path_active_set", motion_path_target_args(*C.document, t));
+  }
+}
 
 /* Whether row `row`'s keys on `frame` are drawn hollow: something picked inside it, but not keyed (of its own) here. */
 static bool key_hollow(const ChannelRow &row, int frame)
@@ -3686,6 +3696,19 @@ bool timeline_row_fold_at(Context &C, int row, bool open)
   return true;
 }
 
+bool timeline_row_path_show_at(Context &C, int row)
+{
+  Area area;
+  ui_bind_project(C.document, C.undo);
+  const std::vector<ChannelRow> rows =
+      channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C));
+  if (row < 0 || row >= int(rows.size())) {
+    return false;
+  }
+  path_of_row_show(C, rows[size_t(row)], false);
+  return true;
+}
+
 bool timeline_row_chain_at(Context &C, int row)
 {
   Area area;
@@ -4161,7 +4184,11 @@ static void timeline_body(Area &area, Context &C)
           row_chain_release(C, row);
         }
         else if (!row.fold.empty() && (on_arrow || !row.layer)) {
+          path_of_row_show(C, row, on_arrow);
           timeline_row_fold(row.fold, row.fold_default, row.holds_pick, !row.open);
+        }
+        else if (!row.layer && !row.media && !row.summary) {
+          path_of_row_show(C, row, on_arrow);
         }
         else if (row.layer) {
           doc.active_layer = row.layer;

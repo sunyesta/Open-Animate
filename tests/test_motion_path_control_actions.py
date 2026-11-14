@@ -9,6 +9,7 @@ Run with:  OpenAnimate --background --python tests/test_motion_path_control_acti
 import math
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 doc, layers, ops, wm = oanim.data.document, oanim.data.layers, oanim.ops, oanim.wm
 

@@ -486,6 +486,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   });
   m.def("timeline_row_fold", [](int row, bool open) { return timeline_row_fold_at(current_context(), row, open); });
   m.def("timeline_row_chain", [](int row) { return timeline_row_chain_at(current_context(), row); });
+  m.def("timeline_row_path_show", [](int row) { return timeline_row_path_show_at(current_context(), row); });
   m.def("timeline_clear_question", []() { return timeline_clear_question(*current_context().document); });
   m.def("timeline_paste_question", []() { return timeline_paste_question(*current_context().document); });
   m.def("action_menu_rows", [](const std::string &filter) {
@@ -1567,6 +1568,23 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     out["points"] = points;
     out["paths"] = paths;
     return out;
+  });
+  /* Every path traced now, shown or not (labels), and the one shown with Show All Paths off (its label, else None). */
+  m.def("motion_paths_traced", []() {
+    Context &C = current_context();
+    py::list out;
+    for (const MotionPathTarget &t : motion_path_targets_all(C)) {
+      out.append(motion_path_label(*C.document, t));
+    }
+    return out;
+  });
+  m.def("motion_path_active", []() -> py::object {
+    Context &C = current_context();
+    MotionPathTarget t;
+    if (!motion_path_active(C, motion_path_targets_all(C), t)) {
+      return py::none();
+    }
+    return py::str(motion_path_label(*C.document, t));
   });
   m.def("motion_paths", [](bool kept) {
     Context &C = current_context();

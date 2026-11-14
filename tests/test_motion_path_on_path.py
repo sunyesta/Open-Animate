@@ -17,12 +17,14 @@ import pathlib
 import tempfile
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 ops, doc, layers, wm = oanim.ops, oanim.data.document, oanim.data.layers, oanim.wm
 
 
 def build():
     ops.wm.read_homefile()
+    oanim.data.document.path_show_all = True
     doc.auto_key = True
     ops.layer.new_bone()
     rig_id = layers.active.id
@@ -116,6 +118,7 @@ saved = dots_at()
 file = str(pathlib.Path(tempfile.mkdtemp(prefix="oanim_on_path_")) / "on_path.oanim")
 assert ops.wm.save_as_mainfile(filepath=file) == {'FINISHED'}
 assert ops.wm.open_mainfile(filepath=file, confirmed="1") == {'FINISHED'}
+oanim.data.document.path_show_all = True
 rig = lambda: next(l for l in layers.all() if any(b["name"] == "Ear" for b in (l.bones or [])))
 layers.active = rig()
 rig().select_bone("Ear")
@@ -185,6 +188,7 @@ old = os.path.join(folder, "old.oanim")
 with zipfile.ZipFile(old, "w") as z:
     z.writestr("document.json", json.dumps(data))
 assert ops.wm.open_mainfile(filepath=old, confirmed="1") == {'FINISHED'}
+oanim.data.document.path_show_all = True
 doc, layers = oanim.data.document, oanim.data.layers
 layers.active = rig()
 rig().select_bone("Ear")

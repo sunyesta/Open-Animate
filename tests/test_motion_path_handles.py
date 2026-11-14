@@ -10,6 +10,7 @@ import pathlib
 import tempfile
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 doc = oanim.data.document
 layers = oanim.data.layers
@@ -83,6 +84,7 @@ box.keyframe_set("position", 30, interp="SMOOTH")
 path = str(pathlib.Path(tempfile.mkdtemp(prefix="oanim_path_handles_")) / "handles.oanim")
 assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
 assert ops.wm.open_mainfile(filepath=path, confirmed="1") == {'FINISHED'}
+oanim.data.document.path_show_all = True
 doc = oanim.data.document
 layers = oanim.data.layers
 box = next(l for l in layers if l.id == int(args["layer"]))

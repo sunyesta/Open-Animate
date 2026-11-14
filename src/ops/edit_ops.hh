@@ -113,9 +113,21 @@ VectorDrawing *editable_drawing(Context &C, Layer **r_layer = nullptr);
  * delete and the other point operators act on all of them at once; drawing tools still draw on
  * the active layer. */
 std::vector<Layer *> editable_layers(Context &C);
-/* The motion paths traced now (anim/motion_path.hh), with the Motion Path tool's Edit Layer: what the tool, its
- * operators and the timeline work on. */
+/* The motion paths shown now (anim/motion_path.hh), with the Motion Path tool's Edit Layer: what the tool, its
+ * operators and the timeline work on. One, the active path (motion_path_active), unless Show All Paths is on. */
 std::vector<struct MotionPathTarget> motion_path_targets(Context &C);
+/* Every path traced now, shown or not: what the active path is chosen from. */
+std::vector<struct MotionPathTarget> motion_path_targets_all(Context &C);
+/* The active path among `all` (motion_path_targets_all): the one chosen while the active layer and bone stay as then,
+ * else the active bone's tip (a pin's head), else the active layer's first, else the first. False with none. */
+bool motion_path_active(Context &C, const std::vector<struct MotionPathTarget> &all, struct MotionPathTarget &r_active);
+/* Makes `target` the active path (remembering the active layer and bone it was chosen with). */
+void motion_path_active_choose(Context &C, const struct MotionPathTarget &target);
+/* The arguments naming `target` to the motion path operators (layer=, bone=, head=, point=, drawing=). */
+std::map<std::string, std::string> motion_path_target_args(const struct Document &doc, const struct MotionPathTarget &target);
+/* The path a timeline row of `layer`'s channel `path` (bones["arm"].angle, points[3].position) traces, when traced
+ * now: a bone's position row its head's, its other rows its tip's. */
+bool motion_path_of_channel(Context &C, const struct Layer &layer, const std::string &path, struct MotionPathTarget &r_target);
 /* Tells Own Motion (motion_path_own_motion) whether the Motion Path tool is on. */
 void motion_path_tool_sync(Context &C);
 std::vector<struct MotionPathTarget> motion_path_timing_targets(Context &C);

@@ -12,12 +12,14 @@ Run with:  OpenAnimate --background --python tests/test_motion_path_on_path_fast
 import math
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 ops, doc, layers, wm = oanim.ops, oanim.data.document, oanim.data.layers, oanim.wm
 
 
 def build(knob_on_hair=False):
     ops.wm.read_homefile()
+    oanim.data.document.path_show_all = True
     doc.auto_key = True
     ops.layer.new_bone()
     rig_id = layers.active.id
@@ -135,6 +137,7 @@ assert furthest(fast, full) < 1e-5, ("the same path", furthest(fast, full))
 def build_self():
     """A bone whose turn plays an action moving the bone itself (as a head turn's bone), dynamics elsewhere."""
     ops.wm.read_homefile()
+    oanim.data.document.path_show_all = True
     doc.auto_key = True
     ops.layer.new_bone()
     rig_id = layers.active.id

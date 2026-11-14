@@ -185,6 +185,8 @@ struct Document {
   bool path_all = false;
   int path_step = 1;
   bool path_lines = true;
+  /* Every path traced drawn at once; off (the default), only the active one (motion_path_active). */
+  bool path_show_all = false;
   PathDotColors path_dot_colors = PathDotColors::TimingCurrent;
   PathRelative path_relative = PathRelative::World;
   uint64_t path_relative_layer = 0;

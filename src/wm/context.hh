@@ -495,6 +495,12 @@ struct WindowManager {
    * timeline's), and what its shortcuts ask the viewport to start: Alt S scaling the timing around the selection,
    * G R S on the selected keys ('G', 'R', 'S'). */
   std::vector<std::pair<MotionPathTarget, int>> path_dots;
+  /* The one path shown (Document::path_show_all off): the one chosen ([ ], the header's or popover's list, a timeline
+   * row), while the active layer and its active bone stay as they were then (`path_active_layer`, `path_active_bone`);
+   * else the active bone's, see motion_path_active. */
+  bool path_active_set = false;
+  MotionPathTarget path_active;
+  uint64_t path_active_layer = 0, path_active_bone = 0;
   /* The path handles and control points picked: handles never with keys, dots or other path things (a pick of one
    * kind drops the others), control points with keys too (L, Shift click); G R S, V and X act on them. The bones and
    * points traced stay picked, as they make the paths show. */

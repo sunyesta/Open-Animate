@@ -6,6 +6,7 @@ Run with:  OpenAnimate --background --python tests/test_timeline_path_picks.py
 """
 
 import oanim
+oanim.data.document.path_show_all = True  # these tests look at several paths at once
 
 ops, layers, wm = oanim.ops, oanim.data.layers, oanim.wm
 doc = oanim.data.document
