@@ -214,6 +214,9 @@ assert wm.field_affected_by(face.id, "rotation") == [], "the side read is moved 
 # --- Every animatable field has Affected By, its count left of the arrow; nothing moving it, 0 and empty ---------------
 assert wm.field_affected_count(rig.id, 'bones["stick"].position') == 0, "the knob: animatable, nothing moves it"
 assert wm.field_affected_by(rig.id, 'bones["stick"].position') == [], "empty, no own value line"
+assert wm.field_affected_empty_text('bones["stick"].position') == "Nothing else moves this bone"
+assert wm.field_affected_empty_text("points[0].pos") == "Nothing else moves this point"
+assert wm.field_affected_empty_text("rotation") == "Nothing else moves this layer"
 assert wm.field_affected_count(face.id, "rotation") == 0
 assert wm.field_affected_count(lid.id, "rotation") == 1, "the driver"
 doc.frame_current = 30

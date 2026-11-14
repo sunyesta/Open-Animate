@@ -83,6 +83,8 @@ PENDING = [
      "Affected By's count leaves out the own value", 'tests/test_affected_by.py'),
     ('src/editors/driver_ui.cc', '  return layer && layer_channel(*layer, path, &ref);', '  return layer && (layer_channel(*layer, path, &ref) || true);',
      "only animatable fields have Affected By", 'tests/test_affected_by.py'),
+    ('src/editors/driver_ui.cc', 'path.rfind("bones[", 0) == 0    ? "bone"', 'path.rfind("bones[", 0) == 0    ? "layer"',
+     "an empty Affected By names what the field belongs to", 'tests/test_affected_by.py'),
 ]
 
 def build(root):

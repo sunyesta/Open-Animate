@@ -308,6 +308,15 @@ int ui_affected_count(const std::vector<AffectedRow> &rows)
   return int(std::count_if(rows.begin(), rows.end(), [](const AffectedRow &r) { return r.kind != "OWN"; }));
 }
 
+std::string ui_affected_empty_text(const std::string &path)
+{
+  const char *thing = path.rfind("bones[", 0) == 0    ? "bone"
+                      : path.rfind("points[", 0) == 0 ? "point"
+                      : path.rfind("curves[", 0) == 0 ? "curve"
+                                                      : "layer";
+  return std::string("Nothing else moves this ") + thing;
+}
+
 bool ui_affected_menu(Context &C, uint64_t layer, const std::string &path, int component)
 {
   /* On every animatable property, empty when nothing moves it. */
@@ -326,6 +335,10 @@ bool ui_affected_menu(Context &C, uint64_t layer, const std::string &path, int c
   menu->DrawList->AddText(ImVec2(right - ImGui::CalcTextSize(count.c_str()).x, y),
                           ImGui::GetColorU32(ImGuiCol_TextDisabled), count.c_str());
   if (open) {
+    if (rows.empty()) {
+      /* A line of its own, so the submenu has a size and opens beside the menu, not hidden behind it. */
+      ImGui::TextDisabled("%s", ui_affected_empty_text(path).c_str());
+    }
     const float s = ImGui::GetFontSize() * 0.36f;
     const float indent = ImGui::GetFontSize() * 1.4f;
     for (size_t i = 0; i < rows.size(); i++) {

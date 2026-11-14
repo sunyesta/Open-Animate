@@ -208,6 +208,8 @@ int ui_driver_field_look(Document &doc, uint64_t layer, const std::string &path,
 bool ui_affected_available(Document &doc, uint64_t layer, const std::string &path);
 /* How many things move it (shown left of Affected By's arrow): its rows but the own value. */
 int ui_affected_count(const std::vector<AffectedRow> &rows);
+/* The empty submenu's line, naming what the field belongs to: "Nothing else moves this bone". */
+std::string ui_affected_empty_text(const std::string &path);
 /* "Moved by 2 action bones, 1 fix, 1 driver" (the field's tooltip), "" when nothing does. */
 std::string ui_affected_summary(const std::vector<AffectedRow> &rows);
 /* Goes where a row says: selects the action bone or knob (a fix's first bone, the fix picked in the Bone tab), a

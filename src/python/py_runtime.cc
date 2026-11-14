@@ -5258,6 +5258,8 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return py::int_(ui_affected_count(ui_affected_rows(doc, id, path, component)));
   });
+  /* The line an empty Affected By shows. */
+  m.def("field_affected_empty_text", [](const std::string &path) { return ui_affected_empty_text(path); });
   m.def("field_affected_go", [](uint64_t id, const std::string &path, int component, size_t index) {
     Context &C = current_context();
     const std::vector<AffectedRow> rows = ui_affected_rows(*C.document, id, path, component);

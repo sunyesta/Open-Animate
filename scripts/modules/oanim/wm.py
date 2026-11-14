@@ -521,6 +521,11 @@ def field_affected_count(layer, path, component=-1):
     return _oanim.field_affected_count(getattr(layer, "id", layer), path, int(component))
 
 
+def field_affected_empty_text(path):
+    """Test hook: the line Affected By shows when nothing moves the field, "Nothing else moves this bone"."""
+    return _oanim.field_affected_empty_text(path)
+
+
 def field_affected_go(layer, path, index, component=-1):
     """Test hook: clicks row `index` of the field's Affected By."""
     _oanim.field_affected_go(getattr(layer, "id", layer), path, int(component), int(index))
