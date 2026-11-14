@@ -4623,6 +4623,8 @@ bool controller_side_set(Document &doc, uint64_t owner_id, uint64_t knob_id, int
     }
   }
   knob->controller_actions[side] = action;
+  /* Fixes following the knob are named after the actions its sides play. */
+  bone_fix_names_follow(doc, owner->id);
   controllers_update(doc);
   animation_evaluate(doc, doc.frame_current);
   return true;
@@ -4689,6 +4691,32 @@ int controller_links_undo(Document &doc)
     document_set_action(doc, open_layer, open);
   }
   controllers_update(doc);
+  return count;
+}
+
+int bone_fix_names_follow(Document &doc, uint64_t owner_id)
+{
+  int count = 0;
+  for (const Layer *f : document_layers_flat(doc)) {
+    if (!f->is_bone_layer() || (owner_id && f->id != owner_id)) {
+      continue;
+    }
+    Layer &owner = *layer_find(doc, f->id);
+    std::vector<std::pair<std::string, std::string>> renames;
+    for (const BoneFix &fix : owner.bone_fixes) {
+      /* The fix being edited has its keys out in the channels: it is named as it is left. */
+      if (!fix.auto_name || (doc.action == fix.name && doc.action_layer == owner.id)) {
+        continue;
+      }
+      const std::string renamed = bone_fix_unique(owner, bone_fix_name(owner, fix), fix.name);
+      if (renamed != fix.name) {
+        renames.push_back({fix.name, renamed});
+      }
+    }
+    for (const auto &[from, to] : renames) {
+      count += document_action_rename(doc, owner.id, from, to) ? 1 : 0;
+    }
+  }
   return count;
 }
 

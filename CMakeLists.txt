@@ -630,6 +630,10 @@ add_test(NAME motion_path_from_keys
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_from_keys.py)
 add_test(NAME motion_path_one
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_one.py)
+add_test(NAME motion_path_one_picks
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_one_picks.py)
+add_test(NAME bone_fix_names
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_fix_names.py)
 add_test(NAME motion_path_fix_line
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_fix_line.py)
 add_test(NAME motion_path_edit_fast

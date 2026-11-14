@@ -166,12 +166,35 @@ bool motion_path_of_channel(Context &C, const Layer &layer, const std::string &p
   return t.bone ? (find(position) || find(!position)) : find(false);
 }
 
+/* Picks made on a path no longer shown (another chosen, another bone made active) are let go, so no edit reaches a
+ * hidden path through them: the dots, the path handles and control points, and the Path Timing graph's points (its
+ * timing's: the path's own or the one it is timed by). Only what is stale is erased, so a caller going through the
+ * picks while it asks for the paths again (the path shown the same) sees nothing move. */
+static void path_picks_prune(Context &C, const MotionPathTarget &shown)
+{
+  WindowManager &wm = *C.wm;
+  std::erase_if(wm.path_dots, [&](const auto &d) { return !d.first.same(shown); });
+  std::erase_if(wm.path_handle_picks, [&](const MotionPathHandlePick &p) { return !p.target.same(shown); });
+  const MotionPathTarget owner = motion_path_timing_owner(*C.document, shown);
+  const MotionPathTarget &g = wm.path_timing_point_target;
+  const bool origin = !shown.bone && !shown.point && !shown.drawing;
+  if ((wm.path_timing_point >= 0 || !wm.path_timing_picks.empty()) && !g.same(shown) && !g.same(owner) &&
+      !(origin && g.drawing && g.layer == shown.layer))
+  {
+    wm.path_timing_point = -1;
+    wm.path_timing_picks.clear();
+  }
+}
+
 std::vector<MotionPathTarget> motion_path_targets(Context &C)
 {
   std::vector<MotionPathTarget> all = motion_path_targets_all(C);
   MotionPathTarget active;
   if (C.document->path_show_all || all.size() < 2 || !motion_path_active(C, all, active)) {
     return all;
+  }
+  if (C.wm) {
+    path_picks_prune(C, active);
   }
   return {active};
 }
@@ -571,6 +594,8 @@ static bool timing_picked(Context &C, MotionPathTarget &r_target, int &r_frame, 
   WindowManager &wm = *C.wm;
   Document &doc = *C.document;
   animation_sync(doc);
+  /* Picks on a path no longer shown are let go first (path_picks_prune). */
+  (void)motion_path_targets(C);
   r_target = wm.path_timing_point_target;
   r_frame = wm.path_timing_point_end - 1;
   r_picks.clear();
@@ -1889,7 +1914,14 @@ void motion_path_operators_register()
                      "slides the dots within size= frames too, by falloff= (the tool's settings when left out); the "
                      "frame shown stays";
     ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_TIMING;
-    ot.poll = [](Context &C) { return C.document != nullptr && C.wm != nullptr && !C.wm->path_dots.empty(); };
+    /* The dots of the path shown only: asking for the paths lets go of those picked on one now hidden. */
+    ot.poll = [](Context &C) {
+      if (!C.document || !C.wm) {
+        return false;
+      }
+      (void)motion_path_targets(C);
+      return !C.wm->path_dots.empty();
+    };
     ot.exec = [](Context &C) {
       Document &doc = *C.document;
       const ToolSettings &ts = C.wm->tool_settings;
@@ -2257,6 +2289,7 @@ void motion_path_operators_register()
         /* X over the graph: the points picked there (the ends are the keys: never). */
         Document &doc = *C.document;
         animation_sync(doc);
+        (void)motion_path_targets(C);
         t = wm.path_timing_point_target;
         frame = wm.path_timing_point_end - 1;
         if (!timing_picks_stretch(wm, doc, curve, nullptr) || curve.empty()) {

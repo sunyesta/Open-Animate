@@ -331,15 +331,23 @@ settle()
 mainline()
 named = [f["name"] for f in fixes() if f["name"] != "Knob Up and Right"]
 assert len(named) == 1 and named[0] not in ("turn", "turn 2"), ("named for turn, never as turn's own", named)
-# A file from before, with a fix named so: it opens as a fix all the same.
+# A file from before, with a fix named so: it opens as a fix all the same (named by itself, it is named after its
+# sides again; renamed by hand, it keeps the name).
 old = os.path.join(tempfile.mkdtemp(), "turn_named.oanim")
 assert ops.wm.save_as_mainfile(filepath=old) == {'FINISHED'}
 with zipfile.ZipFile(old) as z:
     members = {n: z.read(n) for n in z.namelist()}
-with zipfile.ZipFile(old, "w") as z:
-    for n, data in members.items():
-        z.writestr(n, data.replace(('"' + named[0] + '"').encode(), b'"turn 2"') if n.endswith(".json") else data)
-assert ops.wm.open_mainfile(filepath=old) == {'FINISHED'}
+for by_hand in (False, True):
+    with zipfile.ZipFile(old, "w") as z:
+        for n, data in members.items():
+            if n.endswith(".json"):
+                data = data.replace(('"' + named[0] + '"').encode(), b'"turn 2"')
+                data = data.replace(b'"auto_name":true', b'"auto_name":false') if by_hand else data
+            z.writestr(n, data)
+    assert ops.wm.open_mainfile(filepath=old, confirmed="1") == {'FINISHED'}
+    if not by_hand:
+        assert [a["kind"] for a in fresh().actions if a["name"] == named[0]] == ["FIX"], fresh().actions
+        assert not [a for a in fresh().actions if a["name"] == "turn 2"], fresh().actions
 rig = next(l for l in layers.all() if l.name == "Head")
 assert [a["kind"] for a in fresh().actions if a["name"] == "turn 2"] == ["FIX"], fresh().actions
 assert "turn 2" not in next(b for b in fresh().bones if b["name"] == "turn")["turn_actions"], "not turn's own"

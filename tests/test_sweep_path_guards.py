@@ -111,7 +111,7 @@ for how in ("scale", "slide"):
     lay = reopen(lay.id)
     before = {f: loc(lay, f) for f in range(20, 33)}
     if how == "scale":
-        assert ops.anim.motion_path_scale_spacing(frame="25", factor="1", layer=str(lay.id)) == {'FINISHED'}
+        assert ops.anim.motion_path_scale_spacing(frame="25", factor="1.00001", layer=str(lay.id)) == {'FINISHED'}
     else:
         x, y = before[23]
         assert ops.anim.motion_path_slide(frame="23", x=repr(x), y=repr(y), layer=str(lay.id)) == {'FINISHED'}
@@ -130,7 +130,7 @@ for interval in (2, 3):
     lay = reopen(lay.id)
     before = {f: loc(lay, f) for f in range(20, 33)}
     length = sum(math.dist(before[f], before[f + 1]) for f in range(20, 32))
-    assert ops.anim.motion_path_scale_spacing(frame="23", factor="1", layer=str(lay.id)) == {'FINISHED'}
+    assert ops.anim.motion_path_scale_spacing(frame="23", factor="1.00001", layer=str(lay.id)) == {'FINISHED'}
     after = {f: loc(lay, f) for f in before}
     worst, at = max((math.dist(before[f], after[f]), f) for f in before)
     assert worst < 4e-4 * length, ("Alt S by 1 on a stepped stretch moved a dot", interval, at, worst / length)

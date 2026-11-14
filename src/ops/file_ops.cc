@@ -202,6 +202,10 @@ static void document_replace(Context &C, Document &&doc, const std::string &file
   /* What was picked on the old document's paths goes with it: the new one's layers may have the same ids. */
   C.wm->path_dots.clear();
   C.wm->path_handle_picks.clear();
+  C.wm->path_timing_point = -1;
+  C.wm->path_timing_picks.clear();
+  /* The path chosen to show too (motion_path_active): the same ids may name other bones now. */
+  C.wm->path_active_set = false;
   motion_path_tool_sync(C);
   C.undo->reset(*C.document);
   /* A recovered document isn't saved anywhere yet, so it starts out with unsaved changes. */

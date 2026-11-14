@@ -3698,6 +3698,10 @@ int motion_path_scale_spacing(Document &doc, const MotionPathTarget &target, int
                               const PathSlide &slide)
 {
   factor = std::max(factor, 0.0f);
+  /* By 1: the timing as it is, nothing stored (no Custom curve made of a Smooth stretch). */
+  if (std::abs(factor - 1.0f) < 1e-6f) {
+    return 0;
+  }
   int changed = 0;
   bool first = true;
   with_timing_channels(doc, target, [&](auto &ch) {
@@ -4106,20 +4110,32 @@ int motion_path_keys_transform(Document &doc, const std::vector<std::pair<Motion
     }
     const bool broken = mode == PathHandles::Broken;
     const float2 new_out = key + turn(out - key), new_in = key + turn(in - key);
-    if (length(out - key) > 1e-7f) {
+    /* Counted only where the key's handles really change: R by 0 or S by 1 store no auto handles, and handles that
+     * can't be set (none to turn) make no edit. */
+    Channel<float2> *hc = handle_channel(doc, t);
+    const Key<float2> *hk = hc ? hc->key_at(frame) : nullptr;
+    if (!hk) {
+      continue;
+    }
+    const float2 was_in = hk->path_in, was_out = hk->path_out;
+    const PathHandles was_mode = hk->path_handles;
+    if (length(out - key) > 1e-7f && length(new_out - out) > 1e-7f) {
       motion_path_handle_set(doc, t, frame, true, new_out, broken);
     }
-    if (length(in - key) > 1e-7f) {
+    if (length(in - key) > 1e-7f && length(new_in - in) > 1e-7f) {
       motion_path_handle_set(doc, t, frame, false, new_in, true);
       if (!broken) {
         /* Set apart, so each keeps its own length; in line again, as they were. */
-        Channel<float2> *ch = handle_channel(doc, t);
-        if (Key<float2> *k = ch ? ch->key_at(frame) : nullptr) {
+        if (Key<float2> *k = hc->key_at(frame)) {
           k->path_handles = PathHandles::Aligned;
         }
       }
     }
-    changed++;
+    if (const Key<float2> *k = hc->key_at(frame);
+        k && (length(k->path_in - was_in) + length(k->path_out - was_out) > 1e-7f || k->path_handles != was_mode))
+    {
+      changed++;
+    }
   }
   animation_evaluate(doc, doc.frame_current);
   return changed;

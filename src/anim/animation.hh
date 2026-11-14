@@ -142,6 +142,10 @@ bool controller_side_set(Document &doc, uint64_t owner, uint64_t knob, int side,
  * action of its own instead, keying that bone's turn as its action did, so the knob still drives it. Returns how
  * many. */
 int controller_links_undo(Document &doc);
+/* Each fix named by itself (BoneFix::auto_name) named again after the actions playing where it ends, as leaving it
+ * names it: once a side's action changes, or on opening a file saved with one out of date; of `owner_id`'s fixes, 0
+ * every bone layer's. The fix being edited waits until it is left. Returns how many were renamed. */
+int bone_fix_names_follow(Document &doc, uint64_t owner_id = 0);
 /* What the action bone actions of bone layer `owner` add to its bones on `frame`, as apply_action_bone_actions plays
  * them on the frame shown: `bones` (owner's, in its order) hold the keyed values there, without action bone
  * actions, and get the action bone actions' amounts added. For working out other frames than the one shown

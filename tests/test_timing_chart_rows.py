@@ -27,6 +27,7 @@ def mover(name, y):
 
 doc.auto_key = False
 doc.motion_paths = True
+doc.path_show_all = True  # picks on both layers' paths
 doc.path_before, doc.path_after = 40, 40
 ball = mover("Ball", 0.0)
 other = mover("Other", 1.0)

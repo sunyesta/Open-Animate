@@ -181,7 +181,7 @@ for how in ("scale", "slide"):
     curve = key(box, 30)["timing"]
     for _ in range(20):
         if how == "scale":
-            assert ops.anim.motion_path_scale_spacing(frame="15", factor="1", **args(box)) == {'FINISHED'}
+            assert ops.anim.motion_path_scale_spacing(frame="15", factor="1.00001", **args(box)) == {'FINISHED'}
         else:
             assert ops.anim.motion_path_slide(frame="15", progress=repr(base[5]), **args(box)) == {'FINISHED'}
     assert worst(base, xs(box, 10, 30)) <= TOL, (how, "dots drifted", worst(base, xs(box, 10, 30)))
