@@ -5268,6 +5268,18 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     ui_affected_go(C, id, path, component, rows[index]);
   });
+  /* What a Collections row's Assign Selected (or Unassign Selected) would change, as its menu shows it. */
+  m.def("collection_selected_change", [layer_or_raise](uint64_t id, const std::string &name, bool assign) {
+    Document &doc = *current_context().document;
+    Layer &armature = layer_or_raise(id);
+    const Collection *c = collection_find_by_name(doc, name);
+    if (!c) {
+      throw py::value_error("no collection " + name);
+    }
+    int bones = 0, drawings = 0;
+    collection_selected_change(doc, armature, c->id, assign, &bones, &drawings);
+    return collection_change_text(bones, drawings);
+  });
   /* A bone layer's actions, and what of them plays now. */
   m.def("layer_actions", [layer_or_raise](uint64_t id) {
     Layer &layer = layer_or_raise(id);

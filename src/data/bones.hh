@@ -245,6 +245,14 @@ Collection &collection_new(Document &doc, const std::string &name);
 Collection *collection_ensure(Document &doc, const std::string &name);
 /* Deletes a collection: every bone and layer leaves it, and every bone layer's panel loses it. */
 void collection_delete(Document &doc, uint64_t id);
+/* Empties a collection: every bone and layer leaves it, and it stays (on the panels it is on). How many left it. */
+int collection_unassign_all(Document &doc, uint64_t id);
+/* How many of the bone layer's selected bones, and of the drawings Assign takes (collection_drawings), Assign
+ * Selected (`assign`) or Unassign Selected would change for collection `id`. */
+void collection_selected_change(Document &doc, Layer &armature, uint64_t id, bool assign, int *r_bones,
+                                int *r_drawings);
+/* "2 bones, 1 drawing", "" for none: what Assign or Unassign Selected would change, as the menu shows it. */
+std::string collection_change_text(int bones, int drawings);
 /* Ids as names, and names as ids (those not found left out). */
 std::vector<std::string> collection_names(const Document &doc, const std::vector<uint64_t> &ids);
 

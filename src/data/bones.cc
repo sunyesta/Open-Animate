@@ -2128,6 +2128,53 @@ static void collection_drop(std::vector<Layer> &list, uint64_t id)
   }
 }
 
+static int collection_empty(std::vector<Layer> &list, uint64_t id)
+{
+  int left = 0;
+  for (Layer &l : list) {
+    left += int(std::erase(l.collections, id));
+    for (Bone &b : l.bones) {
+      left += int(std::erase(b.collections, id));
+    }
+    left += collection_empty(l.children, id);
+  }
+  return left;
+}
+
+void collection_selected_change(Document &doc, Layer &armature, uint64_t id, bool assign, int *r_bones,
+                                int *r_drawings)
+{
+  /* As armature.collection_assign and _unassign find them: what they would change. */
+  const auto changes = [&](const std::vector<uint64_t> &ids) {
+    return (std::find(ids.begin(), ids.end(), id) != ids.end()) != assign;
+  };
+  *r_bones = 0;
+  *r_drawings = 0;
+  for (const Bone &b : armature.bones) {
+    *r_bones += (b.selected || b.select_head || b.select_tail) && changes(b.collections);
+  }
+  for (const Layer *d : collection_drawings(doc, armature)) {
+    *r_drawings += changes(d->collections);
+  }
+}
+
+std::string collection_change_text(int bones, int drawings)
+{
+  std::string text;
+  if (bones > 0) {
+    text = std::to_string(bones) + (bones == 1 ? " bone" : " bones");
+  }
+  if (drawings > 0) {
+    text += (text.empty() ? "" : ", ") + std::to_string(drawings) + (drawings == 1 ? " drawing" : " drawings");
+  }
+  return text;
+}
+
+int collection_unassign_all(Document &doc, uint64_t id)
+{
+  return collection_empty(doc.layers, id);
+}
+
 void collection_delete(Document &doc, uint64_t id)
 {
   std::erase_if(doc.collections, [&](const Collection &c) { return c.id == id; });

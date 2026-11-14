@@ -526,6 +526,12 @@ def field_affected_empty_text(path):
     return _oanim.field_affected_empty_text(path)
 
 
+def collection_selected_change(rig, collection, assign=True):
+    """Test hook: what a Collections row's Assign Selected (assign=False: Unassign Selected) would change, as the
+    row's right-click menu shows it right of the item: "2 bones, 1 drawing", or "" (the item greyed)."""
+    return _oanim.collection_selected_change(getattr(rig, "id", rig), collection, bool(assign))
+
+
 def field_affected_go(layer, path, index, component=-1):
     """Test hook: clicks row `index` of the field's Affected By."""
     _oanim.field_affected_go(getattr(layer, "id", layer), path, int(component), int(index))

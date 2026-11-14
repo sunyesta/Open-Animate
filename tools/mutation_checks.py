@@ -85,6 +85,14 @@ PENDING = [
      "only animatable fields have Affected By", 'tests/test_affected_by.py'),
     ('src/editors/driver_ui.cc', 'path.rfind("bones[", 0) == 0    ? "bone"', 'path.rfind("bones[", 0) == 0    ? "layer"',
      "an empty Affected By names what the field belongs to", 'tests/test_affected_by.py'),
+    ('src/data/bones.cc', '    return (std::find(ids.begin(), ids.end(), id) != ids.end()) != assign;', '    return (std::find(ids.begin(), ids.end(), id) != ids.end()) == assign;',
+     "Assign Selected counts what isn't in the collection yet, Unassign Selected what is", 'tests/test_collection_row_menu.py'),
+    ('src/data/bones.cc', '    *r_bones += (b.selected || b.select_head || b.select_tail) && changes(b.collections);', '    *r_bones += changes(b.collections);',
+     "Assign Selected counts only the selected bones", 'tests/test_collection_row_menu.py'),
+    ('src/data/bones.cc', '    *r_drawings += changes(d->collections);', '    *r_drawings += changes(d->collections) && false;',
+     "Assign Selected counts the drawings shown with the bones", 'tests/test_collection_row_menu.py'),
+    ('src/data/bones.cc', '      left += int(std::erase(b.collections, id));', '      left += int(std::count(b.collections.begin(), b.collections.end(), id));',
+     "Unassign takes every bone out of the collection", 'tests/test_collection_row_menu.py'),
 ]
 
 def build(root):

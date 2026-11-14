@@ -3921,6 +3921,26 @@ void rig_operators_register()
                  collection_delete(doc, c->id);
                  return OpStatus::Finished;
                });
+  rig_operator("armature.collection_unassign_all", "Unassign Collection",
+               "Empty collection `collection` (default the active bone layer's active one): every bone and layer "
+               "leaves it, and it stays on the Collections panels, ready to use again",
+               [](Context &C) { return C.document != nullptr; }, [](Context &C) {
+                 Document &doc = *C.document;
+                 const std::string name = op_arg(C, "collection");
+                 const Layer *active = document_active_layer(doc);
+                 const Collection *c = !name.empty() ? collection_find_by_name(doc, name)
+                                       : active && active->is_bone_layer()
+                                           ? collection_find(doc, active->active_collection)
+                                           : nullptr;
+                 if (!c) {
+                   return OpStatus::Cancelled;
+                 }
+                 if (collection_unassign_all(doc, c->id) == 0) {
+                   report(ReportType::Warning, "Nothing is in " + c->name);
+                   return OpStatus::Cancelled;
+                 }
+                 return OpStatus::Finished;
+               });
   rig_operator("armature.collection_move", "Move Collection",
                "Move the active collection up or down the Collections panel (`direction` UP or DOWN)",
                bone_layer_active, [](Context &C) {

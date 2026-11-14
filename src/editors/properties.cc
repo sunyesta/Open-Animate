@@ -300,12 +300,32 @@ static void bone_collections_panel(Context &C, Layer &armature)
           row_op_collection = name;
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Delete Collection")) {
-          row_op = "armature.collection_delete";
+        /* Assign / Unassign Selected: what they would change on the right ("2 bones, 1 drawing"), greyed when
+         * nothing. */
+        for (const bool assign : {true, false}) {
+          int bones = 0, drawn = 0;
+          collection_selected_change(doc, armature, c.id, assign, &bones, &drawn);
+          const std::string count = collection_change_text(bones, drawn);
+          if (ImGui::MenuItem(assign ? "Assign Selected" : "Unassign Selected", count.c_str(), false, !count.empty())) {
+            row_op = assign ? "armature.collection_assign" : "armature.collection_unassign";
+            row_op_collection = name;
+          }
+          if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+            const std::string what = "the selected bones, and the drawings shown with the bones that are picked or "
+                                     "have points selected,";
+            const std::string tip = count.empty() ? (assign ? "Nothing selected is outside " : "Nothing selected is in ") + name
+                                    : assign      ? "Put " + what + " in " + name
+                                                  : "Take " + what + " out of " + name;
+            ImGui::SetTooltip("%s", tip.c_str());
+          }
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Unassign")) {
+          row_op = "armature.collection_unassign_all";
           row_op_collection = name;
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-          ImGui::SetTooltip("Take it off every bone and layer, and every panel");
+          ImGui::SetTooltip("Take every bone and layer out of it; it stays on the panel, empty");
         }
         ImGui::EndPopup();
       }

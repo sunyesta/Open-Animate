@@ -796,6 +796,8 @@ add_test(NAME bone_collections
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_collections.py)
 add_test(NAME collections
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_collections.py)
+add_test(NAME collection_row_menu
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_collection_row_menu.py)
 add_test(NAME affected_by
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_affected_by.py)
 add_test(NAME bone_transform
