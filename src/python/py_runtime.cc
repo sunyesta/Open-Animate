@@ -1494,6 +1494,19 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return out;
   });
+  m.def("controller_boxes_shown", [](uint64_t id) {
+    /* Each 2 Axis Controller of a bone layer: whether its box shows, as it is picked now. */
+    py::dict out;
+    const Document &doc = *current_context().document;
+    if (const Layer *layer = layer_find(doc, id)) {
+      for (const Bone &b : layer->bones) {
+        if (bone_is_controller(b)) {
+          out[py::str(b.name)] = controller_box_shown(doc, b, b.selected || b.select_head || b.select_tail);
+        }
+      }
+    }
+    return out;
+  });
   m.def("overlay_colors", [](uint64_t id, py::tuple left, py::tuple right, float split, float pixel, bool handles) {
     Context &C = current_context();
     const Document &doc = *C.document;
@@ -3332,6 +3345,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         d["controller_box_angle"] = b.controller_box_angle;
         d["knob_independent"] = b.controller_knob_independent;
         d["contain_knob"] = b.controller_contain_knob;
+        d["controller_box_show"] = b.controller_box_show == ControllerBoxShow::Selected ? "SELECTED" :
+                                   b.controller_box_show == ControllerBoxShow::Never    ? "NEVER" :
+                                                                                          "ALWAYS";
         const Bone *knob_parent = bone_find(layer, b.controller_knob_parent);
         d["knob_parent"] = knob_parent ? knob_parent->name : std::string();
       }
@@ -3418,6 +3434,18 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
           throw py::value_error("contain_knob is a 2 Axis Controller's");
         }
         bone.controller_contain_knob = value.cast<bool>();
+      }
+      else if (key == "controller_box_show") {
+        if (!bone_is_controller(bone)) {
+          throw py::value_error("controller_box_show is a 2 Axis Controller's");
+        }
+        const std::string show = value.cast<std::string>();
+        if (show != "ALWAYS" && show != "SELECTED" && show != "NEVER") {
+          throw py::value_error("controller_box_show is ALWAYS, SELECTED or NEVER");
+        }
+        bone.controller_box_show = show == "SELECTED" ? ControllerBoxShow::Selected :
+                                   show == "NEVER"    ? ControllerBoxShow::Never :
+                                                        ControllerBoxShow::Always;
       }
       else if (key == "controller_frame_size") {
         bone.controller_frame_size = std::max(value.cast<float>(), 1e-5f);

@@ -617,6 +617,8 @@ struct BoneCollection {
  * bones, which have no length) or another layer's drawing (Custom). */
 /* How a bone is drawn: as a bone, or as a layer's drawing (a pin is a bone type, BoneType::Pin, not a shape). */
 enum class BoneShape { None, Custom };
+/* When a 2 Axis Controller's box shows in the viewport (Viewport Display > Show Box); its knob always shows. */
+enum class ControllerBoxShow { Always, Selected, Never };
 /* Blender's bone colour sets: 0 its Default Colors, 1 to BONE_COLOR_THEME_SETS its theme sets,
  * BONE_COLOR_CUSTOM the bone's own three shades. */
 inline constexpr int BONE_COLOR_THEME_SETS = 15;
@@ -746,6 +748,8 @@ struct Bone {
   /* Contain Knob in Box (on by default): the knob is held at the box's edge, dragging included. Off, it goes where its
    * keys and parents put it, past the box too, what hangs from it with it; its actions play the nearest point inside. */
   bool controller_contain_knob = true;
+  /* Show Box: when the box (its spots and where its actions really are) shows; only how it looks. */
+  ControllerBoxShow controller_box_show = ControllerBoxShow::Always;
   bool controller_size_auto = true;
   /* Its spots, in the Spots panel's order. */
   std::vector<ControllerSpot> controller_spots;

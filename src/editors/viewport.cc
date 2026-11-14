@@ -10128,9 +10128,26 @@ static constexpr float CONTROLLER_KNOB_RADIUS = 7.0f;
 /* Half a spot's square, and how near the mouse picks one. */
 static constexpr float CONTROLLER_SPOT_HALF = 3.5f, CONTROLLER_SPOT_PICK = 6.0f;
 
+/* Whether a 2 Axis Controller's box shows (Viewport Display > Show Box). On the setup frame a picked one's always does,
+ * as its corners size it there. */
+bool controller_box_shown(const Document &doc, const Bone &bone, bool picked)
+{
+  switch (bone.controller_box_show) {
+    case ControllerBoxShow::Always:
+      return true;
+    case ControllerBoxShow::Selected:
+      return picked;
+    case ControllerBoxShow::Never:
+      break;
+  }
+  return picked && doc.frame_current == 0;
+}
+
 /* A 2 Axis Controller: its box (the frames of its actions either way from the rest point), a square at each spot (named
  * under the mouse), a ring where its actions really are if not at the knob, and the knob. Neither its actions' keys nor
- * the lines of the fixes that follow it are drawn here: the box stays plain (the Bone tab shows the fixes' lines). */
+ * the lines of the fixes that follow it are drawn here: the box stays plain (the Bone tab shows the fixes' lines). With
+ * Show Box hiding the box only the knob draws, and with When Selected the box's outline shows faintly while the mouse is
+ * over the knob, so its reach can be seen before pressing. */
 static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &armature, const Bone &bone,
                             const BonePose &pose, const ScreenBone &sb, const ViewMapping &view, bool picked, bool active,
                             bool faint, ImU32 fill, ImU32 edge)
@@ -10139,56 +10156,68 @@ static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &ar
   controller_box(bone, lo, hi);
   const auto at = [&](float2 frames) { return controller_screen(doc, armature, view, bone, pose, sb, frames); };
   const ImVec2 corners[4] = {at({lo.x, lo.y}), at({hi.x, lo.y}), at({hi.x, hi.y}), at({lo.x, hi.y})};
-  if (!faint) {
-    dl->AddConvexPolyFilled(corners, 4, IM_COL32(0x10, 0x10, 0x10, 60));
-  }
-  dl->AddPolyline(corners, 4, edge, ImDrawFlags_Closed, active ? 1.6f : 1.2f);
+  const bool shown = controller_box_shown(doc, bone, picked);
   if (faint) {
+    if (shown) {
+      dl->AddPolyline(corners, 4, edge, ImDrawFlags_Closed, active ? 1.6f : 1.2f);
+    }
     return;
   }
-  const ImU32 guide = IM_COL32(0xff, 0xff, 0xff, 70);
-  dl->AddLine(at({lo.x, 0.0f}), at({hi.x, 0.0f}), guide);
-  dl->AddLine(at({0.0f, lo.y}), at({0.0f, hi.y}), guide);
-  const ImVec2 mouse = ImGui::GetIO().MousePos;
-  for (const ControllerSpot &spot : bone.controller_spots) {
-    const ImVec2 s = at(spot.at);
-    const ImVec2 half(CONTROLLER_SPOT_HALF, CONTROLLER_SPOT_HALF);
-    dl->AddRect(s - half, s + half, IM_COL32(0xff, 0xff, 0xff, 210), 0.0f, 0, 1.2f);
-    if (std::abs(mouse.x - s.x) <= CONTROLLER_SPOT_PICK && std::abs(mouse.y - s.y) <= CONTROLLER_SPOT_PICK) {
-      const float font = ImGui::GetFontSize();
-      const ImVec2 text = s + ImVec2(CONTROLLER_SPOT_PICK + 2.0f, -font - 2.0f);
-      const ImVec2 size = ImGui::CalcTextSize(spot.name.c_str());
-      dl->AddRectFilled(text - ImVec2(3.0f, 1.0f), text + size + ImVec2(3.0f, 1.0f), IM_COL32(0x18, 0x18, 0x18, 200), 3.0f);
-      dl->AddText(text, IM_COL32(0xff, 0xff, 0xff, 230), spot.name.c_str());
-    }
-  }
   const float2 knob = controller_knob_shown(doc, armature, bone);
-  ImVec2 knob_at = at(knob);
-  if (doc.frame_current != 0) {
-    /* Drawn where its pose has it. Past the box: a ring on the edge where its actions play and a faint line between. */
-    const ImVec2 real = controller_knob_screen(doc, armature, view, bone, pose, sb, knob);
-    const ImVec2 d = real - knob_at;
-    if (!bone.controller_contain_knob && d.x * d.x + d.y * d.y > 9.0f) {
-      dl->AddLine(knob_at, real, IM_COL32(0xff, 0xff, 0xff, 90), 1.0f);
-      dl->AddCircle(knob_at, CONTROLLER_KNOB_RADIUS, IM_COL32(0xff, 0xff, 0xff, 200), 0, 1.5f);
+  /* Where the knob is seen: in the box, and on a posed frame where its pose has it. */
+  const ImVec2 knob_in_box = at(knob);
+  const ImVec2 knob_at = doc.frame_current != 0 ? controller_knob_screen(doc, armature, view, bone, pose, sb, knob) :
+                                                  knob_in_box;
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  if (!shown) {
+    if (bone.controller_box_show == ControllerBoxShow::Selected &&
+        std::hypot(mouse.x - knob_at.x, mouse.y - knob_at.y) <= CONTROLLER_KNOB_RADIUS)
+    {
+      dl->AddPolyline(corners, 4, IM_COL32(0xff, 0xff, 0xff, 90), ImDrawFlags_Closed, 1.0f);
     }
-    knob_at = real;
   }
-  if (doc.frame_current != 0 && doc.action.empty() && std::hypot(pose.knob_pull.x, pose.knob_pull.y) > 1e-4f) {
-    /* Moved by its constraints: a faint ring where its keys alone would have it. */
-    float2 box_lo, box_hi;
-    controller_box(bone, box_lo, box_hi);
-    float2 keyed = controller_knob_place(bone, pose) - pose.knob_pull;
-    if (bone.controller_contain_knob) {
-      keyed = {std::clamp(keyed.x, box_lo.x, box_hi.x), std::clamp(keyed.y, box_lo.y, box_hi.y)};
+  else {
+    dl->AddConvexPolyFilled(corners, 4, IM_COL32(0x10, 0x10, 0x10, 60));
+    dl->AddPolyline(corners, 4, edge, ImDrawFlags_Closed, active ? 1.6f : 1.2f);
+    const ImU32 guide = IM_COL32(0xff, 0xff, 0xff, 70);
+    dl->AddLine(at({lo.x, 0.0f}), at({hi.x, 0.0f}), guide);
+    dl->AddLine(at({0.0f, lo.y}), at({0.0f, hi.y}), guide);
+    for (const ControllerSpot &spot : bone.controller_spots) {
+      const ImVec2 s = at(spot.at);
+      const ImVec2 half(CONTROLLER_SPOT_HALF, CONTROLLER_SPOT_HALF);
+      dl->AddRect(s - half, s + half, IM_COL32(0xff, 0xff, 0xff, 210), 0.0f, 0, 1.2f);
+      if (std::abs(mouse.x - s.x) <= CONTROLLER_SPOT_PICK && std::abs(mouse.y - s.y) <= CONTROLLER_SPOT_PICK) {
+        const float font = ImGui::GetFontSize();
+        const ImVec2 text = s + ImVec2(CONTROLLER_SPOT_PICK + 2.0f, -font - 2.0f);
+        const ImVec2 size = ImGui::CalcTextSize(spot.name.c_str());
+        dl->AddRectFilled(text - ImVec2(3.0f, 1.0f), text + size + ImVec2(3.0f, 1.0f), IM_COL32(0x18, 0x18, 0x18, 200), 3.0f);
+        dl->AddText(text, IM_COL32(0xff, 0xff, 0xff, 230), spot.name.c_str());
+      }
     }
-    dl->AddCircle(at(keyed), CONTROLLER_KNOB_RADIUS, IM_COL32(0xff, 0xff, 0xff, 110), 0, 1.0f);
-  }
-  if (doc.frame_current != 0 && doc.action.empty()) {
-    const ImVec2 playing = at(controller_knob_played(armature, bone));
-    const ImVec2 d = playing - knob_at;
-    if (d.x * d.x + d.y * d.y > 9.0f) {
-      dl->AddCircle(playing, CONTROLLER_KNOB_RADIUS, IM_COL32(0xff, 0xff, 0xff, 200), 0, 1.5f);
+    if (doc.frame_current != 0) {
+      /* Drawn where its pose has it. Past the box: a ring on the edge where its actions play and a faint line between. */
+      const ImVec2 d = knob_at - knob_in_box;
+      if (!bone.controller_contain_knob && d.x * d.x + d.y * d.y > 9.0f) {
+        dl->AddLine(knob_in_box, knob_at, IM_COL32(0xff, 0xff, 0xff, 90), 1.0f);
+        dl->AddCircle(knob_in_box, CONTROLLER_KNOB_RADIUS, IM_COL32(0xff, 0xff, 0xff, 200), 0, 1.5f);
+      }
+    }
+    if (doc.frame_current != 0 && doc.action.empty() && std::hypot(pose.knob_pull.x, pose.knob_pull.y) > 1e-4f) {
+      /* Moved by its constraints: a faint ring where its keys alone would have it. */
+      float2 box_lo, box_hi;
+      controller_box(bone, box_lo, box_hi);
+      float2 keyed = controller_knob_place(bone, pose) - pose.knob_pull;
+      if (bone.controller_contain_knob) {
+        keyed = {std::clamp(keyed.x, box_lo.x, box_hi.x), std::clamp(keyed.y, box_lo.y, box_hi.y)};
+      }
+      dl->AddCircle(at(keyed), CONTROLLER_KNOB_RADIUS, IM_COL32(0xff, 0xff, 0xff, 110), 0, 1.0f);
+    }
+    if (doc.frame_current != 0 && doc.action.empty()) {
+      const ImVec2 playing = at(controller_knob_played(armature, bone));
+      const ImVec2 d = playing - knob_at;
+      if (d.x * d.x + d.y * d.y > 9.0f) {
+        dl->AddCircle(playing, CONTROLLER_KNOB_RADIUS, IM_COL32(0xff, 0xff, 0xff, 200), 0, 1.5f);
+      }
     }
   }
   /* The knob is a pin: its tick shows which way it is turned (what hangs from it turns with it). */
@@ -10202,6 +10231,9 @@ static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &ar
     pin.head = knob_at;
     pin.dir = n > 1e-6f ? d / n : ImVec2(1, 0);
     draw_pin(dl, pin, CONTROLLER_KNOB_RADIUS, fill == 0 ? edge : fill, edge, active ? 1.6f : 1.2f);
+  }
+  if (!shown) {
+    return;
   }
   /* Frame 0 sizes it: its corners are handles. */
   if (doc.frame_current == 0 && picked && (hi.x > lo.x || hi.y > lo.y)) {
@@ -10456,7 +10488,8 @@ static std::vector<BoneHit> pick_bone_parts(const Document &doc, const Layer &ar
       if (d <= CONTROLLER_KNOB_RADIUS + 3.0f) {
         found.push_back({{bone.id, BonePart::Body}, 0, d, 0});
       }
-      else if (doc.frame_current == 0) {
+      /* Its edges take clicks only where the box shows (Show Box). */
+      else if (doc.frame_current == 0 && controller_box_shown(doc, bone, bone.selected || bone.select_head || bone.select_tail)) {
         float2 lo, hi;
         controller_box(bone, lo, hi);
         const float2 c[4] = {at({lo.x, lo.y}), at({hi.x, lo.y}), at({hi.x, hi.y}), at({lo.x, hi.y})};
@@ -15326,7 +15359,9 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
       float best = CONTROLLER_SPOT_PICK + 1.0f;
       for (size_t i = 0; i < armature.bones.size() && i < poses.size() && i < sbs.size(); i++) {
         const Bone &knob = armature.bones[i];
-        if (!bone_is_controller(knob) || !bone_shown(armature, knob)) {
+        if (!bone_is_controller(knob) || !bone_shown(armature, knob) ||
+            !controller_box_shown(doc, knob, knob.selected || knob.select_head || knob.select_tail))
+        {
           continue;
         }
         const ImVec2 k = controller_knob_screen(doc, armature, view, knob, poses[i], sbs[i],

@@ -638,6 +638,8 @@ add_test(NAME controller_side_guards
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_side_guards.py)
 add_test(NAME sweep_timeline_guards
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sweep_timeline_guards.py)
+add_test(NAME controller_box_show
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_box_show.py)
 add_test(NAME motion_path_fix_line
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_fix_line.py)
 add_test(NAME motion_path_edit_fast

@@ -507,6 +507,12 @@ def overlay_colors(layer, left=(0.0, 0.0, 0.0), right=(1.0, 1.0, 1.0), split=0.0
                                  bool(handles))
 
 
+def controller_boxes_shown(layer):
+    """Test hook: each 2 Axis Controller of a bone layer by name, whether the viewport shows its box (Show Box, as
+    it is picked now); its knob always shows."""
+    return dict(_oanim.controller_boxes_shown(int(getattr(layer, "id", layer))))
+
+
 def overlay_drawing_identity(layer):
     """Test hook: what the viewport's overlays key a layer's drawing by: it changes with what is picked in it, even
     when nothing records an undo step, so the handles shown follow the picks at once."""

@@ -25,6 +25,7 @@ namespace oanim {
 struct Context;
 struct Document;
 struct BoneFixKnobLine;
+struct Bone;
 
 enum class EditorType { Viewport, Properties, Layers, Timeline, TextEditor, Console, Info, AssetShelf, PathTiming };
 
@@ -158,6 +159,8 @@ void path_brush_icon(ImDrawList *dl, PathBrush brush, ImVec2 center, float size,
 void ink_line_draw(ImDrawList *dl, const std::vector<float2> &points, const std::vector<float> &half_widths, Color color);
 /* Fixes' lines in a knob's box (the viewport's and the Spots panel's), `at` taking frames to the screen: each fainter as
  * less of it plays, the edited one brighter, a dot where it plays. */
+/* Whether a 2 Axis Controller's box shows in the viewport (Show Box), `picked` or not. */
+bool controller_box_shown(const Document &doc, const Bone &bone, bool picked);
 void bone_fix_lines_draw(ImDrawList *dl, const std::vector<BoneFixKnobLine> &lines,
                          const std::function<ImVec2(float2)> &at);
 /* A sculpt brush's picture: a line before and after it (the shelf's tiles, the tool bar). */

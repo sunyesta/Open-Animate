@@ -2127,6 +2127,26 @@ static void bone_display_panel(Context &C, Layer &armature)
       C.undo->push("Pin Size", doc);
     }
   }
+  if (bone_is_controller(*active)) {
+    /* Show Box: when the box shows in the viewport; the knob always does. Only how it looks, so any frame. */
+    props_label("Show Box");
+    static const char *const shows[] = {"Always", "When Selected", "Never"};
+    const int show = int(active->controller_box_show);
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##controller_box_show", shows[show])) {
+      for (int k = 0; k < 3; k++) {
+        if (ImGui::Selectable(shows[k], k == show) && k != show) {
+          active->controller_box_show = ControllerBoxShow(k);
+          C.undo->push("Show Box", doc);
+        }
+      }
+      ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("When the box shows in the viewport: always, only while the controller is selected (hovering\n"
+                        "the knob shows it faintly), or never. The knob always shows, and Ctrl still lands on its spots");
+    }
+  }
   if (active->shape == BoneShape::Custom) {
     /* The layer: a list to pick from (or drop a layer from the Layers editor), the eyedropper,
      * and a button that clears it. */

@@ -4222,6 +4222,7 @@ void rig_operators_register()
                        existing->controller_frame_size = copy.controller_frame_size;
                        existing->controller_size_auto = copy.controller_size_auto;
                        existing->controller_spots = copy.controller_spots;
+                       existing->controller_box_show = copy.controller_box_show;
                      }
                      else {
                        copy.id = armature.next_bone_id++;

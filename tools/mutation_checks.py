@@ -37,6 +37,14 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 PENDING = [
     ('src/anim/controller.cc', 'float2 best = knob.controller_spots.front().at;', 'float2 best(0.0f, 0.0f);',
      "Ctrl lands the knob on spots only, never the rest point", 'tests/test_controller_spots.py'),
+    ('src/editors/viewport.cc', '    case ControllerBoxShow::Selected:\n      return picked;', '    case ControllerBoxShow::Selected:\n      return true;',
+     "Show Box When Selected hides the box while the controller isn't picked", 'tests/test_controller_box_show.py'),
+    ('src/editors/viewport.cc', '  return picked && doc.frame_current == 0;', '  return false;',
+     "Show Box Never still shows a picked controller's box on the setup frame", 'tests/test_controller_box_show.py'),
+    ('src/io/oanim_file.cc', 'if (b.controller_box_show != ControllerBoxShow::Always) {', 'if (false) {',
+     "Show Box is saved with the file", 'tests/test_controller_box_show.py'),
+    ('src/ops/rig_ops.cc', '                       existing->controller_box_show = copy.controller_box_show;', '',
+     "Symmetrize copies Show Box onto a knob there already", 'tests/test_controller_box_show.py'),
 ]
 
 def build(root):
