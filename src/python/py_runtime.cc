@@ -5226,6 +5226,32 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     static const char *const keys[] = {"NONE", "ANIMATED", "KEYED"};
     return py::make_tuple(std::string(keys[std::clamp(key, 0, 2)]), layer_action_bone_state(layer, {path}) != 0);
   });
+  /* A field's Affected By rows (oanim.wm.field_affected_by), and going where one says (field_affected_go). */
+  m.def("field_affected_by", [](uint64_t id, const std::string &path, int component) {
+    py::list rows;
+    for (const AffectedRow &r : ui_affected_rows(*current_context().document, id, path, component)) {
+      py::dict d;
+      d["kind"] = r.kind;
+      d["name"] = r.name;
+      d["detail"] = r.detail;
+      d["layer"] = r.layer;
+      d["bone"] = r.bone;
+      d["action"] = r.action;
+      rows.append(d);
+    }
+    return rows;
+  });
+  m.def("field_affected_summary", [](uint64_t id, const std::string &path, int component) {
+    return ui_affected_summary(ui_affected_rows(*current_context().document, id, path, component));
+  });
+  m.def("field_affected_go", [](uint64_t id, const std::string &path, int component, size_t index) {
+    Context &C = current_context();
+    const std::vector<AffectedRow> rows = ui_affected_rows(*C.document, id, path, component);
+    if (index >= rows.size()) {
+      throw py::index_error("no such Affected By row");
+    }
+    ui_affected_go(C, id, path, component, rows[index]);
+  });
   /* A bone layer's actions, and what of them plays now. */
   m.def("layer_actions", [layer_or_raise](uint64_t id) {
     Layer &layer = layer_or_raise(id);

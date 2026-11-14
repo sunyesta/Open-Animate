@@ -66,7 +66,7 @@ rig.bone_set("dial", angle=0.75)
 doc.frame_current = doc.frame_current
 assert abs(face.location_x - 1.5) < 1e-3, face.location_x
 
-# Its fields show the live value, pink while the action bone action plays into them.
+# Its fields show the live value, the action bone action in their Affected By while it plays into them.
 assert face.field_state("position")[1], face.field_state("position")
 assert not face.field_state("opacity")[1], "the action doesn't touch its opacity"
 rig.bone_set("dial", angle=0.0)

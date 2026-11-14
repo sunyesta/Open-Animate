@@ -191,6 +191,23 @@ struct PropertiesTabEntry {
   int id;
 };
 std::vector<PropertiesTabEntry> properties_tabs(Document &doc);
+/* Affected By: what moves a field besides its own keys and value, in src/editors/driver_ui.cc: at the top of its right-click menu (and a timeline
+ * row's). `kind`: "OWN" first where actions move it (`name` its own value and what it shows), then one row each for
+ * "ACTION_BONE", "KNOB", "FIX", "ACTION" (one playing at its own Frame) and "DRIVER": `name` and `detail` as shown
+ * ("jaw_open", "Mouth Open · 42%"), `layer`, `bone` and `action` where clicking it goes. */
+struct AffectedRow {
+  std::string kind, name, detail;
+  uint64_t layer = 0;
+  std::string bone, action;
+};
+std::vector<AffectedRow> ui_affected_rows(Document &doc, uint64_t layer, const std::string &path, int component);
+/* "Moved by 2 action bones, 1 fix, 1 driver" (the field's tooltip), "" when nothing does. */
+std::string ui_affected_summary(const std::vector<AffectedRow> &rows);
+/* Goes where a row says: selects the action bone or knob (a fix's first bone, the fix picked in the Bone tab), a
+ * bone layer for an action of its own, or opens the field's Driver window. */
+void ui_affected_go(Context &C, uint64_t layer, const std::string &path, int component, const AffectedRow &row);
+/* Shows the Bone tab (`fix`: with that fix picked in its Fix Actions) or, `bone` false, the Armature tab. */
+void properties_show_bone(Context &C, uint64_t armature, bool bone, const std::string &fix = "");
 /* Layers editor, in layers_editor.cc. */
 void layers_draw(Area &area, Context &C);
 /* Timeline editor, in timeline.cc. */

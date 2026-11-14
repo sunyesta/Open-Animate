@@ -16,6 +16,7 @@
 #include "anim/drivers.hh"
 #include "data/camera.hh"
 #include "data/document.hh"
+#include "editors/editors.hh"
 #include "editors/ui.hh"
 #include "ops/operator.hh"
 #include "ops/undo.hh"
@@ -136,7 +137,196 @@ std::string field_tooltip(Document &doc, const Field &f)
   return "Driven: " + text + "\n\nRight-click to edit, copy or delete the driver";
 }
 
+/* "12.0°", "0.50", "(1.20, 3.00)": a value as its field shows it (angles in degrees). */
+std::string affected_value(const std::string &path, float2 v, bool vector, int component)
+{
+  const bool angle = path == "rotation" || (path.size() >= 5 && path.compare(path.size() - 5, 5, "angle") == 0);
+  const auto one = [&](float x) {
+    char text[32];
+    if (angle) {
+      std::snprintf(text, sizeof(text), "%.1f\xC2\xB0", double(x) * 57.29577951308232);
+    }
+    else {
+      std::snprintf(text, sizeof(text), "%.2f", double(x));
+    }
+    return std::string(text);
+  };
+  if (!vector) {
+    return one(v.x);
+  }
+  if (component == 0 || component == 1) {
+    return one(component == 0 ? v.x : v.y);
+  }
+  return one(v.x) + ", " + one(v.y);
+}
+
+/* A row's icon, left of its name: a bone, a knob in its box, a fix's line of poses, an action's play, a driver's
+ * purple. */
+void affected_icon(ImDrawList *dl, const std::string &kind, ImVec2 c, float s)
+{
+  const ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
+  if (kind == "ACTION_BONE") {
+    dl->AddQuad(ImVec2(c.x - s, c.y), ImVec2(c.x - s * 0.45f, c.y - s * 0.45f), ImVec2(c.x + s, c.y),
+                ImVec2(c.x - s * 0.45f, c.y + s * 0.45f), col, 1.2f);
+  }
+  else if (kind == "KNOB") {
+    dl->AddRect(c - ImVec2(s, s) * 0.85f, c + ImVec2(s, s) * 0.85f, col, 1.0f, 0, 1.2f);
+    dl->AddCircleFilled(c + ImVec2(s * 0.3f, -s * 0.3f), s * 0.32f, col);
+  }
+  else if (kind == "FIX") {
+    const ImVec2 a(c.x - s * 0.85f, c.y + s * 0.55f), b(c.x + s * 0.85f, c.y - s * 0.55f);
+    dl->AddLine(a, b, col, 1.2f);
+    dl->AddCircleFilled(a, s * 0.28f, col);
+    dl->AddCircleFilled(c, s * 0.28f, col);
+    dl->AddCircleFilled(b, s * 0.28f, col);
+  }
+  else if (kind == "ACTION") {
+    dl->AddTriangleFilled(ImVec2(c.x - s * 0.5f, c.y - s * 0.7f), ImVec2(c.x + s * 0.7f, c.y),
+                          ImVec2(c.x - s * 0.5f, c.y + s * 0.7f), col);
+  }
+  else if (kind == "DRIVER") {
+    dl->AddCircleFilled(c, s * 0.6f, ImGui::GetColorU32(DRIVEN_HOVER));
+  }
+}
+
 }  // namespace
+
+std::vector<AffectedRow> ui_affected_rows(Document &doc, uint64_t layer_id, const std::string &path, int component)
+{
+  std::vector<AffectedRow> rows;
+  Layer *layer = path.empty() ? nullptr : layer_find(doc, layer_id);
+  if (!layer) {
+    return rows;
+  }
+  const std::vector<ChannelSource> sources = layer_channel_sources(doc, *layer, path);
+  float2 own, shown;
+  bool vector = false;
+  if (!sources.empty() && layer_channel_own_value(*layer, path, &own, &shown, &vector)) {
+    AffectedRow row;
+    row.kind = "OWN";
+    row.name = "Own value " + affected_value(path, own, vector, component) + " \xE2\x86\x92 " +
+               affected_value(path, shown, vector, component);
+    rows.push_back(std::move(row));
+  }
+  const auto percent = [](float amount) { return std::to_string(int(std::lround(amount * 100.0f))) + "%"; };
+  for (const ChannelSource &s : sources) {
+    AffectedRow row;
+    row.layer = s.owner;
+    row.bone = s.bone;
+    row.action = s.action;
+    switch (s.kind) {
+      case ChannelSourceKind::ActionBone:
+      case ChannelSourceKind::Knob:
+        row.kind = s.kind == ChannelSourceKind::Knob ? "KNOB" : "ACTION_BONE";
+        row.name = s.bone;
+        row.detail = s.action + " \xC2\xB7 " + percent(s.amount);
+        break;
+      case ChannelSourceKind::Fix:
+        row.kind = "FIX";
+        row.name = s.action;
+        row.detail = "fix \xC2\xB7 " + percent(s.amount);
+        break;
+      case ChannelSourceKind::Action:
+        row.kind = "ACTION";
+        row.name = s.action;
+        row.detail = "action \xC2\xB7 " + percent(s.amount);
+        break;
+    }
+    rows.push_back(std::move(row));
+  }
+  /* Drivers (not a two-way link's: its field says so in teal). */
+  static const char *const TYPES[] = {"", "Average of variables", "Sum of variables", "Smallest of variables",
+                                      "Largest of variables"};
+  for (const DriverRef &r : driver_field_refs(doc, layer_id, path, component)) {
+    const Driver *d = driver_find(doc, r);
+    if (!d || d->two_way) {
+      continue;
+    }
+    AffectedRow row;
+    row.kind = "DRIVER";
+    row.name = "Driver";
+    row.detail = d->type == DriverType::Expression ? d->expression : std::string(TYPES[int(d->type)]);
+    row.layer = layer_id;
+    rows.push_back(std::move(row));
+  }
+  return rows;
+}
+
+std::string ui_affected_summary(const std::vector<AffectedRow> &rows)
+{
+  static const std::pair<const char *, const char *> KINDS[] = {{"ACTION_BONE", "action bone"},
+                                                                {"KNOB", "knob"},
+                                                                {"FIX", "fix"},
+                                                                {"ACTION", "action"},
+                                                                {"DRIVER", "driver"}};
+  std::string text;
+  for (const auto &[kind, word] : KINDS) {
+    const int n = int(std::count_if(rows.begin(), rows.end(), [&](const AffectedRow &r) { return r.kind == kind; }));
+    if (n == 0) {
+      continue;
+    }
+    std::string words = word;
+    if (n > 1) {
+      words += std::string(kind) == "FIX" ? "es" : "s";
+    }
+    text += (text.empty() ? "Moved by " : ", ") + std::to_string(n) + " " + words;
+  }
+  return text;
+}
+
+void ui_affected_go(Context &C, uint64_t layer, const std::string &path, int component, const AffectedRow &row)
+{
+  if (row.kind == "DRIVER") {
+    g_editor = {true, true, Field{layer, path, component}, 0};
+    return;
+  }
+  if (row.kind == "OWN" || !row.layer) {
+    return;
+  }
+  operator_call(C, "armature.bone_go", {{"layer", std::to_string(row.layer)}, {"bone", row.bone}});
+  properties_show_bone(C, row.layer, !row.bone.empty(), row.kind == "FIX" ? row.action : std::string());
+}
+
+bool ui_affected_menu(Context &C, uint64_t layer, const std::string &path, int component)
+{
+  if (!C.document) {
+    return false;
+  }
+  const std::vector<AffectedRow> rows = ui_affected_rows(*C.document, layer, path, component);
+  if (rows.empty()) {
+    return false;
+  }
+  if (ui_submenu_begin("Affected By")) {
+    const float s = ImGui::GetFontSize() * 0.36f;
+    const float indent = ImGui::GetFontSize() * 1.4f;
+    for (size_t i = 0; i < rows.size(); i++) {
+      const AffectedRow &row = rows[i];
+      if (row.kind == "OWN") {
+        ImGui::TextDisabled("%s", row.name.c_str());
+        ImGui::Separator();
+        continue;
+      }
+      ImGui::PushID(int(i));
+      const ImVec2 at = ImGui::GetCursorScreenPos();
+      ImGui::SetCursorScreenPos(ImVec2(at.x + indent, at.y));
+      const bool chosen = ImGui::MenuItem(row.name.c_str(), row.detail.c_str());
+      const ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
+      affected_icon(ImGui::GetWindowDrawList(), row.kind, ImVec2(at.x + indent * 0.5f, (lo.y + hi.y) * 0.5f), s);
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip(row.kind == "DRIVER" ? "Open its Driver window"
+                          : row.kind == "FIX"  ? "Select its bone and show the fix in the Bone tab"
+                          : row.kind == "ACTION" ? "Show its bone layer's Actions"
+                                                 : "Select it");
+      }
+      if (chosen) {
+        ui_affected_go(C, layer, path, component, row);
+      }
+      ImGui::PopID();
+    }
+    ui_submenu_end();
+  }
+  return true;
+}
 
 void ui_driver_next(uint64_t layer, const std::string &path)
 {
@@ -196,12 +386,31 @@ void ui_driver_field_end(Context &C, uint64_t layer, const std::string &path, in
     ImGui::OpenPopup("##driver_menu");
     g_menu_frame = ImGui::GetFrameCount();
   }
-  if (pushed > 0 && !ImGui::IsAnyItemActive() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    const std::string linked = linked_text(doc, field);
-    ImGui::SetTooltip("%s", linked.empty() ? field_tooltip(doc, field).c_str()
-                                           : (linked + "\nEdit either side. Right-click: Select Linked, Unlink").c_str());
+  if (!ImGui::IsAnyItemActive() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    /* What else moves it, one line (its rows in the right-click menu's Affected By). */
+    const std::vector<AffectedRow> rows = ui_affected_rows(doc, layer, path, component);
+    std::string summary = ui_affected_summary(rows);
+    if (pushed > 0) {
+      /* A driver alone is what its purple and "Driven:" already say. */
+      if (std::all_of(rows.begin(), rows.end(), [](const AffectedRow &r) { return r.kind == "DRIVER"; })) {
+        summary.clear();
+      }
+      const std::string linked = linked_text(doc, field);
+      ImGui::SetTooltip("%s%s%s", linked.empty() ? field_tooltip(doc, field).c_str()
+                                                 : (linked + "\nEdit either side. Right-click: Select Linked, Unlink").c_str(),
+                        summary.empty() ? "" : "\n", summary.c_str());
+    }
+    else if (!summary.empty()) {
+      /* Under the field's own tooltip, if it has one. */
+      ImGui::BeginTooltip();
+      ImGui::TextUnformatted(summary.c_str());
+      ImGui::EndTooltip();
+    }
   }
   if (ui_menu_begin("##driver_menu")) {
+    if (ui_affected_menu(C, layer, path, component)) {
+      ImGui::Separator();
+    }
     const bool driven = field_state(doc, field) > 0;
     const std::vector<OpArgs> args = field_args(field);
     if (driven) {

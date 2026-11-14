@@ -2537,6 +2537,8 @@ static TimelinePress g_press;
 /* The reference channel a right-click asked to sync (its menu's subject). */
 static uint64_t g_sync_layer = 0;
 static std::string g_sync_path;
+/* The row right-clicked is a reference's own channel (its Reset items): else only its Affected By. */
+static bool g_sync_reference = false;
 
 /* The Keyed Here list (Ctrl-click or right-click a key): what a row has keyed on a frame. */
 struct KeyedHere {
@@ -4143,13 +4145,16 @@ static void timeline_body(Area &area, Context &C)
     summarize();
   }
   else if (!names_resizing && over_names && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-    /* A reference's own layer channel: sync it (or all of them) to its original again. */
+    /* One property's row: what moves it besides its keys (Affected By), and a reference's own layer channel synced
+     * (or all of them) to its original again. */
     const int r = row_at(io.MousePos.y);
-    if (r >= 0 && rows[r].layers.size() == 1 && rows[r].layers[0]->is_reference() &&
-        rows[r].layers[0]->reference.own_channels.count(rows[r].filter.path))
-    {
+    const std::string &path = r >= 0 ? rows[r].filter.path : std::string();
+    const bool one = r >= 0 && rows[r].layers.size() == 1 && !path.empty() && path.back() != '.';
+    const bool reference = one && rows[r].layers[0]->is_reference() && rows[r].layers[0]->reference.own_channels.count(path);
+    if (one && (reference || !ui_affected_rows(doc, rows[r].layers[0]->id, path, -1).empty())) {
       g_sync_layer = rows[r].layers[0]->id;
-      g_sync_path = rows[r].filter.path;
+      g_sync_path = path;
+      g_sync_reference = reference;
       ImGui::OpenPopup("##reference_channel");
     }
   }
@@ -4447,10 +4452,13 @@ static void timeline_body(Area &area, Context &C)
   timeline_media_menu(C);
   timeline_space_menus(C);
   if (ui_menu_begin("##reference_channel")) {
-    if (ui_menu_item("Reset Channel to Original")) {
+    if (ui_affected_menu(C, g_sync_layer, g_sync_path, -1) && g_sync_reference) {
+      ImGui::Separator();
+    }
+    if (g_sync_reference && ui_menu_item("Reset Channel to Original")) {
       operator_call(C, "layer.reference_sync", {{"layer", std::to_string(g_sync_layer)}, {"path", g_sync_path}});
     }
-    if (ui_menu_item("Reset Layer Animation to Original")) {
+    if (g_sync_reference && ui_menu_item("Reset Layer Animation to Original")) {
       operator_call(C, "layer.reference_sync", {{"layer", std::to_string(g_sync_layer)}});
     }
     ui_menu_end();

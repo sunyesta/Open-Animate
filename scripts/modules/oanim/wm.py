@@ -497,6 +497,23 @@ def motion_path_timing_panel():
     return _oanim.motion_path_timing_panel()
 
 
+def field_affected_by(layer, path, component=-1):
+    """Test hook: a field's Affected By rows, as its right-click menu lists them: dicts with "kind" ("OWN", then
+    "ACTION_BONE", "KNOB", "FIX", "ACTION" or "DRIVER"), "name" and "detail" (as shown), and "layer", "bone" and
+    "action" (where clicking it goes). Empty when nothing but its own keys moves it."""
+    return list(_oanim.field_affected_by(getattr(layer, "id", layer), path, int(component)))
+
+
+def field_affected_summary(layer, path, component=-1):
+    """Test hook: the field's tooltip line, "Moved by 2 action bones, 1 fix", or ""."""
+    return _oanim.field_affected_summary(getattr(layer, "id", layer), path, int(component))
+
+
+def field_affected_go(layer, path, index, component=-1):
+    """Test hook: clicks row `index` of the field's Affected By."""
+    _oanim.field_affected_go(getattr(layer, "id", layer), path, int(component), int(index))
+
+
 def overlay_colors(layer, left=(0.0, 0.0, 0.0), right=(1.0, 1.0, 1.0), split=0.0, pixel=0.01, handles=False):
     """Test hook: the colours ("#RRGGBB") the wires and points of `layer` (a layer or its id) and the motion paths'
     line pieces take over a canvas that is `left` left of x = `split` and `right` from there on, at `pixel` document

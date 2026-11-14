@@ -5136,6 +5136,112 @@ int layer_action_bone_state(Layer &layer, const std::vector<std::string> &paths)
   return 0;
 }
 
+std::vector<ChannelSource> layer_channel_sources(Document &doc, Layer &layer, const std::string &path)
+{
+  std::vector<ChannelSource> sources;
+  ChannelRef ref;
+  if (!layer_channel(layer, path, &ref) || !(ref.scalar ? ref.scalar->action_bone_live : ref.vector->action_bone_live)) {
+    return sources;
+  }
+  const void *target = ref.scalar ? static_cast<const void *>(ref.scalar) : static_cast<const void *>(ref.vector);
+  for (const Layer *flat : document_layers_flat(doc)) {
+    if (!flat->is_bone_layer() || flat->actions.empty()) {
+      continue;
+    }
+    Layer &owner = *layer_find(doc, flat->id);
+    /* What plays, as apply_action_bone_actions_playing has it. */
+    std::vector<std::pair<std::string, float>> playing = action_bone_actions_playing(owner);
+    ActionOwnLengths lengths;
+    action_own_frames(owner, -1, lengths, playing);
+    for (const BoneFix &fix : owner.bone_fixes) {
+      if (!action_muted(owner, fix.name)) {
+        playing.push_back({fix.name, 0.0f});
+      }
+    }
+    std::set<const void *> action_bones;
+    for (const std::string &name : owner.actions) {
+      if (const Bone *b = action_bone_of(owner, name)) {
+        action_bones.insert({&b->position_keys, &b->angle_keys, &b->scale_keys});
+      }
+    }
+    for (const auto &[name, t] : playing) {
+      if (name == doc.action && owner.id == doc.action_layer) {
+        continue;
+      }
+      const BoneFix *fix = bone_fix_find(owner, name);
+      const Bone *by = fix ? nullptr : action_bone_of(owner, name);
+      const Bone *knob = fix ? nullptr : controller_of_action(owner, name, nullptr);
+      ChannelSource source;
+      source.owner = owner.id;
+      source.action = name;
+      if (fix) {
+        const BoneFixPlay at = bone_fix_play(owner, *fix);
+        if (at.strength <= 0.0f) {
+          continue;
+        }
+        source.kind = ChannelSourceKind::Fix;
+        source.amount = at.strength;
+        const Bone *first = fix->follows.empty() ? nullptr : bone_find(owner, fix->follows.front());
+        source.bone = first ? first->name : std::string();
+      }
+      else {
+        const float length = action_length(owner, name);
+        source.amount = length > 0.0f ? std::clamp(t / length, 0.0f, 1.0f) : 0.0f;
+        source.kind = by ? (bone_is_controller(*by) ? ChannelSourceKind::Knob : ChannelSourceKind::ActionBone)
+                         : ChannelSourceKind::Action;
+        source.bone = by ? by->name : std::string();
+      }
+      bool moves = false;
+      owner_for_each_channel_with(owner, name, [&](auto &ch, auto &value) {
+        if (static_cast<const void *>(&ch) != target ||
+            (by && target == static_cast<const void *>(&by->angle_keys)) ||
+            (knob && target == static_cast<const void *>(&knob->position_keys)) ||
+            (fix && (action_bones.count(target) || bone_fix_tracing(owner, *fix, target))))
+        {
+          return;
+        }
+        const auto it = ch.actions.find(name);
+        if (it == ch.actions.end()) {
+          return;
+        }
+        /* An action keys every bone, most held still: only one that takes it somewhere. */
+        const auto setup = ch.animated() ? ch.evaluate(0) : value - ch.from_action_bones;
+        for (const auto &k : it->second) {
+          const auto off = k.value - setup;
+          if constexpr (std::is_same_v<std::decay_t<decltype(off)>, float>) {
+            moves = moves || std::abs(off) > 1e-6f;
+          }
+          else {
+            moves = moves || std::abs(off.x) > 1e-6f || std::abs(off.y) > 1e-6f;
+          }
+        }
+      });
+      if (moves) {
+        sources.push_back(std::move(source));
+      }
+    }
+  }
+  return sources;
+}
+
+bool layer_channel_own_value(Layer &layer, const std::string &path, float2 *r_own, float2 *r_shown, bool *r_vector)
+{
+  ChannelRef ref;
+  if (!layer_channel(layer, path, &ref)) {
+    return false;
+  }
+  *r_vector = ref.vector != nullptr;
+  if (ref.scalar) {
+    *r_shown = float2{*ref.scalar_value, 0.0f};
+    *r_own = float2{*ref.scalar_value - ref.scalar->from_action_bones, 0.0f};
+  }
+  else {
+    *r_shown = *ref.vector_value;
+    *r_own = *ref.vector_value - ref.vector->from_action_bones;
+  }
+  return true;
+}
+
 int layer_key_state(Layer &layer, const std::vector<std::string> &paths, int frame)
 {
   int state = 0;

@@ -331,11 +331,27 @@ bool channel_delete_key(Channel<float2> &ch, float2 &value, int frame);
 int layer_toggle_keys(Layer &layer, const std::vector<std::string> &paths, int frame, int mode = 0);
 /* 0: none of them animated; 1: animated; 2: keyed at `frame`. */
 int layer_key_state(Layer &layer, const std::vector<std::string> &paths, int frame);
-/* Added to a key state: an action bone action plays into one of them now (its field shows the value with it,
- * pink; ui_key_tint_push). */
+/* An action bone action, a knob or a fix moves one of them now (their fields say so in Affected By, not in colour:
+ * green and yellow are the timeline's own keys only). */
 inline constexpr int KEY_STATE_ACTION_BONE = 4;
 /* KEY_STATE_ACTION_BONE when an action bone action is playing into any of them now, else 0. */
 int layer_action_bone_state(Layer &layer, const std::vector<std::string> &paths);
+/* What moves a channel now besides its own keys and value (a field's Affected By): each action playing into it,
+ * by what plays it, with how far (0..1: its frame of the action's length, a fix's strength). Not the action
+ * edited (its keys are the timeline's). */
+enum class ChannelSourceKind : uint8_t { ActionBone, Knob, Fix, Action };
+struct ChannelSource {
+  ChannelSourceKind kind = ChannelSourceKind::Action;
+  /* The bone layer whose action it is. */
+  uint64_t owner = 0;
+  std::string action;
+  /* The action bone or knob; a fix's first bone. */
+  std::string bone;
+  float amount = 0.0f;
+};
+std::vector<ChannelSource> layer_channel_sources(Document &doc, Layer &layer, const std::string &path);
+/* A channel's own value (without what actions add) and what it shows. False when `path` isn't a channel. */
+bool layer_channel_own_value(Layer &layer, const std::string &path, float2 *r_own, float2 *r_shown, bool *r_vector);
 /* Key Whole Drawing: every channel of the drawing's shape (each point's position and width, each curve point's
  * curvature and handles) keyed on every frame any of them is, each new key holding what the channel has there and
  * taking the timing (interpolation, hold, speeds...) most keys on that frame have. A frame that lost a key since the

@@ -1562,6 +1562,12 @@ static void bone_actions_panel(Context &C, Layer &armature)
 /* The fix actions that follow the active bone (BoneFix): each with how much of it plays now, a pencil that opens it and
  * whether it plays; + makes one following the selected bones, - deletes the one picked. Under the list the picked one's
  * bones (x lets go of one, Add Selected Bones), and where it starts and ends (a click opens it there). */
+/* The Fix Actions list of each bone layer: the fix picked, one renamed. */
+struct BoneFixListState {
+  std::string picked, renaming, rename_text;
+};
+static std::map<uint64_t, BoneFixListState> g_bone_fix_lists;
+
 static void bone_fixes_panel(Context &C, Layer &armature)
 {
   const Bone *active = bone_find(armature, armature.active_bone);
@@ -1579,11 +1585,7 @@ static void bone_fixes_panel(Context &C, Layer &armature)
       ImGui::SetTooltip("%s", text);
     }
   };
-  struct ListState {
-    std::string picked, renaming, rename_text;
-  };
-  static std::map<uint64_t, ListState> states;
-  ListState &st = states[armature.id];
+  BoneFixListState &st = g_bone_fix_lists[armature.id];
   std::vector<std::string> fixes;
   for (const BoneFix &f : armature.bone_fixes) {
     if (std::find(f.follows.begin(), f.follows.end(), active->id) != f.follows.end()) {
@@ -1910,7 +1912,7 @@ static void bone_panel(Context &C, Layer &armature)
       const int state = layer_key_state(armature, {bone_path + channel}, doc.frame_current);
       label(name);
       ImGui::SetNextItemWidth(-ui_key_button_width());
-      const int pushed = ui_key_tint_push(state | layer_action_bone_state(armature, {bone_path + channel}));
+      const int pushed = ui_key_tint_push(state);
       const int driven = ui_driver_field_begin(C, armature.id, bone_path + channel, -1);
       field();
       ui_driver_typed(C, armature.id, bone_path + channel, -1);
@@ -2405,14 +2407,13 @@ static void key_next(Context &C, Layer &layer, std::vector<std::string> paths)
 {
   const int state = layer_key_state(layer, paths, C.document->frame_current);
   const int pin = pin_state(layer, paths, state);
-  const int action_bone_state = layer_action_bone_state(layer, paths);
   std::string joined;
   for (const std::string &p : paths) {
     joined += (joined.empty() ? "" : "|") + p;
   }
   const uint64_t id = layer.id;
   ui_key_next(
-      state | action_bone_state,
+      state,
       [&C, id, joined]() {
         operator_call(C, "anim.keyframe_toggle", {{"layer", std::to_string(id)}, {"paths", joined}});
       },
@@ -3882,12 +3883,11 @@ static void merge_modifier_body(Context &C, Layer &layer, Modifier &m, int index
   /* Smoothing: keyable, with its key button, as a mask's Reach. */
   const std::string path = "modifiers[" + idx + "].smoothing";
   const int key_state = layer_key_state(layer, {path}, doc.frame_current);
-  const int action_bone_smoothing = layer_action_bone_state(layer, {path});
   modifier_row_label("Smoothing", column,
                      "Rounds the corners where the outlines meet, as a radius: 0 keeps them sharp. Only there: the "
                      "shapes' own corners stay as drawn. It can be keyed");
   ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ui_key_button_width() - 4.0f);
-  const int tint = ui_key_tint_push(key_state | action_bone_smoothing);
+  const int tint = ui_key_tint_push(key_state);
   const int driven = ui_driver_field_begin(C, layer.id, path, -1);
   float smoothing = m.merge_smoothing;
   if (ui_drag_float("##smoothing", &smoothing, 0.001f, 0.0f, 100.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp)) {
@@ -4010,7 +4010,7 @@ static void bevel_modifier_body(Context &C, Layer &layer, Modifier &m, int index
   const int key_state = layer_key_state(layer, {path}, doc.frame_current);
   modifier_row_label("Amount", column, "How big the cuts are (Width Type says how it's measured). It can be keyed");
   ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ui_key_button_width() - 4.0f);
-  const int tint = ui_key_tint_push(key_state | layer_action_bone_state(layer, {path}));
+  const int tint = ui_key_tint_push(key_state);
   const int driven = ui_driver_field_begin(C, layer.id, path, -1);
   const bool percent = m.bevel_width == BevelWidth::Percent;
   float amount = m.bevel_amount;
@@ -4942,7 +4942,7 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
                                                   : "How much of the deform shows: 0 none, 1 all of it. It can be keyed, to fade "
                                                     "a deform in or out");
   ImGui::SetNextItemWidth(width());
-  const int tint = ui_key_tint_push(key_state | layer_action_bone_state(layer, {path}));
+  const int tint = ui_key_tint_push(key_state);
   const int driven = ui_driver_field_begin(C, layer.id, path, -1);
   float strength = m.deform_strength;
   if (ui_slider_float("##deform_strength", &strength, 0.0f, 1.0f, "%.3f")) {
@@ -5115,7 +5115,7 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
                          "How far the point is moved from where it rests, on this frame: key it for a drawing that slides\n"
                          "along the shape. Dragging the light blue point does the same");
       ImGui::SetNextItemWidth(width());
-      const int shift_tint = ui_key_tint_push(shift_state | layer_action_bone_state(layer, {shift_path}));
+      const int shift_tint = ui_key_tint_push(shift_state);
       float2 &shift = second ? m.deform_shift2 : m.deform_shift;
       float values[2] = {shift.x, shift.y};
       if (ui_drag_float2(second ? "##deform_shift2" : "##deform_shift", values, 0.001f, -100.0f, 100.0f, "%.3f")) {
@@ -5817,7 +5817,7 @@ static void constraints_panel(Context &C, Layer &armature)
       const auto keyed_begin = [&](const std::string &p) {
         const int state = layer_key_state(armature, {p}, doc.frame_current);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ui_key_button_width() - 4.0f);
-        const int tint = ui_key_tint_push(state | layer_action_bone_state(armature, {p}));
+        const int tint = ui_key_tint_push(state);
         /* The driver tint over the key's: pushed last, popped first. */
         return std::pair<int, int>(state, tint | (ui_driver_field_begin(C, armature.id, p, -1) << 8));
       };
@@ -6619,7 +6619,7 @@ static void constraints_panel(Context &C, Layer &armature)
       const int state = layer_key_state(armature, {path}, doc.frame_current);
       modifier_row_label("Influence", column, "How much of the constraint's effect is used: 0 none, 1 all. It can be keyed");
       ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ui_key_button_width() - 4.0f);
-      const int tint = ui_key_tint_push(state | layer_action_bone_state(armature, {path}));
+      const int tint = ui_key_tint_push(state);
       const int driven = ui_driver_field_begin(C, armature.id, path, -1);
       ui_slider_float("##influence", &c.influence, 0.0f, 1.0f, "%.3f");
       ui_driver_typed(C, armature.id, path, -1);
@@ -7752,7 +7752,7 @@ static void mask_cards(Context &C, Layer &layer)
                            "puts their last dab's middle on it, below 0 leaves a gap. It can be keyed");
         ImGui::BeginDisabled(!reach_used);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ui_key_button_width() - 4.0f);
-        const int reach_tint = ui_key_tint_push(reach_state | layer_action_bone_state(layer, {reach_path}));
+        const int reach_tint = ui_key_tint_push(reach_state);
         const int driven_reach = ui_driver_field_begin(C, layer.id, reach_path, -1);
         float reach = m.line_reach;
         if (ui_drag_float("##reach", &reach, 0.01f, -2.0f, 2.0f, "%.2f line widths",
@@ -10107,6 +10107,16 @@ static void point_panel(Context &C, VectorDrawing &drawing)
   }
   handle_rows(C, drawing);
   ui_panel_end();
+}
+
+void properties_show_bone(Context &C, uint64_t armature, bool bone, const std::string &fix)
+{
+  if (!fix.empty()) {
+    g_bone_fix_lists[armature].picked = fix;
+  }
+  if (C.wm) {
+    C.wm->properties_tab_request = bone ? TAB_BONE : TAB_DRAWING;
+  }
 }
 
 std::vector<PropertiesTabEntry> properties_tabs(Document &doc)

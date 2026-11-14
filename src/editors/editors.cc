@@ -644,15 +644,8 @@ void ui_pinned_row()
 
 int ui_key_tint_push(int state)
 {
-  if (state & KEY_STATE_ACTION_BONE) {
-    /* An action bone is moving it now: pink, whatever its own keys (the value shown has the action in). */
-    const ImVec4 c(0.62f, 0.27f, 0.47f, 1.0f), hover(0.71f, 0.31f, 0.54f, 1.0f);
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, c);
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, hover);
-    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, hover);
-    ImGui::PushStyleColor(ImGuiCol_CheckboxSelectedBg, ImVec4(0.90f, 0.45f, 0.72f, 1.0f));
-    return 4;
-  }
+  /* Only the timeline's own keys: what action bones, knobs and fixes add shows in Affected By (the field's
+   * right-click menu and tooltip), not as a colour. */
   state &= 3;
   if (state <= 0) {
     return 0;

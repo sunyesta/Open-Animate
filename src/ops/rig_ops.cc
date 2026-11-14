@@ -4224,6 +4224,36 @@ void rig_operators_register()
                                           !all_in);
                  return OpStatus::Finished;
                });
+  {
+    /* Selection only: no undo step, as Blender's. */
+    OperatorType ot;
+    ot.idname = "armature.bone_go";
+    ot.name = "Go to Bone";
+    ot.description = "Make bone layer `layer` active with only bone `bone` selected and active (none named: the layer "
+                     "only), as a field's Affected By goes to what moves it";
+    ot.flag = OPTYPE_REGISTER;
+    ot.exec = [](Context &C) {
+      Document &doc = *C.document;
+      Layer *armature = layer_find(doc, std::strtoull(op_arg(C, "layer").c_str(), nullptr, 10));
+      if (!armature || !armature->is_bone_layer()) {
+        return OpStatus::Cancelled;
+      }
+      const std::string name = op_arg(C, "bone");
+      Bone *bone = name.empty() ? nullptr : const_cast<Bone *>(bone_find_by_name(*armature, name));
+      if (!name.empty() && !bone) {
+        return OpStatus::Cancelled;
+      }
+      doc.active_layer = armature->id;
+      if (bone) {
+        armature_deselect_all(*armature);
+        bone_select(*bone, true);
+        armature->active_bone = bone->id;
+      }
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
+
   rig_operator("armature.bone_collection_link", "Bone in Collection",
                "Put bone `bone` (default the active bone) of bone layer `armature` (default the one worked on) in "
                "collection `collection` (made if there is none), or take it out (`on` 0); `all` 1: every selected "

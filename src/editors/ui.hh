@@ -319,4 +319,7 @@ bool ui_driver_menu_opened_this_frame();
 /* The Driver window, drawn once a frame with the other floating windows. */
 void ui_driver_window_draw(Context &C);
 
+/* The "Affected By" submenu (src/editors/driver_ui.cc; its rows ui_affected_rows in editors.hh), inside an open menu, when anything moves the field: true when drawn. */
+bool ui_affected_menu(Context &C, uint64_t layer, const std::string &path, int component);
+
 }  // namespace oanim

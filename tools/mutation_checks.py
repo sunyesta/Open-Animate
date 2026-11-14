@@ -63,6 +63,16 @@ PENDING = [
      "Alt on a bone's chips does every selected bone", 'tests/test_collections.py'),
     ('src/ops/rig_ops.cc', 'if (l->selected && l != layer) {', 'if (false) {',
      "Alt on a layer's chips does every picked layer", 'tests/test_collections.py'),
+    ('src/anim/animation.cc', '            moves = moves || std::abs(off.x) > 1e-6f || std::abs(off.y) > 1e-6f;', '            moves = true;',
+     'Affected By leaves out an action holding the field still', 'tests/test_affected_by.py'),
+    ('src/anim/animation.cc', '    *r_own = *ref.vector_value - ref.vector->from_action_bones;', '    *r_own = *ref.vector_value;',
+     "Affected By's own value is without what actions add", 'tests/test_affected_by.py'),
+    ('src/ops/rig_ops.cc', '      if (bone) {\n        armature_deselect_all(*armature);\n', '      if (bone) {\n',
+     'an Affected By row selects only its bone', 'tests/test_affected_by.py'),
+    ('src/anim/animation.cc', '        source.bone = first ? first->name : std::string();', '        source.bone = std::string();',
+     "a fix's Affected By row goes to its bone", 'tests/test_affected_by.py'),
+    ('src/anim/animation.cc', '        source.amount = at.strength;', '        source.amount = 1.0f;',
+     "a fix's Affected By row says its strength", 'tests/test_affected_by.py'),
 ]
 
 def build(root):

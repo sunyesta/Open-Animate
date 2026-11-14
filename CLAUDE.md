@@ -145,7 +145,8 @@ Controller (`src/anim/controller.*`, Convert To; the knob plays ordinary actions
 whose keys on its bones are a line of poses; played by `bone_fix_play` in `src/anim/animation.cc` among the action bone
 actions (`action_bone_action_turns` orders them), faded by `BoneFix::fade`, made by `armature.bone_fix_new`; the Bone tab's
 `bone_fixes_panel` in `src/editors/properties.cc`; lines in the Spots panel's knob box (not the viewport's) from `bone_fix_knob_lines`, drawn by
-`bone_fix_lines_draw` in `src/editors/viewport.cc`; mirrored by Symmetrize through `document_bone_fix_mirror`). The Actions panel in the Armature
+`bone_fix_lines_draw` in `src/editors/viewport.cc`; mirrored by Symmetrize through `document_bone_fix_mirror`). Affected By (a field's or timeline row's right-click submenu, and its tooltip line, of what moves it besides its own keys: `layer_channel_sources` in `src/anim/animation.cc`, rows by `ui_affected_rows` and the submenu `ui_affected_menu` in `src/editors/driver_ui.cc`, `armature.bone_go`; fields are green or yellow from the shown timeline's keys only, no pink).
+The Actions panel in the Armature
 tab (`actions_panel` in `src/editors/properties.cc`; `ActionPlay` in `src/data/layer.hh`: each action's Frame, mute and loop,
 played by `action_own_frames` and set by `action_frame_set`). Not yet: local
 armature viewport, copy/paste poses.
