@@ -45,6 +45,11 @@ def snap():
     return d
 
 
+# Numbers a file leaves out at their default: a value a hair off it (a point's width 0.9999999) is written, so
+# compare a missing one as the default, not as a change.
+SAVED_DEFAULTS = {"radius": 1.0}
+
+
 def diff(a, b, path="", out=None, eps=1e-5):
     """Where two snaps differ (at most ~9 places), relative tolerance eps on floats."""
     out = [] if out is None else out
@@ -52,7 +57,9 @@ def diff(a, b, path="", out=None, eps=1e-5):
         return out
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a) | set(b), key=str):
-            if k not in a or k not in b:
+            if (k not in a or k not in b) and k in SAVED_DEFAULTS:
+                diff(a.get(k, SAVED_DEFAULTS[k]), b.get(k, SAVED_DEFAULTS[k]), f"{path}.{k}", out, eps)
+            elif k not in a or k not in b:
                 out.append(f"{path}.{k}: {'missing before' if k not in a else 'missing after'}")
             else:
                 diff(a[k], b[k], f"{path}.{k}", out, eps)

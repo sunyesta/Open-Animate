@@ -209,3 +209,4 @@ not a bug, check the times against the shutdown before shrinking.
 - **An edit by nothing turned CANCELLED** leaves older tests that ran the real path with it (Alt S by 1) testing nothing: give them a hair off (1.00001) so their mutation entries still catch.
 - **A rig loop** (a bone's IK target riding on the chain, a constraint fed by what it moves) can make a pose depend on
   history by design: report it as a question, don't fix it as a bug.
+- **A field "missing before" can be a hair off its default.** The file leaves a point's width out at exactly 1.0; a fix playing a width can leave the stored 1.0 two rounding steps under it (0.9999999, settled, never growing) after some frames are visited, so the field appears. `SAVED_DEFAULTS` in harness.py and fuzz_timing.py compares a missing one as its default; add a key there when another such field shows up.
