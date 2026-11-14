@@ -2240,10 +2240,8 @@ static void bone_display_panel(Context &C, Layer &armature)
   const ImGuiStyle &style = ImGui::GetStyle();
   const float h = ImGui::GetFrameHeight();
   const bool controller = bone_is_controller(*active);
-  /* A controller's colour first: it colours the knob and box, whatever its shape. */
-  if (controller) {
-    bone_color_rows(C, *active);
-  }
+  /* Colour first, on every bone type: it colours the bone, pin or knob and box whatever its shape. */
+  bone_color_rows(C, *active);
 
   /* Shape: Bone | Custom, as Blender's tabs (a pin is a bone type: drawn as a pin whatever this says). */
   props_label("Shape");
@@ -2395,9 +2393,6 @@ static void bone_display_panel(Context &C, Layer &armature)
     if (ImGui::IsItemDeactivatedAfterEdit()) {
       C.undo->push("Controller Frame Size", doc);
     }
-  }
-  if (!controller) {
-    bone_color_rows(C, *active);
   }
   ui_panel_end();
 }
