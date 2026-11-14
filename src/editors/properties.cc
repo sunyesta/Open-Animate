@@ -193,13 +193,14 @@ static void star_icon(ImDrawList *dl, ImVec2 c, float s, bool on, ImU32 col)
   }
 }
 
-/* Blender's Bone Collections panel: the bone layer's collections, each with a dot (filled: something
- * of it is selected; hollow: it has bones or drawings), its eye and its star; + and - beside, and a
- * menu; Assign, Remove, Select and Deselect under it. */
+/* The Armature tab's Collections panel (Blender's Bone Collections): the collections the bone layer works
+ * with, All first, each with a dot (filled: something of it is selected; hollow: it has bones or drawings),
+ * its eye and its star; + (a collection put on the panel, or a new one) and - (taken off) beside, and a
+ * menu. */
 static void bone_collections_panel(Context &C, Layer &armature)
 {
   Document &doc = *C.document;
-  if (!ui_collapsing_header("Bone Collections", true)) {
+  if (!ui_collapsing_header("Collections", true)) {
     return;
   }
   const ImGuiStyle &style = ImGui::GetStyle();
@@ -236,7 +237,6 @@ static void bone_collections_panel(Context &C, Layer &armature)
   /* All first: every bone and editable drawing, nothing assigned to it; it can't be renamed or removed. */
   BoneCollection all_row;
   all_row.id = 0;
-  all_row.name = BONE_COLLECTION_ALL;
   all_row.visible = armature.all_bones_visible;
   all_row.solo = armature.all_bones_solo;
   std::vector<const BoneCollection *> rows = {&all_row};
@@ -244,12 +244,13 @@ static void bone_collections_panel(Context &C, Layer &armature)
     rows.push_back(&c);
   }
   const bool all_active = !bone_collection_find(armature, armature.active_collection);
-  /* A collection deleted from its row's right-click menu, after the list. */
-  std::string delete_collection;
+  /* An operator a row's right-click menu chose, run after the list. */
+  std::string row_op, row_op_collection;
   for (const BoneCollection *row_c : rows) {
     const BoneCollection &c = *row_c;
     const bool is_all = &c == &all_row;
-    if (!st.filter.empty() && c.name.find(st.filter) == std::string::npos) {
+    const std::string name = is_all ? std::string(BONE_COLLECTION_ALL) : collection_name(doc, c.id);
+    if (!st.filter.empty() && name.find(st.filter) == std::string::npos) {
       continue;
     }
     ImGui::PushID(int(c.id) + (is_all ? 0 : 1));
@@ -263,8 +264,8 @@ static void bone_collections_panel(Context &C, Layer &armature)
       }
       ImGui::InputText("##rename", &st.rename_text, ImGuiInputTextFlags_AutoSelectAll);
       if (ImGui::IsItemDeactivated()) {
-        if (!st.rename_text.empty() && st.rename_text != c.name) {
-          operator_call(C, "armature.collection_set", {{"collection", c.name}, {"name", st.rename_text}});
+        if (!st.rename_text.empty() && st.rename_text != name) {
+          operator_call(C, "armature.collection_set", {{"collection", name}, {"name", st.rename_text}});
         }
         st.renaming = 0;
       }
@@ -275,34 +276,47 @@ static void bone_collections_panel(Context &C, Layer &armature)
       if (ImGui::Selectable("##row", is_active, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(w - icons_w, row_h - 2.0f))) {
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !is_all) {
           st.renaming = c.id;
-          st.rename_text = c.name;
+          st.rename_text = name;
         }
         else if (!is_active) {
-          operator_call(C, "armature.collection_set", {{"collection", c.name}, {"active", "1"}});
+          operator_call(C, "armature.collection_set", {{"collection", name}, {"active", "1"}});
         }
       }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
         ImGui::SetTooltip(is_all ? "All: every bone, and every drawing Editable in Bone Group. Its eye shows or hides "
                                    "them all; nothing is assigned to it"
-                                 : "Click to make it active; double-click to rename; right-click to delete");
+                                 : "Click to make it active; double-click to rename; right-click for more");
       }
-      /* Right-click: rename or delete it (its bones and drawings just leave it). All has neither. */
+      /* Right-click: rename it (everywhere), select or deselect its bones, or delete it (from everything). */
       if (!is_all && ImGui::BeginPopupContextItem("##collection_menu")) {
-        ImGui::TextDisabled("%s", c.name.c_str());
+        ImGui::TextDisabled("%s", name.c_str());
         ImGui::Separator();
         if (ImGui::MenuItem("Rename")) {
           st.renaming = c.id;
-          st.rename_text = c.name;
+          st.rename_text = name;
         }
-        if (ImGui::MenuItem("Delete")) {
-          delete_collection = c.name;
+        if (ImGui::MenuItem("Select")) {
+          row_op = "armature.collection_select";
+          row_op_collection = name;
+        }
+        if (ImGui::MenuItem("Deselect")) {
+          row_op = "armature.collection_deselect";
+          row_op_collection = name;
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Delete Collection")) {
+          row_op = "armature.collection_delete";
+          row_op_collection = name;
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+          ImGui::SetTooltip("Take it off every bone and layer, and every panel");
         }
         ImGui::EndPopup();
       }
       const bool shown = is_all ? bone_collection_all_shown(armature) : bone_collection_shown(armature, c);
       dl->AddText(ImVec2(row.x + style.FramePadding.x, row.y + 1.0f),
                   shown ? ImGui::GetColorU32(ImGuiCol_Text) : ImGui::GetColorU32(ImGuiCol_TextDisabled),
-                  c.name.c_str());
+                  name.c_str());
     }
     /* The dot: filled while something of it is selected, hollow while it has members. */
     bool members = false, selected = false;
@@ -331,7 +345,7 @@ static void bone_collections_panel(Context &C, Layer &armature)
     ImGui::SameLine(w - row_h * 2.0f);
     const ImVec2 eye_at = ImGui::GetCursorScreenPos();
     if (ImGui::InvisibleButton("##eye", ImVec2(row_h, row_h - 2.0f))) {
-      operator_call(C, "armature.collection_set", {{"collection", c.name}, {"visible", c.visible ? "0" : "1"}});
+      operator_call(C, "armature.collection_set", {{"collection", name}, {"visible", c.visible ? "0" : "1"}});
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip("Show or hide its bones, and its drawings' points and wires (their artwork still renders)");
@@ -340,7 +354,7 @@ static void bone_collections_panel(Context &C, Layer &armature)
     ImGui::SameLine(0.0f, 0.0f);
     const ImVec2 star_at = ImGui::GetCursorScreenPos();
     if (ImGui::InvisibleButton("##solo", ImVec2(row_h, row_h - 2.0f))) {
-      operator_call(C, "armature.collection_set", {{"collection", c.name}, {"solo", c.solo ? "0" : "1"}});
+      operator_call(C, "armature.collection_set", {{"collection", name}, {"solo", c.solo ? "0" : "1"}});
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip("Solo: while any collection is soloed, only soloed ones show");
@@ -349,12 +363,9 @@ static void bone_collections_panel(Context &C, Layer &armature)
               c.solo || ImGui::IsItemHovered() ? icon : dim);
     ImGui::PopID();
   }
-  if (armature.bone_collections.empty()) {
-    ImGui::TextDisabled("No collections yet: + adds one");
-  }
   ImGui::EndChild();
-  if (!delete_collection.empty()) {
-    operator_call(C, "armature.collection_remove", {{"collection", delete_collection}});
+  if (!row_op.empty()) {
+    operator_call(C, row_op, {{"collection", row_op_collection}});
     return;
   }
   const ImVec2 list_max = ImGui::GetItemRectMax();
@@ -363,10 +374,21 @@ static void bone_collections_panel(Context &C, Layer &armature)
   ImGui::SetCursorScreenPos(ImVec2(list_min.x + list_w + style.ItemSpacing.x, list_min.y));
   ImGui::BeginGroup();
   if (ImGui::Button("+", ImVec2(h, h))) {
-    operator_call(C, "armature.collection_add");
+    ImGui::OpenPopup("##collection_put");
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip("Add a bone collection after the active one");
+    ImGui::SetTooltip("Put a collection on this panel, or make a new one");
+  }
+  if (ImGui::BeginPopup("##collection_put")) {
+    std::string put;
+    bool fresh = false;
+    if (ui_collection_list(doc, "put",
+                           [&](const Collection &c) { return bone_collection_find(armature, c.id) == nullptr; },
+                           nullptr, "New Collection", put, fresh))
+    {
+      operator_call(C, "armature.collection_add", fresh ? OpArgs{{"name", put}} : OpArgs{{"collection", put}});
+    }
+    ImGui::EndPopup();
   }
   ImGui::BeginDisabled(all_active);
   if (ImGui::Button("-", ImVec2(h, h))) {
@@ -374,7 +396,8 @@ static void bone_collections_panel(Context &C, Layer &armature)
   }
   ImGui::EndDisabled();
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip(all_active ? "All can't be removed" : "Remove the active bone collection (its bones and drawings just leave it)");
+    ImGui::SetTooltip(all_active ? "All can't be removed"
+                                 : "Take the active collection off this panel (its bones and layers stay in it)");
   }
   ImGui::Dummy(ImVec2(h, 4.0f));
   if (ImGui::ArrowButton("##specials", ImGuiDir_Down)) {
@@ -434,48 +457,6 @@ static void bone_collections_panel(Context &C, Layer &armature)
     ImGui::InputTextWithHint("##filter_text", "Filter by name", &st.filter);
   }
 
-  /* Assign, Remove, Select, Deselect. */
-  const bool any_bone = std::any_of(armature.bones.begin(), armature.bones.end(), picked);
-  /* Drawings Assign and Remove take: picked in the Layers editor, or with points selected in the
-   * viewport (as M and Shift M). */
-  const bool any_drawing = !collection_drawings(doc, armature).empty();
-  const BoneCollection *active = bone_collection_find(armature, armature.active_collection);
-  bool active_members = all_active && !armature.bones.empty();
-  if (active) {
-    for (const Bone &b : armature.bones) {
-      active_members |= has(b.collections, active->id);
-    }
-    for (const Layer *d : drawings) {
-      active_members |= d->edit_with_bones && has(d->collections, active->id);
-    }
-  }
-  const float bw = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x * 3.0f) / 4.0f;
-  struct Action {
-    const char *label, *op, *tip;
-    bool enabled;
-  };
-  const Action actions[] = {
-      {"Assign", "armature.collection_assign", "Put the selected bones and drawings (points selected, or picked in the Layers editor) in the active collection",
-       active && (any_bone || any_drawing)},
-      {"Remove", "armature.collection_unassign", "Take the selected bones and drawings out of the active collection",
-       active && (any_bone || any_drawing)},
-      {"Select", "armature.collection_select", "Select the active collection's bones, and its drawings' points",
-       active_members},
-      {"Deselect", "armature.collection_deselect", "Deselect the active collection's bones, and its drawings' points",
-       active_members}};
-  for (int i = 0; i < 4; i++) {
-    if (i > 0) {
-      ImGui::SameLine();
-    }
-    ImGui::BeginDisabled(!actions[i].enabled);
-    if (ImGui::Button(actions[i].label, ImVec2(bw, 0.0f))) {
-      operator_call(C, actions[i].op);
-    }
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
-      ImGui::SetTooltip("%s", actions[i].tip);
-    }
-  }
   ImGui::Spacing();
 }
 
@@ -596,9 +577,149 @@ static void controller_side_row(Context &C, Layer &armature, const Bone &knob, i
   ImGui::PopID();
 }
 
+/* A bone's or layer's Collections: its collections as chips that wrap, each with an x that takes it out,
+ * and + for a searchable list of the others (or a new one). Alt with + or x: every selected bone (or picked
+ * layer) too. `op` puts it in or takes it out, given `args` and `collection`, `on` and `all`. */
+static void collection_chips(Context &C, const std::vector<uint64_t> &ids, const char *op, const OpArgs &args,
+                             const char *alt_what)
+{
+  Document &doc = *C.document;
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float h = ImGui::GetFrameHeight();
+  const float pad = style.FramePadding.x;
+  const float avail = ImGui::GetContentRegionAvail().x;
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImVec2 field = ImGui::GetCursorScreenPos();
+  /* The field behind the chips, drawn once their lines are known. */
+  dl->ChannelsSplit(2);
+  dl->ChannelsSetCurrent(1);
+  const float inner = pad * 0.5f;
+  ImGui::SetCursorScreenPos(ImVec2(field.x + inner, field.y + inner));
+  const float right = field.x + avail - inner;
+  const float chip_h = h - inner * 2.0f;
+  float x = field.x + inner, y = field.y + inner;
+  const auto place = [&](float w) {
+    if (x > field.x + inner && x + w > right) {
+      x = field.x + inner;
+      y += chip_h + style.ItemSpacing.y * 0.5f;
+    }
+    ImGui::SetCursorScreenPos(ImVec2(x, y));
+    x += w + style.ItemSpacing.x * 0.5f;
+  };
+  std::string take_off;
+  bool take_all = false;
+  const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text), dim = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+  for (const uint64_t id : ids) {
+    const Collection *c = collection_find(doc, id);
+    if (!c) {
+      continue;
+    }
+    ImGui::PushID(int(id));
+    const float text_w = ImGui::CalcTextSize(c->name.c_str()).x;
+    const float x_w = chip_h;
+    const float w = std::min(text_w + pad * 2.0f + x_w, right - (field.x + inner));
+    place(w);
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##chip", ImVec2(w, chip_h));
+    const bool over_x = ImGui::IsMouseHoveringRect(ImVec2(at.x + w - x_w, at.y), ImVec2(at.x + w, at.y + chip_h));
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && over_x) {
+      take_off = c->name;
+      take_all = ImGui::GetIO().KeyAlt;
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      if (over_x) {
+        ImGui::SetTooltip("Take it out of %s (Alt: %s too)", c->name.c_str(), alt_what);
+      }
+      else if (text_w + pad * 2.0f + x_w > w) {
+        ImGui::SetTooltip("%s", c->name.c_str());
+      }
+    }
+    const bool hovered = ImGui::IsItemHovered();
+    dl->AddRectFilled(at, ImVec2(at.x + w, at.y + chip_h),
+                      ImGui::GetColorU32(hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Button), chip_h * 0.5f);
+    dl->PushClipRect(at, ImVec2(at.x + w - x_w, at.y + chip_h), true);
+    dl->AddText(ImVec2(at.x + pad, at.y + (chip_h - ImGui::GetTextLineHeight()) * 0.5f), text, c->name.c_str());
+    dl->PopClipRect();
+    /* The x. */
+    const ImVec2 xc(at.x + w - x_w * 0.5f, at.y + chip_h * 0.5f);
+    const float r = chip_h * 0.17f;
+    const ImU32 xcol = over_x && hovered ? text : dim;
+    dl->AddLine(ImVec2(xc.x - r, xc.y - r), ImVec2(xc.x + r, xc.y + r), xcol, 1.4f);
+    dl->AddLine(ImVec2(xc.x - r, xc.y + r), ImVec2(xc.x + r, xc.y - r), xcol, 1.4f);
+    ImGui::PopID();
+  }
+  /* + last, on the line it fits. */
+  place(chip_h);
+  const ImVec2 plus_at = ImGui::GetCursorScreenPos();
+  if (ImGui::InvisibleButton("##collection_plus", ImVec2(chip_h, chip_h))) {
+    ImGui::OpenPopup("##collection_chip_add");
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("Put it in a collection, or a new one (Alt: %s too)", alt_what);
+  }
+  {
+    const ImVec2 pc(plus_at.x + chip_h * 0.5f, plus_at.y + chip_h * 0.5f);
+    const float r = chip_h * 0.25f;
+    const ImU32 pcol = ImGui::IsItemHovered() ? text : dim;
+    dl->AddLine(ImVec2(pc.x - r, pc.y), ImVec2(pc.x + r, pc.y), pcol, 1.4f);
+    dl->AddLine(ImVec2(pc.x, pc.y - r), ImVec2(pc.x, pc.y + r), pcol, 1.4f);
+  }
+  const float bottom = y + chip_h + inner;
+  dl->ChannelsSetCurrent(0);
+  dl->AddRectFilled(field, ImVec2(field.x + avail, bottom), ImGui::GetColorU32(ImGuiCol_FrameBg), style.FrameRounding);
+  dl->ChannelsMerge();
+  ImGui::SetCursorScreenPos(field);
+  ImGui::Dummy(ImVec2(avail, bottom - field.y));
+  if (ImGui::BeginPopup("##collection_chip_add")) {
+    std::string name;
+    bool fresh = false;
+    if (ui_collection_list(doc, "chip",
+                           [&](const Collection &c) { return std::find(ids.begin(), ids.end(), c.id) == ids.end(); },
+                           nullptr, "New Collection", name, fresh))
+    {
+      OpArgs put = args;
+      put["collection"] = fresh ? collection_unique_name(doc, name) : name;
+      put["on"] = "1";
+      put["all"] = ImGui::GetIO().KeyAlt ? "1" : "0";
+      operator_call(C, op, put);
+    }
+    ImGui::EndPopup();
+  }
+  if (!take_off.empty()) {
+    OpArgs off = args;
+    off["collection"] = take_off;
+    off["on"] = "0";
+    off["all"] = take_all ? "1" : "0";
+    operator_call(C, op, off);
+  }
+}
+
+/* The Bone tab's Collections: the active bone's. */
+static void bone_collections_chips_panel(Context &C, Layer &armature)
+{
+  const Bone *active = bone_find(armature, armature.active_bone);
+  if (!active || !ui_panel_begin("Collections")) {
+    return;
+  }
+  const std::vector<uint64_t> ids = active->collections;
+  collection_chips(C, ids, "armature.bone_collection_link",
+                   {{"armature", std::to_string(armature.id)}, {"bone", active->name}}, "every selected bone");
+  ui_panel_end();
+}
+
+/* The Layer tab's Collections: the active layer's. */
+static void layer_collections_chips_panel(Context &C, Layer &layer)
+{
+  if (!ui_panel_begin("Collections")) {
+    return;
+  }
+  const std::vector<uint64_t> ids = layer.collections;
+  collection_chips(C, ids, "layer.collection_link", {{"layer", std::to_string(layer.id)}}, "every picked layer");
+  ui_panel_end();
+}
+
 /* Blender's bone Relations, for the active bone: its parent (a searchable list and an eyedropper; on the
- * setup frame), Connected, Local Location, Inherit Rotation and Inherit Scale (with Keep Animation), and
- * the bone collections it is in. */
+ * setup frame), Connected, Local Location, Inherit Rotation and Inherit Scale (with Keep Animation). */
 static void bone_relations_panel(Context &C, Layer &armature)
 {
   Document &doc = *C.document;
@@ -951,53 +1072,6 @@ static void bone_relations_panel(Context &C, Layer &armature)
     }
   }
 
-  /* The bone collections it is in, with their eye and star (as the Bone Collections list). */
-  active = bone_find(armature, own);
-  label("Collections");
-  bool any = false;
-  ImDrawList *dl = ImGui::GetWindowDrawList();
-  const float h = ImGui::GetFrameHeight();
-  const ImU32 icon = ImGui::GetColorU32(ImGuiCol_Text), dim = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-  for (const BoneCollection &c : armature.bone_collections) {
-    if (std::find(active->collections.begin(), active->collections.end(), c.id) == active->collections.end()) {
-      continue;
-    }
-    if (any) {
-      label("");
-    }
-    any = true;
-    ImGui::PushID(int(c.id));
-    const float w = ImGui::GetContentRegionAvail().x;
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(c.name.c_str());
-    ImGui::SameLine(std::max(0.0f, w - h * 2.0f));
-    const ImVec2 eye_at = ImGui::GetCursorScreenPos();
-    if (ImGui::InvisibleButton("##eye", ImVec2(h, h))) {
-      operator_call(C, "armature.collection_set", {{"collection", c.name}, {"visible", c.visible ? "0" : "1"}});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Show or hide its bones, and its drawings' points and wires");
-    }
-    eye_icon(dl, ImVec2(eye_at.x + h * 0.5f, eye_at.y + h * 0.5f), h * 0.32f, c.visible, ImGui::IsItemHovered() ? icon : dim);
-    ImGui::SameLine(0.0f, 0.0f);
-    const ImVec2 star_at = ImGui::GetCursorScreenPos();
-    if (ImGui::InvisibleButton("##solo", ImVec2(h, h))) {
-      operator_call(C, "armature.collection_set", {{"collection", c.name}, {"solo", c.solo ? "0" : "1"}});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Solo: while any collection is soloed, only soloed ones show");
-    }
-    star_icon(dl, ImVec2(star_at.x + h * 0.5f, star_at.y + h * 0.5f), h * 0.32f, c.solo,
-              c.solo || ImGui::IsItemHovered() ? icon : dim);
-    ImGui::PopID();
-    active = bone_find(armature, own);
-    if (!active) {
-      break;
-    }
-  }
-  if (!any) {
-    ImGui::TextDisabled("None (Assign in Bone Collections, or M)");
-  }
   ui_panel_end();
 }
 
@@ -8301,8 +8375,8 @@ static void layer_tab(Context &C)
     ui_prop(C, ptr, "render_visible", path);
     ui_prop(C, ptr, "locked", path);
     if (layer->type == LayerType::Vector && layer_armature(doc, layer->id)) {
-      /* Edited along with its bone layer's bones (and so in its All collection; Assign or M put it in
-       * others). */
+      /* Edited along with its bone layer's bones (and so in its All collection, and shown or hidden by
+       * its collections there). */
       ui_prop(C, ptr, "edit_with_bones", path);
     }
     if (layer->type == LayerType::Vector && (layer->ignore_group_deforms || layer_has_group_deforms(doc, *layer, false))) {
@@ -8328,6 +8402,7 @@ static void layer_tab(Context &C)
   /* On a reference, a channel it took over from its original shows teal. */
   const auto own = [&](const char *name) { return layer->is_reference() && layer->reference.own_channels.count(name) > 0; };
   const auto channel_args = [](const char *name) { return std::vector<OpArgs>{{{"kind", "CHANNEL"}, {"path", name}}}; };
+  layer_collections_chips_panel(C, *layer);
   if (ui_panel_begin("Transform")) {
     bool on = changed_begin(own("position"));
     key_next(C, *layer, {"position"});
@@ -10191,6 +10266,7 @@ void properties_draw(Area &area, Context &C)
           controller_preview_clear();
         }
         bone_relations_panel(C, armature);
+        bone_collections_chips_panel(C, armature);
         bone_display_panel(C, armature);
         break;
       }

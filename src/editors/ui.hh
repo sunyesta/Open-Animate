@@ -16,6 +16,7 @@ namespace oanim {
 
 struct Context;
 struct Document;
+struct Collection;
 class UndoStack;
 struct Layer;
 struct WindowManager;
@@ -281,9 +282,16 @@ void ui_layer_eyedropper_overlay();
 /* A pipette icon, as on Blender's eyedropper buttons. */
 void ui_eyedropper_icon(ImDrawList *dl, ImVec2 center, float size, ImU32 color);
 
-/* M and Shift M: Blender's Move to Collection and Assign to Collection menus, opened by the editor
- * under the mouse (the viewport or the Layers editor) when one of them asked. */
-void ui_bone_collection_menus(Context &C, bool hovered);
+/* M (and Shift M): a menu of every collection, ticked where all the selection is in it, each putting the
+ * selection in it or taking it out; opened by the editor under the mouse when asked. `in_layers`: the Layers
+ * editor's, for the picked layers (the viewport's is for the selected bones). */
+void ui_bone_collection_menus(Context &C, bool hovered, bool in_layers);
+/* Inside an open popup: a search field, the collections `listed` lets through (ticked where `ticked` says),
+ * and New "<typed>" (`new_label` before anything is typed). True when one was picked: its name, and whether
+ * it is a new one (its name typed, or empty for the default). */
+bool ui_collection_list(const Document &doc, const char *id, const std::function<bool(const Collection &)> &listed,
+                        const std::function<bool(const Collection &)> &ticked, const char *new_label,
+                        std::string &r_name, bool &r_new);
 
 /* Menus that open at the mouse (right-click menus, X, Ctrl P...), as Blender's: each remembers the
  * item last chosen and opens with it under the mouse (the first item, before any choice). In place

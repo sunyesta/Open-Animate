@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <climits>
+#include <cctype>
 #include <cstring>
 #include <cmath>
 #include <map>
@@ -1535,47 +1536,119 @@ const Document *g_doc_for_cue = nullptr;
 
 }  // namespace
 
-void ui_bone_collection_menus(Context &C, bool hovered)
+bool ui_collection_list(const Document &doc, const char *id, const std::function<bool(const Collection &)> &listed,
+                        const std::function<bool(const Collection &)> &ticked, const char *new_label,
+                        std::string &r_name, bool &r_new)
 {
-  WindowManager &wm = *C.wm;
-  if (hovered && (wm.menu_request == "bone_collection_move" || wm.menu_request == "bone_collection_assign")) {
-    ImGui::OpenPopup(wm.menu_request == "bone_collection_move" ? "##bone_collection_move" : "##bone_collection_assign");
-    wm.menu_request.clear();
+  static std::map<std::string, std::string> searches;
+  std::string &search = searches[id];
+  if (ImGui::IsWindowAppearing()) {
+    search.clear();
+    ImGui::SetKeyboardFocusHere();
   }
-  Document &doc = *C.document;
-  Layer *armature = collection_armature(doc);
-  for (const bool move : {true, false}) {
-    if (!ui_menu_begin(move ? "##bone_collection_move" : "##bone_collection_assign")) {
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+  const bool entered = ImGui::InputTextWithHint("##collection_search", "Search", &search,
+                                                ImGuiInputTextFlags_EnterReturnsTrue);
+  const auto lower = [](std::string t) {
+    for (char &ch : t) {
+      ch = char(std::tolower((unsigned char)ch));
+    }
+    return t;
+  };
+  const std::string want = lower(search);
+  bool picked = false;
+  const Collection *exact = nullptr, *first = nullptr;
+  for (const Collection &c : doc.collections) {
+    if (!listed(c)) {
       continue;
     }
-    ImGui::TextDisabled(move ? "Move to Collection" : "Assign to Collection");
-    ImGui::Separator();
-    const char *op = move ? "armature.move_to_collection" : "armature.assign_to_collection";
-    if (armature) {
-      const bool bones = doc.active_layer == armature->id;
-      const std::vector<Layer *> drawings = collection_drawings(doc, *armature);
-      for (const BoneCollection &c : armature->bone_collections) {
-        /* Ticked: something it would move is in it already. */
-        const auto in = [&](const std::vector<uint64_t> &ids) {
-          return std::find(ids.begin(), ids.end(), c.id) != ids.end();
-        };
-        bool has = std::any_of(drawings.begin(), drawings.end(), [&](const Layer *d) { return in(d->collections); });
-        for (const Bone &b : armature->bones) {
-          has |= bones && (b.selected || b.select_head || b.select_tail) && in(b.collections);
-        }
-        if (ui_menu_item(c.name.c_str(), nullptr, has)) {
-          operator_call(C, op, {{"collection", c.name}});
-        }
-      }
-      if (!armature->bone_collections.empty()) {
-        ImGui::Separator();
-      }
+    if (c.name == search) {
+      exact = &c;
     }
-    if (ui_menu_item("New Collection...")) {
-      operator_call(C, op, {{"new", "1"}});
+    if (!want.empty() && lower(c.name).find(want) == std::string::npos) {
+      continue;
     }
-    ui_menu_end();
+    if (!first) {
+      first = &c;
+    }
+    if (ImGui::MenuItem(c.name.c_str(), nullptr, ticked && ticked(c))) {
+      r_name = c.name;
+      r_new = false;
+      picked = true;
+    }
   }
+  /* A name no collection has yet (All is never one). */
+  const bool can_new = search.empty() || (!collection_find_by_name(doc, search) && search != BONE_COLLECTION_ALL);
+  if (first || can_new) {
+    ImGui::Separator();
+  }
+  if (can_new) {
+    const std::string label = search.empty() ? std::string(new_label) : "New \"" + search + "\"";
+    if (ImGui::MenuItem(label.c_str())) {
+      r_name = search;
+      r_new = true;
+      picked = true;
+    }
+  }
+  if (entered && !picked) {
+    /* Enter: the collection of that name, else the only one found, else a new one of that name. */
+    if (exact || first) {
+      r_name = (exact ? exact : first)->name;
+      r_new = false;
+      picked = true;
+    }
+    else if (can_new && !search.empty()) {
+      r_name = search;
+      r_new = true;
+      picked = true;
+    }
+    ImGui::CloseCurrentPopup();
+  }
+  return picked;
+}
+
+void ui_bone_collection_menus(Context &C, bool hovered, bool in_layers)
+{
+  WindowManager &wm = *C.wm;
+  if (hovered && wm.menu_request == "collection_toggle") {
+    ImGui::OpenPopup("##collection_toggle");
+    wm.menu_request.clear();
+  }
+  if (!ui_menu_begin("##collection_toggle")) {
+    return;
+  }
+  Document &doc = *C.document;
+  ImGui::TextDisabled("Collections");
+  ImGui::Separator();
+  std::vector<Bone *> bones;
+  std::vector<Layer *> layers;
+  collection_targets(doc, in_layers, bones, layers);
+  /* Ticked: all of the selection is in it, so picking it takes it out. */
+  const auto ticked = [&](const Collection &c) {
+    const auto in = [&](const std::vector<uint64_t> &ids) {
+      return std::find(ids.begin(), ids.end(), c.id) != ids.end();
+    };
+    bool all = !bones.empty() || !layers.empty();
+    for (const Bone *b : bones) {
+      all &= in(b->collections);
+    }
+    for (const Layer *l : layers) {
+      all &= in(l->collections);
+    }
+    return all;
+  };
+  std::string name;
+  bool fresh = false;
+  if (ui_collection_list(doc, "toggle", [](const Collection &) { return true; }, ticked, "New Collection", name,
+                         fresh))
+  {
+    OpArgs args = fresh ? OpArgs{{"new", "1"}, {"name", name}} : OpArgs{{"collection", name}};
+    if (in_layers) {
+      args["area"] = "LAYERS";
+    }
+    operator_call(C, "armature.collection_toggle", args);
+  }
+  ui_menu_end();
 }
 
 void ui_layer_eyedropper_start(uint64_t armature, uint64_t bone)

@@ -510,17 +510,18 @@ class _Layer:
 
     @property
     def bone_collections(self):
-        """A bone layer's bone collections, in list order, All first (fixed: every bone and every
-        drawing Editable in Bone Group; nothing is assigned to it): dicts with name, visible (the eye),
-        solo (the star), shown, active, fixed, bones and layers (the drawings in it). Change them with the
-        armature.collection_* operators (add, remove, move, assign, unassign, select, deselect,
-        set) and armature.move_to_collection / assign_to_collection (M and Shift M)."""
+        """The collections on a bone layer's Collections panel, in list order, All first (fixed: every
+        bone and every drawing Editable in Bone Group; nothing is assigned to it): dicts with name,
+        visible (the eye), solo (the star), shown, active, fixed, bones and layers (the drawings in it).
+        Change them with the armature.collection_* operators (add and remove put collections on the panel
+        and take them off; delete deletes one everywhere; move, assign, unassign, select, deselect, set,
+        toggle for the M menu)."""
         return [dict(c) for c in _oanim.layer_bone_collections(self._id)]
 
     @property
     def collections(self):
-        """The bone collections this drawing is in (names, of its bone layer); layer.bone_collection_toggle
-        puts it in one or takes it out."""
+        """The collections this layer is in (names); layer.collection_link puts it in one or takes it
+        out."""
         return list(_oanim.layer_collections(self._id)[0])
 
     @property
@@ -964,6 +965,12 @@ class _Data:
         """The names of the drawing layers as drawn now, bottom first: the Layers editor's order
         with every layer's Draw Order rule applied (hidden layers left out)."""
         return list(_oanim.draw_order())
+
+    @property
+    def collections(self):
+        """The document's collections (names): tags any bone or layer can carry. A bone's are
+        bone["collections"], a layer's layer.collections; armature.collection_delete deletes one."""
+        return list(_oanim.document_collections())
 
     @property
     def materials(self):

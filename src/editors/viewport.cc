@@ -18238,7 +18238,7 @@ static void viewport_draw_contents(Area &area, Context &C)
     ui_menu_end();
   }
   bone_parent_menus(C, hovered);
-  ui_bone_collection_menus(C, hovered);
+  ui_bone_collection_menus(C, hovered, false);
   if (!ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
     g_right_click_spent = false;
   }

@@ -3321,10 +3321,8 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["shape_layer"] = shape_layer ? shape_layer->name : std::string();
       d["color_set"] = bone_color_set_identifier(b.color_set);
       py::list in;
-      for (const uint64_t c_id : b.collections) {
-        if (const BoneCollection *c = bone_collection_find(layer, c_id)) {
-          in.append(c->name);
-        }
+      for (const std::string &name : collection_names(*current_context().document, b.collections)) {
+        in.append(name);
       }
       d["collections"] = in;
       const BoneColors shades = bone_colors(b);
@@ -4092,7 +4090,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         }
       }
       py::dict d;
-      d["name"] = c.name;
+      d["name"] = collection_name(doc, c.id);
       d["visible"] = c.visible;
       d["solo"] = c.solo;
       d["shown"] = bone_collection_shown(armature, c);
@@ -4104,19 +4102,23 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return result;
   });
-  /* The bone collections a drawing is in (of its bone layer), and whether its points are edited
-   * along with the bones now. */
+  /* The collections a layer is in, and whether its points are edited along with the bones now. */
   m.def("layer_collections", [layer_or_raise](uint64_t id) {
     const Document &doc = *current_context().document;
     const Layer &layer = layer_or_raise(id);
-    const Layer *armature = layer_armature(doc, layer.id);
     py::list names;
-    for (const uint64_t c_id : layer.collections) {
-      if (const BoneCollection *c = armature ? bone_collection_find(*armature, c_id) : nullptr) {
-        names.append(c->name);
-      }
+    for (const std::string &name : collection_names(doc, layer.collections)) {
+      names.append(name);
     }
     return py::make_tuple(names, layer_edited_with_bones(doc, layer));
+  });
+  /* The document's collections, by name, in the order made. */
+  m.def("document_collections", [] {
+    std::vector<std::string> names;
+    for (const Collection &c : current_context().document->collections) {
+      names.push_back(c.name);
+    }
+    return names;
   });
   /* The paths of the layer's channels keyed at `frame` (the timeline's Keyed Here list). */
   m.def("layer_keyed_at", [layer_or_raise](uint64_t id, int frame) {

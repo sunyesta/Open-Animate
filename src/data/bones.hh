@@ -17,6 +17,7 @@ namespace oanim {
 
 struct Bone;
 struct BoneCollection;
+struct Collection;
 struct BoneConstraint;
 struct Document;
 struct Layer;
@@ -225,13 +226,32 @@ BoneColors bone_colors(const Bone &bone);
 /* Gives a bone colour set `set`. Going to Custom starts from the shades it had, as in Blender. */
 void bone_set_color_set(Bone &bone, int set);
 
-/* --- Bone collections ---------------------------------------------------------------------- */
+/* --- Collections ---------------------------------------------------------------------------- */
 
+/* The All collection's name: every bone layer's panel has it, holding all its bones (and editable
+ * drawings); no collection takes the name. */
+inline constexpr const char *BONE_COLLECTION_ALL = "All";
+Collection *collection_find(Document &doc, uint64_t id);
+const Collection *collection_find(const Document &doc, uint64_t id);
+Collection *collection_find_by_name(Document &doc, const std::string &name);
+const Collection *collection_find_by_name(const Document &doc, const std::string &name);
+/* Its name ("" for none). */
+std::string collection_name(const Document &doc, uint64_t id);
+/* "Collection", "Collection.001", ... unique among the document's collections (and not All). */
+std::string collection_unique_name(const Document &doc, const std::string &name);
+/* A new collection, its name made unique. */
+Collection &collection_new(Document &doc, const std::string &name);
+/* The collection of that name, made if there is none (null for All or nothing). */
+Collection *collection_ensure(Document &doc, const std::string &name);
+/* Deletes a collection: every bone and layer leaves it, and every bone layer's panel loses it. */
+void collection_delete(Document &doc, uint64_t id);
+/* Ids as names, and names as ids (those not found left out). */
+std::vector<std::string> collection_names(const Document &doc, const std::vector<uint64_t> &ids);
+
+/* A bone layer's panel entry for a collection. */
 BoneCollection *bone_collection_find(Layer &armature, uint64_t id);
 const BoneCollection *bone_collection_find(const Layer &armature, uint64_t id);
-BoneCollection *bone_collection_find_by_name(Layer &armature, const std::string &name);
-/* The All collection's name: every bone layer has it, holding all its bones (and editable drawings). */
-inline constexpr const char *BONE_COLLECTION_ALL = "All";
+BoneCollection *bone_collection_find_by_name(const Document &doc, Layer &armature, const std::string &name);
 /* Whether a collection shows: by its eye, or, while any collection is soloed (All included), by its
  * star. */
 bool bone_collection_shown(const Layer &armature, const BoneCollection &collection);
@@ -244,12 +264,13 @@ bool bone_shown(const Layer &armature, const Bone &bone);
 /* Whether a drawing is edited along with its bone layer's bones: it is Editable in Bone Group, and
  * shows by its collections. */
 bool layer_edited_with_bones(const Document &doc, const Layer &layer);
-/* "Collection", "Collection.001", ... unique among the bone layer's collections. */
-std::string bone_collection_unique_name(const Layer &armature, const std::string &name);
-/* Adds a collection after the active one and makes it active. */
-BoneCollection &bone_collection_add(Layer &armature, const std::string &name);
-/* Removes a collection; its bones and drawings just leave it. */
-void bone_collection_remove(Document &doc, Layer &armature, uint64_t id);
+/* Puts the document's collection `id` on the bone layer's panel after the active one (if it isn't there)
+ * and makes it active. */
+BoneCollection &bone_collection_add(Layer &armature, uint64_t id);
+/* Puts it on the bone layer's panel, last, if it isn't there; the active one stays. */
+void bone_collection_ensure(Layer &armature, uint64_t id);
+/* Takes a collection off the bone layer's panel; its bones and drawings stay in it. */
+void bone_collection_remove(Layer &armature, uint64_t id);
 /* The bone layer whose collections M and Shift M (and Assign) work with: the active layer when it is a
  * bone layer, else the one the active drawing is inside; null for neither. */
 Layer *collection_armature(Document &doc);
@@ -257,6 +278,10 @@ Layer *collection_armature(Document &doc);
  * editor, the active layer when it is one of them, and those edited along with the bones whose points
  * are selected in the viewport. */
 std::vector<Layer *> collection_drawings(Document &doc, const Layer &armature);
+/* What the M menu's collections are given to: in the Layers editor (`in_layers`, or with no bone layer active)
+ * the picked layers; otherwise the active bone layer's selected bones and the drawings edited with them that
+ * are picked. */
+void collection_targets(Document &doc, bool in_layers, std::vector<Bone *> &r_bones, std::vector<Layer *> &r_layers);
 /* Bones that no longer show are deselected (after hiding or soloing), so moves leave them be. */
 void armature_deselect_hidden(Layer &armature);
 

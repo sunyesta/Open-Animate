@@ -598,15 +598,22 @@ struct BoneDynamicsState {
  * along it (scale.y: its length) and X across (scale.x: its thickness); inside, the frame lays
  * the bone along x, so the solver swaps them. The values at frame 0 are the setup
  * pose; the difference from it is what moves bound artwork. */
-/* Blender's bone collections: named sets of a bone layer's bones, and of the drawings inside it that
- * are Editable in Bone Group (whose points are then edited along with the bones). A bone or drawing
- * can be in several. Every bone layer also has All, a fixed collection holding every bone and every
- * editable drawing (nothing is assigned to it or removed from it). As in Blender, a bone shows while
+/* A collection: a named tag, shared by the whole document, that any bone or layer can carry (several
+ * each). Its name is the document's alone, so renaming it renames it everywhere. */
+struct Collection {
+  uint64_t id = 0;
+  std::string name;
+  bool operator==(const Collection &) const = default;
+};
+
+/* A collection on a bone layer's Collections panel (Blender's bone collections), with its eye and star
+ * there. Every bone layer also has All, a fixed entry holding every bone and every drawing Editable in
+ * Bone Group (whose points are then edited along with the bones). As in Blender, a bone shows while
  * any collection holding it shows, so while All shows, everything does. Hiding hides bones, and
  * drawings' points and wires; their artwork still renders. */
 struct BoneCollection {
+  /* The document's collection. */
   uint64_t id = 0;
-  std::string name;
   bool visible = true;
   /* Blender's star: while any collection is soloed, only soloed ones show. */
   bool solo = false;
@@ -724,7 +731,7 @@ struct Bone {
   float pin_size = 1.0f;
   /* Custom: the layer whose drawing it is drawn as (its id; 0 for none). */
   uint64_t shape_layer = 0;
-  /* The bone collections it is in (their ids, in its bone layer). */
+  /* The collections it is in (the document's ids). */
   std::vector<uint64_t> collections;
   BoneType type = BoneType::Regular;
   /* A regular or pin bone's Turns, Full Turn: its one action bone action is a whole turn, played round and round (the
@@ -1249,7 +1256,6 @@ struct Layer {
   bool parent_bone_points = true;
   /* Bone layers: their bone collections, in list order, and the active one (its id; 0: All). */
   std::vector<BoneCollection> bone_collections;
-  uint64_t next_collection_id = 1;
   uint64_t active_collection = 0;
   /* Bone layers: the All collection's eye and star. */
   bool all_bones_visible = true;
@@ -1298,7 +1304,7 @@ struct Layer {
    * with it, as if each were picked too. On for groups, off for bone groups (whose drawings come
    * with their bone collections instead). */
   bool edit_descendants = true;
-  /* A drawing that is: the bone collections it is in besides All (their ids). */
+  /* The collections it is in (the document's ids; any layer can be in them, besides All). */
   std::vector<uint64_t> collections;
   /* Run on the drawing in order (see ModifierType). */
   std::vector<Modifier> modifiers;

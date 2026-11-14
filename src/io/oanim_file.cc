@@ -1105,12 +1105,11 @@ static json layer_to_json(const Layer &layer)
     if (!layer.bone_collections.empty()) {
       json collections = json::array();
       for (const BoneCollection &c : layer.bone_collections) {
-        collections.push_back({{"id", c.id}, {"name", c.name}, {"visible", c.visible}, {"solo", c.solo}});
+        collections.push_back({{"id", c.id}, {"visible", c.visible}, {"solo", c.solo}});
       }
       j["bone_collections"] = std::move(collections);
       j["active_collection"] = layer.active_collection;
     }
-    j["next_collection_id"] = layer.next_collection_id;
     if (!layer.all_bones_visible || layer.all_bones_solo) {
       j["all_bones"] = {{"visible", layer.all_bones_visible}, {"solo", layer.all_bones_solo}};
     }
@@ -1318,6 +1317,14 @@ std::string oanim_document_to_json(const Document &doc)
            {"layers", std::move(layers)},
            {"texts", std::move(texts)},
            {"materials", materials_to_json(doc)},
+           {"collections", [&] {
+              json list = json::array();
+              for (const Collection &c : doc.collections) {
+                list.push_back({{"id", c.id}, {"name", c.name}});
+              }
+              return list;
+            }()},
+           {"next_collection_id", doc.next_collection_id},
            {"brush_presets", brush_presets_to_json(doc)},
            {"drivers", drivers_to_json(doc)},
            {"switch_links", [&] {
@@ -2355,6 +2362,39 @@ struct OldMaskRows {
 };
 static std::map<uint64_t, OldMaskRows> g_old_rows;
 
+/* Files from before collections were the document's (no "collections" in it): each bone layer had its own,
+ * by name. Same names become one collection of the document's, and the ids the bone layer's bones and the
+ * layers inside it carry are mapped to them: the maps of the bone layers being read, nearest last. */
+static bool g_old_collections_file = false;
+static std::vector<Collection> g_old_collections;
+static std::vector<std::map<uint64_t, uint64_t>> g_old_collection_maps;
+
+static uint64_t old_collection_id(const std::string &name)
+{
+  for (const Collection &c : g_old_collections) {
+    if (c.name == name) {
+      return c.id;
+    }
+  }
+  g_old_collections.push_back({uint64_t(g_old_collections.size() + 1), name});
+  return g_old_collections.back().id;
+}
+
+static void old_collections_map(std::vector<uint64_t> &ids, const std::map<uint64_t, uint64_t> *map)
+{
+  std::vector<uint64_t> mapped;
+  for (const uint64_t id : ids) {
+    if (!map) {
+      break;
+    }
+    const auto it = map->find(id);
+    if (it != map->end() && std::find(mapped.begin(), mapped.end(), it->second) == mapped.end()) {
+      mapped.push_back(it->second);
+    }
+  }
+  ids = std::move(mapped);
+}
+
 /* Rows from before cards, as cards that show the same: one for the fills (the rows that masked them)
  * and one for the lines (the rows that masked them, ending lines at the card's edge if any row
  * ended them), or one for both when the two are the same rows; a row that was off, a card of its
@@ -3154,20 +3194,30 @@ static Layer layer_from_json(const json &j, int depth)
   }
   layer.next_bone_id = std::max<uint64_t>(layer.next_bone_id, get_id(j, "next_bone_id"));
   layer.active_bone = get_id(j, "active_bone");
+  std::map<uint64_t, uint64_t> old_map;
   for (const json &cj : get_array(j, "bone_collections")) {
     if (!cj.is_object()) {
       continue;
     }
     BoneCollection c;
     c.id = get_id(cj, "id");
-    c.name = get_string(cj, "name", "Collection");
+    if (g_old_collections_file) {
+      const uint64_t to = old_collection_id(get_string(cj, "name", "Collection"));
+      old_map[c.id] = to;
+      if (c.id == get_id(j, "active_collection")) {
+        layer.active_collection = to;
+      }
+      c.id = to;
+    }
     c.visible = get_bool(cj, "visible", true);
     c.solo = get_bool(cj, "solo", false);
-    layer.next_collection_id = std::max(layer.next_collection_id, c.id + 1);
-    layer.bone_collections.push_back(std::move(c));
+    if (!bone_collection_find(layer, c.id)) {
+      layer.bone_collections.push_back(std::move(c));
+    }
   }
-  layer.next_collection_id = std::max<uint64_t>(layer.next_collection_id, get_id(j, "next_collection_id"));
-  layer.active_collection = get_id(j, "active_collection");
+  if (!g_old_collections_file) {
+    layer.active_collection = get_id(j, "active_collection");
+  }
   for (const json &c : get_array(j, "collections")) {
     if (c.is_number_unsigned()) {
       layer.collections.push_back(c.get<uint64_t>());
@@ -3180,6 +3230,13 @@ static Layer layer_from_json(const json &j, int depth)
   /* Files saved while collections replaced Editable in Bone Group: a drawing in one is editable. */
   if (!j.contains("edit_with_bones") && !layer.collections.empty()) {
     layer.edit_with_bones = true;
+  }
+  if (g_old_collections_file) {
+    /* Its own, in the bone layer around it; its bones', in its own. */
+    old_collections_map(layer.collections, g_old_collection_maps.empty() ? nullptr : &g_old_collection_maps.back());
+    for (Bone &b : layer.bones) {
+      old_collections_map(b.collections, &old_map);
+    }
   }
   get_keys(j, "position_keys", layer.position_keys);
   get_keys(j, "rotation_keys", layer.rotation_keys);
@@ -3342,10 +3399,17 @@ static Layer layer_from_json(const json &j, int depth)
   }
   /* Deeper than any real file: stops a crafted file from overflowing the stack. */
   if (layer.is_group() && depth < 256) {
+    const bool rig = g_old_collections_file && layer.is_bone_layer();
+    if (rig) {
+      g_old_collection_maps.push_back(old_map);
+    }
     for (const json &child : get_array(j, "children")) {
       if (child.is_object()) {
         layer.children.push_back(layer_from_json(child, depth + 1));
       }
+    }
+    if (rig) {
+      g_old_collection_maps.pop_back();
     }
   }
   return layer;
@@ -3366,6 +3430,30 @@ static void layers_visit(std::vector<Layer> &layers, const std::function<void(La
     fn(layer);
     layers_visit(layer.children, fn);
   }
+}
+
+/* Every bone and layer keeps only collections the document has, each once, as does every panel. */
+static void collections_validate(Document &doc)
+{
+  const auto keep = [&](std::vector<uint64_t> &ids) {
+    std::vector<uint64_t> kept;
+    for (const uint64_t id : ids) {
+      if (collection_find(doc, id) && std::find(kept.begin(), kept.end(), id) == kept.end()) {
+        kept.push_back(id);
+      }
+    }
+    ids = std::move(kept);
+  };
+  layers_visit(doc.layers, [&](Layer &layer) {
+    keep(layer.collections);
+    for (Bone &b : layer.bones) {
+      keep(b.collections);
+    }
+    std::erase_if(layer.bone_collections, [&](const BoneCollection &c) { return !collection_find(doc, c.id); });
+    if (!bone_collection_find(layer, layer.active_collection)) {
+      layer.active_collection = 0;
+    }
+  });
 }
 
 /* Gives every layer a unique id, and drops references that point nowhere. */
@@ -3924,11 +4012,37 @@ bool oanim_document_from_json(const std::string &text, Document &r_doc, std::str
       }
     }
   }
+  g_old_collections_file = !j.contains("collections");
+  g_old_collections.clear();
+  g_old_collection_maps.clear();
   for (const json &layer : get_array(j, "layers")) {
     if (layer.is_object()) {
       doc.layers.push_back(layer_from_json(layer, 0));
     }
   }
+  if (g_old_collections_file) {
+    doc.collections = std::move(g_old_collections);
+  }
+  else {
+    for (const json &cj : get_array(j, "collections")) {
+      const uint64_t id = cj.is_object() ? get_id(cj, "id") : 0;
+      const std::string name = cj.is_object() ? get_string(cj, "name", "Collection") : "";
+      if (id != 0 && !collection_find(doc, id) && !name.empty() && name != BONE_COLLECTION_ALL &&
+          !collection_find_by_name(doc, name))
+      {
+        doc.collections.push_back({id, name});
+      }
+    }
+  }
+  g_old_collections_file = false;
+  g_old_collections.clear();
+  g_old_collection_maps.clear();
+  doc.next_collection_id = get_id(j, "next_collection_id");
+  for (const Collection &c : doc.collections) {
+    doc.next_collection_id = std::max(doc.next_collection_id, c.id + 1);
+  }
+  doc.next_collection_id = std::max<uint64_t>(doc.next_collection_id, 1);
+  collections_validate(doc);
   migrate_old_masks(doc.layers);
   migrate_old_mask_options(doc.layers);
   mask_rows_to_cards(doc.layers);

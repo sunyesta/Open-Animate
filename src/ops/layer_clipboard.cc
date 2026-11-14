@@ -170,6 +170,9 @@ static json layers_copy_json(Document &doc, const std::vector<uint64_t> &ids,
       mini.next_material_id = std::max(mini.next_material_id, m.id + 1);
     }
   }
+  /* Collections travel by name (few and small: all of them). */
+  mini.collections = doc.collections;
+  mini.next_collection_id = doc.next_collection_id;
   /* Drivers wholly inside the copy come along. */
   for (const Driver &d : doc.drivers) {
     bool all = inside.count(d.target.layer) != 0;
@@ -262,8 +265,24 @@ static std::vector<uint64_t> layers_paste_text(Document &doc, const std::string 
   }
 
   const std::map<uint64_t, uint64_t> material_map = clipboard_materials(doc, mini);
+  /* Collections: the one of the same name, made if this document has none. */
+  std::map<uint64_t, uint64_t> collection_map;
+  for (const Collection &c : mini.collections) {
+    if (const Collection *here = collection_ensure(doc, c.name)) {
+      collection_map[c.id] = here->id;
+    }
+  }
+  const auto collections_mapped = [&](std::vector<uint64_t> &ids) {
+    std::vector<uint64_t> mapped;
+    for (const uint64_t id : ids) {
+      if (const auto it = collection_map.find(id); it != collection_map.end()) {
+        mapped.push_back(it->second);
+      }
+    }
+    ids = std::move(mapped);
+  };
 
-  /* Taken out of their holders, with their bones and materials made this document's. */
+  /* Taken out of their holders, with their bones, materials and collections made this document's. */
   std::vector<Layer> items;
   for (size_t i = 0; i < mini.layers.size(); i++) {
     Layer &top = mini.layers[i];
@@ -307,6 +326,23 @@ static std::vector<uint64_t> layers_paste_text(Document &doc, const std::string 
           s.material = it != material_map.end() ? it->second : 0;
         }
       }
+      collections_mapped(l.collections);
+      for (Bone &b : l.bones) {
+        collections_mapped(b.collections);
+      }
+      std::vector<BoneCollection> panel;
+      const uint64_t active = l.active_collection;
+      l.active_collection = 0;
+      for (BoneCollection c : l.bone_collections) {
+        if (const auto it = collection_map.find(c.id); it != collection_map.end()) {
+          if (c.id == active) {
+            l.active_collection = it->second;
+          }
+          c.id = it->second;
+          panel.push_back(c);
+        }
+      }
+      l.bone_collections = std::move(panel);
     });
     items.push_back(std::move(item));
   }

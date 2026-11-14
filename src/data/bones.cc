@@ -2044,6 +2044,107 @@ void bone_set_color_set(Bone &bone, int set)
   bone.color_set = std::clamp(set, 0, BONE_COLOR_CUSTOM);
 }
 
+Collection *collection_find(Document &doc, uint64_t id)
+{
+  for (Collection &c : doc.collections) {
+    if (c.id == id && id != 0) {
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+const Collection *collection_find(const Document &doc, uint64_t id)
+{
+  return collection_find(const_cast<Document &>(doc), id);
+}
+
+Collection *collection_find_by_name(Document &doc, const std::string &name)
+{
+  for (Collection &c : doc.collections) {
+    if (c.name == name) {
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+const Collection *collection_find_by_name(const Document &doc, const std::string &name)
+{
+  return collection_find_by_name(const_cast<Document &>(doc), name);
+}
+
+std::string collection_name(const Document &doc, uint64_t id)
+{
+  const Collection *c = collection_find(doc, id);
+  return c ? c->name : std::string();
+}
+
+std::string collection_unique_name(const Document &doc, const std::string &name)
+{
+  const auto taken = [&](const std::string &n) {
+    return n == BONE_COLLECTION_ALL || collection_find_by_name(doc, n) != nullptr;
+  };
+  const std::string base = name.empty() ? "Collection" : name;
+  if (!taken(base)) {
+    return base;
+  }
+  for (int i = 1;; i++) {
+    char suffix[16];
+    std::snprintf(suffix, sizeof(suffix), ".%03d", i);
+    if (!taken(base + suffix)) {
+      return base + suffix;
+    }
+  }
+}
+
+Collection &collection_new(Document &doc, const std::string &name)
+{
+  Collection c;
+  c.id = doc.next_collection_id++;
+  c.name = collection_unique_name(doc, name);
+  doc.collections.push_back(std::move(c));
+  return doc.collections.back();
+}
+
+Collection *collection_ensure(Document &doc, const std::string &name)
+{
+  if (name.empty() || name == BONE_COLLECTION_ALL) {
+    return nullptr;
+  }
+  Collection *c = collection_find_by_name(doc, name);
+  return c ? c : &collection_new(doc, name);
+}
+
+static void collection_drop(std::vector<Layer> &list, uint64_t id)
+{
+  for (Layer &l : list) {
+    std::erase(l.collections, id);
+    for (Bone &b : l.bones) {
+      std::erase(b.collections, id);
+    }
+    bone_collection_remove(l, id);
+    collection_drop(l.children, id);
+  }
+}
+
+void collection_delete(Document &doc, uint64_t id)
+{
+  std::erase_if(doc.collections, [&](const Collection &c) { return c.id == id; });
+  collection_drop(doc.layers, id);
+}
+
+std::vector<std::string> collection_names(const Document &doc, const std::vector<uint64_t> &ids)
+{
+  std::vector<std::string> names;
+  for (const uint64_t id : ids) {
+    if (const Collection *c = collection_find(doc, id)) {
+      names.push_back(c->name);
+    }
+  }
+  return names;
+}
+
 BoneCollection *bone_collection_find(Layer &armature, uint64_t id)
 {
   for (BoneCollection &c : armature.bone_collections) {
@@ -2059,14 +2160,10 @@ const BoneCollection *bone_collection_find(const Layer &armature, uint64_t id)
   return bone_collection_find(const_cast<Layer &>(armature), id);
 }
 
-BoneCollection *bone_collection_find_by_name(Layer &armature, const std::string &name)
+BoneCollection *bone_collection_find_by_name(const Document &doc, Layer &armature, const std::string &name)
 {
-  for (BoneCollection &c : armature.bone_collections) {
-    if (c.name == name) {
-      return &c;
-    }
-  }
-  return nullptr;
+  const Collection *c = collection_find_by_name(doc, name);
+  return c ? bone_collection_find(armature, c->id) : nullptr;
 }
 
 static bool any_solo(const Layer &armature)
@@ -2111,31 +2208,14 @@ bool layer_edited_with_bones(const Document &doc, const Layer &layer)
   return armature && bone_collections_show(*armature, layer.collections);
 }
 
-std::string bone_collection_unique_name(const Layer &armature, const std::string &name)
+BoneCollection &bone_collection_add(Layer &armature, uint64_t id)
 {
-  const auto taken = [&](const std::string &n) {
-    return n == BONE_COLLECTION_ALL ||
-           std::any_of(armature.bone_collections.begin(), armature.bone_collections.end(),
-                       [&](const BoneCollection &c) { return c.name == n; });
-  };
-  const std::string base = name.empty() ? "Collection" : name;
-  if (!taken(base)) {
-    return base;
+  if (BoneCollection *had = bone_collection_find(armature, id)) {
+    armature.active_collection = id;
+    return *had;
   }
-  for (int i = 1;; i++) {
-    char suffix[16];
-    std::snprintf(suffix, sizeof(suffix), ".%03d", i);
-    if (!taken(base + suffix)) {
-      return base + suffix;
-    }
-  }
-}
-
-BoneCollection &bone_collection_add(Layer &armature, const std::string &name)
-{
   BoneCollection c;
-  c.id = armature.next_collection_id++;
-  c.name = bone_collection_unique_name(armature, name);
+  c.id = id;
   /* After the active one (All, first of all, puts it at the top). */
   auto at = bone_collection_find(armature, armature.active_collection) ? armature.bone_collections.end()
                                                                          : armature.bone_collections.begin();
@@ -2149,17 +2229,16 @@ BoneCollection &bone_collection_add(Layer &armature, const std::string &name)
   return *at;
 }
 
-static void drop_collection(std::vector<Layer> &list, uint64_t armature_id, uint64_t id, const Document &doc)
+void bone_collection_ensure(Layer &armature, uint64_t id)
 {
-  for (Layer &l : list) {
-    if (const Layer *a = layer_armature(doc, l.id); a && a->id == armature_id) {
-      std::erase(l.collections, id);
-    }
-    drop_collection(l.children, armature_id, id, doc);
+  if (id != 0 && !bone_collection_find(armature, id)) {
+    BoneCollection c;
+    c.id = id;
+    armature.bone_collections.push_back(c);
   }
 }
 
-void bone_collection_remove(Document &doc, Layer &armature, uint64_t id)
+void bone_collection_remove(Layer &armature, uint64_t id)
 {
   const auto it = std::find_if(armature.bone_collections.begin(), armature.bone_collections.end(),
                                [&](const BoneCollection &c) { return c.id == id; });
@@ -2168,10 +2247,6 @@ void bone_collection_remove(Document &doc, Layer &armature, uint64_t id)
   }
   const size_t at = size_t(it - armature.bone_collections.begin());
   armature.bone_collections.erase(it);
-  for (Bone &b : armature.bones) {
-    std::erase(b.collections, id);
-  }
-  drop_collection(doc.layers, armature.id, id, doc);
   if (armature.active_collection == id) {
     /* The one before it (All before the first). */
     armature.active_collection = at == 0 ? 0 : armature.bone_collections[at - 1].id;
@@ -2224,6 +2299,25 @@ std::vector<Layer *> collection_drawings(Document &doc, const Layer &armature)
     }
   }
   return drawings;
+}
+
+void collection_targets(Document &doc, bool in_layers, std::vector<Bone *> &r_bones, std::vector<Layer *> &r_layers)
+{
+  Layer *active = document_active_layer(doc);
+  if (!in_layers && active && active->is_bone_layer()) {
+    for (Bone &b : active->bones) {
+      if (b.selected || b.select_head || b.select_tail) {
+        r_bones.push_back(&b);
+      }
+    }
+    r_layers = collection_drawings(doc, *active);
+    return;
+  }
+  for (const Layer *l : document_layers_flat(doc)) {
+    if (l->selected || l->id == doc.active_layer) {
+      r_layers.push_back(layer_find(doc, l->id));
+    }
+  }
 }
 
 void armature_deselect_hidden(Layer &armature)

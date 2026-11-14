@@ -130,7 +130,11 @@ and onion skins, PNG sequence export, playback range.
 
 Rigging and modifiers (milestones 4 and 5, started early): bone layers (`LayerType::Bone`,
 `src/data/bones.*` for the skeleton and _L/_R names), weights (a new point averages its neighbours, one connected to nothing has none,
-Weight Select / Weight Paint tools) and Parent to Bone; the modifier stack (`src/anim/deform.*`: Mirror, and the Armature modifier every
+Weight Select / Weight Paint tools) and Parent to Bone; collections (`Document::collections`, tags on any bone or layer;
+a bone layer's panel of them is `Layer::bone_collections`, eyes and stars; helpers in `src/data/bones.*`, operators
+`armature.collection_*` in `src/ops/rig_ops.cc`, the chips in the Bone and Layer tabs by `collection_chips` in
+`src/editors/properties.cc`, the M menu and search list in `src/editors/editors.cc`; older files' per-rig ones merged by
+name in `src/io/oanim_file.cc`); the modifier stack (`src/anim/deform.*`: Mirror, and the Armature modifier every
 layer inside a bone layer gets, kept by `document_sync_armature_modifiers`, and on groups the deforms, `group_deforms` in `deform.cc`, which bend every drawing inside); rig operators in
 `src/ops/rig_ops.cc` (setup frame only for rig changes); Blender-style bone editing (head/tail joints, E, Shift A,
 Shift D, Ctrl P / Alt P; `armature_move_selected_joints` for G R S on frame 0); Weight Paint tool. Actions (bone layer

@@ -1,5 +1,6 @@
-"""Bone collections, as Blender's (Armature tab > Bone Collections): named sets of a bone layer's
-bones, and of the drawings inside it marked Editable in Bone Group. A bone or drawing can be in
+"""Bone collections, as Blender's (Armature tab > Collections): the collections a bone layer's panel
+works with, holding its bones and the drawings inside it marked Editable in Bone Group (the document's
+collections, tags any bone or layer can carry: tests/test_collections.py). A bone or drawing can be in
 several. Every bone layer has All first: every bone and editable drawing, nothing assigned to it or
 removed from it, and it can't be removed. As in Blender, a bone (or drawing) shows while any
 collection holding it shows (the eye, or, while any is soloed, the star), so while All shows,
@@ -201,12 +202,15 @@ assert lips.points[1][2], "and its point stays selected"
 oanim.ops.mesh.select_none()
 layers.active = rig
 
-# --- Removing ------------------------------------------------------------------------------------------------
+# --- Removing from the panel, and deleting ------------------------------------------------------------------
 assert ops.collection_add(name="Spare") == {'FINISHED'}
 assert ops.collection_remove_unused() == {'FINISHED'}
-assert "Spare" not in colls(), "an empty collection goes"
+assert "Spare" not in colls() and "Spare" in oanim.data.collections, "an empty collection leaves the panel"
 assert ops.collection_remove(collection="Main") == {'FINISHED'}
-assert bone("chin")["collections"] == [] and lips.collections == ["Mouth"], "its members just leave it"
+assert "Main" not in colls() and bone("chin")["collections"] == ["Main"], "off the panel, its bones stay in it"
+assert ops.collection_delete(collection="Main") == {'FINISHED'}
+assert bone("chin")["collections"] == [] and lips.collections == ["Mouth"], "deleted: its members just leave it"
+assert "Main" not in oanim.data.collections
 assert colls()["All"]["bones"][-1] == "nose" and lips.edited_with_bones, "still in All"
 
 # --- Saved, and files from before ----------------------------------------------------------------------------

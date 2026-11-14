@@ -283,6 +283,10 @@ struct Document {
    * timeline's Only Selected shows nothing of it. A click on a layer picks it again. */
   uint64_t active_unpicked = 0;
   uint64_t next_layer_id = 1;
+  /* Collections: named tags any bone or layer can carry, shared by the whole document (a bone layer's
+   * Collections panel lists those it works with). */
+  std::vector<Collection> collections;
+  uint64_t next_collection_id = 1;
   /* Changes whenever layers may have been added, removed or moved (see Revision). */
   Revision tree_revision;
 

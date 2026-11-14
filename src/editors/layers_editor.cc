@@ -1129,7 +1129,7 @@ void layers_draw(Area &area, Context &C)
   ui_mask_pick_update(C);
   area_editor_type_menu(area);
   /* M and Shift M over the Layers editor: the picked drawings' bone collections. */
-  ui_bone_collection_menus(C, ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows));
+  ui_bone_collection_menus(C, ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows), true);
 
   /* Header buttons: add, duplicate as reference, delete, and move up/down. */
   ImGui::SameLine();

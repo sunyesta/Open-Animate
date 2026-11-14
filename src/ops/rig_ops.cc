@@ -516,14 +516,66 @@ static bool any_point_selected(const Layer &layer)
                      [](const MeshPoint &p) { return p.selected; });
 }
 
-/* The collection an operator names (`collection`, by name), or the active one; null for All (and for
- * none of that name). */
+/* The panel entry of the collection an operator names (`collection`, by name), or the active one; null for
+ * All (and for none of that name on the panel). */
 static BoneCollection *collection_arg(Context &C, Layer &armature)
 {
   const std::string name = op_arg(C, "collection");
   return name.empty() ? bone_collection_find(armature, armature.active_collection)
-                      : bone_collection_find_by_name(armature, name);
+                      : bone_collection_find_by_name(*C.document, armature, name);
 }
+
+/* The collection an operator names (on the panel or not), or the panel's active one; 0 for All or none. */
+static uint64_t collection_arg_id(Context &C, const Layer &armature)
+{
+  const std::string name = op_arg(C, "collection");
+  if (name.empty()) {
+    return bone_collection_find(armature, armature.active_collection) ? armature.active_collection : 0;
+  }
+  const Collection *c = collection_find_by_name(*C.document, name);
+  return c ? c->id : 0;
+}
+
+/* Puts `id` in or takes it out of a bone's or layer's collections: 1 when that changed them. */
+static int collection_link(std::vector<uint64_t> &ids, uint64_t id, bool on)
+{
+  const bool has = std::find(ids.begin(), ids.end(), id) != ids.end();
+  if (on == has) {
+    return 0;
+  }
+  if (on) {
+    ids.push_back(id);
+  }
+  else {
+    std::erase(ids, id);
+  }
+  return 1;
+}
+
+/* A collection given to bones, or to drawings edited with bones, goes on their bone layer's panel too, so its
+ * eye and star are there; bones hidden by it are deselected. */
+static void collection_panels_ensure(Document &doc, Layer *armature, const std::vector<Layer *> &layers, uint64_t id,
+                                     bool on)
+{
+  std::vector<Layer *> rigs;
+  if (armature) {
+    rigs.push_back(armature);
+  }
+  for (const Layer *l : layers) {
+    if (l->edit_with_bones && l->type == LayerType::Vector) {
+      if (Layer *rig = const_cast<Layer *>(layer_armature(doc, l->id))) {
+        rigs.push_back(rig);
+      }
+    }
+  }
+  for (Layer *rig : rigs) {
+    if (on) {
+      bone_collection_ensure(*rig, id);
+    }
+    armature_deselect_hidden(*rig);
+  }
+}
+
 
 /* Whether an operator means All: by name, or, named nothing, with All active. */
 static bool all_arg(Context &C, const Layer &armature)
@@ -3816,16 +3868,29 @@ void rig_operators_register()
     operators().add(std::move(ot));
   }
 
-  /* --- Bone collections, as Blender's ------------------------------------------------------- */
-  rig_operator("armature.collection_add", "Add Bone Collection",
-               "Add a bone collection after the active one (`name`, default \"Collection\") and make it active",
+  /* --- Collections: the document's tags, and each bone layer's panel of them (Blender's bone collections) --- */
+  rig_operator("armature.collection_add", "Add Collection to Panel",
+               "Put collection `collection` on the active bone layer's Collections panel after the active one and make "
+               "it active; with none named (or a name no collection has), a new collection (`name`, default "
+               "\"Collection\")",
                bone_layer_active, [](Context &C) {
-                 Layer &armature = *document_active_layer(*C.document);
-                 bone_collection_add(armature, op_arg(C, "name"));
+                 Document &doc = *C.document;
+                 Layer &armature = *document_active_layer(doc);
+                 const std::string name = op_arg(C, "collection");
+                 if (name == BONE_COLLECTION_ALL) {
+                   return OpStatus::Cancelled;
+                 }
+                 const Collection *c = name.empty() ? nullptr : collection_find_by_name(doc, name);
+                 if (c && bone_collection_find(armature, c->id)) {
+                   return OpStatus::Cancelled;
+                 }
+                 const uint64_t id = c ? c->id : collection_new(doc, name.empty() ? op_arg(C, "name") : name).id;
+                 bone_collection_add(armature, id);
                  return OpStatus::Finished;
                });
-  rig_operator("armature.collection_remove", "Remove Bone Collection",
-               "Remove the active bone collection (or `collection`); its bones and drawings just leave it",
+  rig_operator("armature.collection_remove", "Remove Collection from Panel",
+               "Take the active collection (or `collection`) off the active bone layer's Collections panel; its bones "
+               "and layers stay in it",
                bone_layer_active, [](Context &C) {
                  Layer &armature = *document_active_layer(*C.document);
                  if (all_arg(C, armature)) {
@@ -3836,12 +3901,29 @@ void rig_operators_register()
                  if (!c) {
                    return OpStatus::Cancelled;
                  }
-                 bone_collection_remove(*C.document, armature, c->id);
+                 bone_collection_remove(armature, c->id);
                  return OpStatus::Finished;
                });
-  rig_operator("armature.collection_move", "Move Bone Collection",
-               "Move the active bone collection up or down the list (`direction` UP or DOWN)", bone_layer_active,
-               [](Context &C) {
+  rig_operator("armature.collection_delete", "Delete Collection",
+               "Delete collection `collection` (default the active bone layer's active one): every bone and layer "
+               "leaves it, and every Collections panel loses it",
+               [](Context &C) { return C.document != nullptr; }, [](Context &C) {
+                 Document &doc = *C.document;
+                 const std::string name = op_arg(C, "collection");
+                 const Layer *active = document_active_layer(doc);
+                 const Collection *c = !name.empty() ? collection_find_by_name(doc, name)
+                                       : active && active->is_bone_layer()
+                                           ? collection_find(doc, active->active_collection)
+                                           : nullptr;
+                 if (!c) {
+                   return OpStatus::Cancelled;
+                 }
+                 collection_delete(doc, c->id);
+                 return OpStatus::Finished;
+               });
+  rig_operator("armature.collection_move", "Move Collection",
+               "Move the active collection up or down the Collections panel (`direction` UP or DOWN)",
+               bone_layer_active, [](Context &C) {
                  Layer &armature = *document_active_layer(*C.document);
                  auto &list = armature.bone_collections;
                  const auto it = std::find_if(list.begin(), list.end(),
@@ -3860,10 +3942,10 @@ void rig_operators_register()
   for (const bool assign : {true, false}) {
     rig_operator(
         assign ? "armature.collection_assign" : "armature.collection_unassign",
-        assign ? "Assign to Bone Collection" : "Remove from Bone Collection",
+        assign ? "Assign to Collection" : "Remove from Collection",
         assign ? "Put the selected bones, and the drawings inside this bone layer picked in the Layers editor, in the "
-                 "active bone collection (or `collection`)"
-               : "Take the selected bones, and the picked drawings, out of the active bone collection (or `collection`)",
+                 "active collection (or `collection`)"
+               : "Take the selected bones, and the picked drawings, out of the active collection (or `collection`)",
         bone_layer_active, [assign](Context &C) {
           Document &doc = *C.document;
           Layer &armature = *document_active_layer(doc);
@@ -3871,19 +3953,19 @@ void rig_operators_register()
             report(ReportType::Warning, "Every bone is in All: assign to (or remove from) another collection");
             return OpStatus::Cancelled;
           }
-          const BoneCollection *c = collection_arg(C, armature);
-          if (!c) {
-            report(ReportType::Warning, "Add a bone collection first");
+          const uint64_t id = collection_arg_id(C, armature);
+          if (!id) {
+            report(ReportType::Warning, "Add a collection first");
             return OpStatus::Cancelled;
           }
           int changed = 0;
           const auto apply = [&](std::vector<uint64_t> &ids) {
-            if (assign && !in_collection(ids, c->id)) {
-              ids.push_back(c->id);
+            if (assign && !in_collection(ids, id)) {
+              ids.push_back(id);
               changed++;
             }
-            else if (!assign && in_collection(ids, c->id)) {
-              std::erase(ids, c->id);
+            else if (!assign && in_collection(ids, id)) {
+              std::erase(ids, id);
               changed++;
             }
           };
@@ -3900,6 +3982,9 @@ void rig_operators_register()
                                                : "None of the selected bones or picked drawings is in it");
             return OpStatus::Cancelled;
           }
+          if (assign) {
+            bone_collection_ensure(armature, id);
+          }
           armature_deselect_hidden(armature);
           return OpStatus::Finished;
         });
@@ -3907,28 +3992,28 @@ void rig_operators_register()
   /* Select / Deselect: every shown bone of the collection, and its drawings' points. */
   for (const bool select : {true, false}) {
     rig_operator(select ? "armature.collection_select" : "armature.collection_deselect",
-                 select ? "Select Bone Collection" : "Deselect Bone Collection",
-                 select ? "Select the bones of the active bone collection (or `collection`), and its drawings' points"
-                        : "Deselect the bones of the active bone collection (or `collection`), and its drawings' points",
+                 select ? "Select Collection" : "Deselect Collection",
+                 select ? "Select the bones of the active collection (or `collection`), and its drawings' points"
+                        : "Deselect the bones of the active collection (or `collection`), and its drawings' points",
                  bone_layer_active, [select](Context &C) {
                    Document &doc = *C.document;
                    Layer &armature = *document_active_layer(doc);
                    /* All: every shown bone and editable drawing. */
                    const bool all = all_arg(C, armature);
-                   const BoneCollection *c = all ? nullptr : collection_arg(C, armature);
-                   if (!all && !c) {
+                   const uint64_t id = all ? 0 : collection_arg_id(C, armature);
+                   if (!all && !id) {
                      return OpStatus::Cancelled;
                    }
                    int touched = 0;
                    for (Bone &b : armature.bones) {
-                     if ((all || in_collection(b.collections, c->id)) && bone_shown(armature, b)) {
+                     if ((all || in_collection(b.collections, id)) && bone_shown(armature, b)) {
                        bone_select(b, select);
                        touched++;
                      }
                    }
                    for (const Layer *l : document_layers_flat(doc)) {
                      const Layer *owner = layer_armature(doc, l->id);
-                     if (owner && owner->id == armature.id && (all || in_collection(l->collections, c->id)) &&
+                     if (owner && owner->id == armature.id && (all || in_collection(l->collections, id)) &&
                          layer_edited_with_bones(doc, *l))
                      {
                        for (MeshPoint &p : layer_find(doc, l->id)->drawing.points) {
@@ -3940,11 +4025,12 @@ void rig_operators_register()
                    return touched ? OpStatus::Finished : OpStatus::Cancelled;
                  });
   }
-  rig_operator("armature.collection_set", "Set Bone Collection",
-               "Change a bone collection (`collection`, default the active one): `name`, `visible` (the eye), `solo` "
-               "(the star) or `active`",
+  rig_operator("armature.collection_set", "Set Collection",
+               "Change a collection on the active bone layer's panel (`collection`, default the active one): `name` "
+               "(renames it everywhere), `visible` (the eye), `solo` (the star) or `active`",
                bone_layer_active, [](Context &C) {
-                 Layer &armature = *document_active_layer(*C.document);
+                 Document &doc = *C.document;
+                 Layer &armature = *document_active_layer(doc);
                  if (all_arg(C, armature)) {
                    /* All: its eye, its star, or made active; it keeps its name. */
                    if (const std::string v = op_arg(C, "visible"); !v.empty()) {
@@ -3963,8 +4049,9 @@ void rig_operators_register()
                  if (!c) {
                    return OpStatus::Cancelled;
                  }
-                 if (const std::string name = op_arg(C, "name"); !name.empty() && name != c->name) {
-                   c->name = bone_collection_unique_name(armature, name);
+                 Collection *named = collection_find(doc, c->id);
+                 if (const std::string name = op_arg(C, "name"); named && !name.empty() && name != named->name) {
+                   named->name = collection_unique_name(doc, name);
                  }
                  if (const std::string v = op_arg(C, "visible"); !v.empty()) {
                    c->visible = v == "1";
@@ -3978,7 +4065,7 @@ void rig_operators_register()
                  armature_deselect_hidden(armature);
                  return OpStatus::Finished;
                });
-  rig_operator("armature.collection_show_all", "Show All Bone Collections", "Turn every bone collection's eye on",
+  rig_operator("armature.collection_show_all", "Show All Collections", "Turn every collection's eye on",
                bone_layer_active, [](Context &C) {
                  Layer &armature = *document_active_layer(*C.document);
                  armature.all_bones_visible = true;
@@ -3987,7 +4074,7 @@ void rig_operators_register()
                  }
                  return OpStatus::Finished;
                });
-  rig_operator("armature.collection_unsolo_all", "Unsolo All Bone Collections", "Turn every bone collection's star off",
+  rig_operator("armature.collection_unsolo_all", "Unsolo All Collections", "Turn every collection's star off",
                bone_layer_active, [](Context &C) {
                  Layer &armature = *document_active_layer(*C.document);
                  armature.all_bones_solo = false;
@@ -3996,8 +4083,9 @@ void rig_operators_register()
                  }
                  return OpStatus::Finished;
                });
-  rig_operator("armature.collection_remove_unused", "Remove Unused Bone Collections",
-               "Remove the bone collections with no bones and no drawings in them", bone_layer_active, [](Context &C) {
+  rig_operator("armature.collection_remove_unused", "Remove Unused Collections",
+               "Take the collections with none of this bone layer's bones and drawings in them off its panel",
+               bone_layer_active, [](Context &C) {
                  Document &doc = *C.document;
                  Layer &armature = *document_active_layer(doc);
                  std::vector<uint64_t> unused;
@@ -4013,19 +4101,19 @@ void rig_operators_register()
                    }
                  }
                  for (const uint64_t id : unused) {
-                   bone_collection_remove(doc, armature, id);
+                   bone_collection_remove(armature, id);
                  }
                  return unused.empty() ? OpStatus::Cancelled : OpStatus::Finished;
                });
-  /* M and Shift M: Blender's Move to Collection (leave the others, join one) and Assign to
-   * Collection (join one, keep the others); `new` 1 makes a new collection for it. */
+  /* Blender's Move to Collection (leave the others, join one) and Assign to Collection (join one, keep the
+   * others); `new` 1 makes a new collection for it. */
   for (const bool move : {true, false}) {
     rig_operator(move ? "armature.move_to_collection" : "armature.assign_to_collection",
-                 move ? "Move to Bone Collection" : "Assign to Bone Collection",
+                 move ? "Move to Collection" : "Assign to Collection",
                  move ? "Put the selected bones (the bone layer active) or the active and picked drawings inside it in "
-                        "bone collection `collection` only (`new` 1: a new one)"
+                        "collection `collection` only (`new` 1: a new one)"
                       : "Add the selected bones (the bone layer active) or the active and picked drawings inside it to "
-                        "bone collection `collection` (`new` 1: a new one)",
+                        "collection `collection` (`new` 1: a new one)",
                  [](Context &C) { return C.document && collection_armature(*C.document); },
                  [move](Context &C) {
                    /* With the bone layer active: its selected bones and the picked drawings. With
@@ -4046,12 +4134,11 @@ void rig_operators_register()
                                                      : "Select bones (or pick drawings in the Layers editor) first");
                      return OpStatus::Cancelled;
                    }
-                   const BoneCollection *c = op_arg(C, "new") == "1" ? &bone_collection_add(armature, "")
-                                                                    : collection_arg(C, armature);
-                   if (!c) {
+                   const uint64_t id = op_arg(C, "new") == "1" ? collection_new(doc, op_arg(C, "name")).id
+                                                              : collection_arg_id(C, armature);
+                   if (!id) {
                      return OpStatus::Cancelled;
                    }
-                   const uint64_t id = c->id;
                    const auto apply = [&](std::vector<uint64_t> &ids) {
                      if (move) {
                        ids.clear();
@@ -4066,64 +4153,154 @@ void rig_operators_register()
                    for (Layer *d : drawings) {
                      apply(d->collections);
                    }
+                   /* A new one is made the active one, as in Blender. */
+                   if (op_arg(C, "new") == "1") {
+                     bone_collection_add(armature, id);
+                   }
+                   else {
+                     bone_collection_ensure(armature, id);
+                   }
                    armature_deselect_hidden(armature);
                    return OpStatus::Finished;
                  });
   }
-  for (const auto &[idname, name, menu] :
-       {std::tuple{"armature.move_to_collection_menu", "Move to Bone Collection", "bone_collection_move"},
-        std::tuple{"armature.assign_to_collection_menu", "Assign to Bone Collection", "bone_collection_assign"}})
+  /* M (and Shift M): a menu of every collection, ticked where the selection is in it, each toggling it. */
+  for (const auto &[idname, name] : {std::pair{"armature.move_to_collection_menu", "Collections"},
+                                     std::pair{"armature.assign_to_collection_menu", "Collections"}})
   {
     OperatorType ot;
     ot.idname = idname;
     ot.name = name;
-    ot.description = "Choose a bone collection for the selected bones, or for the active and picked drawings inside a "
-                     "bone layer, as Blender's M and Shift M";
+    ot.description = "Put the selection in collections, or take it out: the selected bones in the viewport, the "
+                     "picked layers in the Layers editor";
     ot.flag = OPTYPE_REGISTER;
     ot.poll = [](Context &C) {
-      /* In the viewport only for bones: M there on a drawing is left to the drawing's own tools (its
-       * bone collections stay in the Layers editor and its Layer tab). */
-      const Layer *armature = C.document ? collection_armature(*C.document) : nullptr;
-      return armature && (C.area_type != "Viewport" || document_active_layer(*C.document) == armature);
+      /* In the viewport only for bones: M there on a drawing is left to the drawing's own tools. */
+      if (!C.document || !document_active_layer(*C.document)) {
+        return false;
+      }
+      return C.area_type != "Viewport" || document_active_layer(*C.document)->is_bone_layer();
     };
-    const std::string menu_name = menu;
-    ot.exec = [menu_name](Context &C) {
-      C.wm->menu_request = menu_name;
+    ot.exec = [](Context &C) {
+      C.wm->menu_request = "collection_toggle";
       return OpStatus::Finished;
     };
     operators().add(std::move(ot));
   }
-  /* A drawing joins or leaves one of its bone layer's collections (its Layer tab, or the Layers
-   * editor's right-click menu). */
-  {
+  rig_operator("armature.collection_toggle", "Toggle Collection",
+               "Put the selection in collection `collection` (`new` 1: a new one, named `name`), or, when all of it is "
+               "in it already, take it out: in the Layers editor (`area` LAYERS) the picked layers; elsewhere, with "
+               "a bone layer active, its selected bones and the drawings edited with them",
+               [](Context &C) { return C.document && document_active_layer(*C.document); }, [](Context &C) {
+                 Document &doc = *C.document;
+                 std::vector<Bone *> bones;
+                 std::vector<Layer *> layers;
+                 collection_targets(doc, C.area_type == "Layers" || op_arg(C, "area") == "LAYERS", bones, layers);
+                 if (bones.empty() && layers.empty()) {
+                   report(ReportType::Warning, "Select bones (or pick layers) first");
+                   return OpStatus::Cancelled;
+                 }
+                 const bool fresh = op_arg(C, "new") == "1";
+                 const Collection *c = fresh ? &collection_new(doc, op_arg(C, "name"))
+                                             : collection_find_by_name(doc, op_arg(C, "collection"));
+                 if (!c) {
+                   return OpStatus::Cancelled;
+                 }
+                 const uint64_t id = c->id;
+                 bool all_in = !fresh;
+                 for (const Bone *b : bones) {
+                   all_in &= in_collection(b->collections, id);
+                 }
+                 for (const Layer *l : layers) {
+                   all_in &= in_collection(l->collections, id);
+                 }
+                 for (Bone *b : bones) {
+                   collection_link(b->collections, id, !all_in);
+                 }
+                 for (Layer *l : layers) {
+                   collection_link(l->collections, id, !all_in);
+                 }
+                 collection_panels_ensure(doc, bones.empty() ? nullptr : document_active_layer(doc), layers, id,
+                                          !all_in);
+                 return OpStatus::Finished;
+               });
+  rig_operator("armature.bone_collection_link", "Bone in Collection",
+               "Put bone `bone` (default the active bone) of bone layer `armature` (default the one worked on) in "
+               "collection `collection` (made if there is none), or take it out (`on` 0); `all` 1: every selected "
+               "bone too",
+               bone_layer_active, [](Context &C) {
+                 Document &doc = *C.document;
+                 const std::string armature_id = op_arg(C, "armature");
+                 Layer *found = armature_id.empty()
+                                    ? armature_worked_on(doc, doc.active_layer)
+                                    : layer_find(doc, std::strtoull(armature_id.c_str(), nullptr, 10));
+                 if (!found || !found->is_bone_layer()) {
+                   return OpStatus::Cancelled;
+                 }
+                 Layer &armature = *found;
+                 const std::string bone_name = op_arg(C, "bone");
+                 Bone *bone = bone_name.empty() ? bone_find(armature, armature.active_bone)
+                                                : const_cast<Bone *>(bone_find_by_name(armature, bone_name));
+                 std::vector<Bone *> bones;
+                 for (Bone &b : armature.bones) {
+                   if (&b == bone || (op_arg(C, "all") == "1" && (b.selected || b.select_head || b.select_tail))) {
+                     bones.push_back(&b);
+                   }
+                 }
+                 const bool on = op_arg(C, "on", "1") == "1";
+                 const std::string name = op_arg(C, "collection");
+                 const Collection *c = on ? collection_ensure(doc, name) : collection_find_by_name(doc, name);
+                 if (!c || bones.empty()) {
+                   return OpStatus::Cancelled;
+                 }
+                 int changed = 0;
+                 for (Bone *b : bones) {
+                   changed += collection_link(b->collections, c->id, on);
+                 }
+                 if (!changed) {
+                   return OpStatus::Cancelled;
+                 }
+                 collection_panels_ensure(doc, &armature, {}, c->id, on);
+                 return OpStatus::Finished;
+               });
+  /* A layer joins or leaves a collection (its Layer tab's Collections panel). */
+  for (const char *idname : {"layer.collection_link", "layer.bone_collection_toggle"}) {
     OperatorType ot;
-    ot.idname = "layer.bone_collection_toggle";
-    ot.name = "Drawing in Bone Collection";
-    ot.description = "Put drawing `layer` (default the active layer) in bone collection `collection` of its bone "
-                     "layer, or take it out (`on` 0)";
+    ot.idname = idname;
+    ot.name = "Layer in Collection";
+    ot.description = "Put layer `layer` (default the active layer) in collection `collection` (made if there is "
+                     "none), or take it out (`on` 0); `all` 1: every picked layer too";
     ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
     ot.poll = [](Context &C) { return C.document != nullptr; };
     ot.exec = [](Context &C) {
       Document &doc = *C.document;
       const std::string id = op_arg(C, "layer");
       Layer *layer = id.empty() ? document_active_layer(doc) : layer_find(doc, std::strtoull(id.c_str(), nullptr, 10));
-      Layer *armature = layer && layer->type == LayerType::Vector ? const_cast<Layer *>(layer_armature(doc, layer->id))
-                                                                  : nullptr;
-      BoneCollection *c = armature ? bone_collection_find_by_name(*armature, op_arg(C, "collection")) : nullptr;
-      if (!c) {
-        report(ReportType::Warning, "A drawing inside a bone layer can join that bone layer's collections");
-        return OpStatus::Cancelled;
+      std::vector<Layer *> layers;
+      if (layer) {
+        layers.push_back(layer);
+      }
+      if (op_arg(C, "all") == "1") {
+        for (const Layer *l : document_layers_flat(doc)) {
+          if (l->selected && l != layer) {
+            layers.push_back(layer_find(doc, l->id));
+          }
+        }
       }
       const bool on = op_arg(C, "on", "1") == "1";
-      if (on == in_collection(layer->collections, c->id)) {
+      const std::string name = op_arg(C, "collection");
+      const Collection *c = on ? collection_ensure(doc, name) : collection_find_by_name(doc, name);
+      if (!c || layers.empty()) {
         return OpStatus::Cancelled;
       }
-      if (on) {
-        layer->collections.push_back(c->id);
+      int changed = 0;
+      for (Layer *l : layers) {
+        changed += collection_link(l->collections, c->id, on);
       }
-      else {
-        std::erase(layer->collections, c->id);
+      if (!changed) {
+        return OpStatus::Cancelled;
       }
+      collection_panels_ensure(doc, nullptr, layers, c->id, on);
       return OpStatus::Finished;
     };
     operators().add(std::move(ot));
