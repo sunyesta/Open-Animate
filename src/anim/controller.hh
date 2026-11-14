@@ -144,9 +144,8 @@ float2 controller_knob_seen(const Bone &knob);
 float2 controller_box_point(const Bone &knob, const BonePose &pose, float2 frames);
 /* A move of the knob by `delta` (bone layer space) from where it is. */
 void controller_knob_move(Bone &knob, const BonePose &pose, float2 delta);
-/* The knob onto the nearest place it has (Ctrl): one of its spots, one of `also` (its fix poses), the rest point, or
- * where keys of its sides' actions cross (each side's end too). */
-void controller_knob_snap(Bone &knob, const std::vector<float2> &also = {});
+/* The knob onto its nearest spot (Ctrl); with no spots it stays where it is. */
+void controller_knob_snap(Bone &knob);
 /* A spot of the knob by name, or null. */
 ControllerSpot *controller_spot_find(Bone &knob, const std::string &name);
 const ControllerSpot *controller_spot_find(const Bone &knob, const std::string &name);

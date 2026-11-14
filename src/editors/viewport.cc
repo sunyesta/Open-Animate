@@ -10070,7 +10070,7 @@ static void draw_custom_shape(ImDrawList *dl, const std::vector<ShapeLoop> &loop
   }
 }
 
-/* Ctrl lands a picked controller's knob where the poses are: its spots, fix poses, rest, or where its keys cross. */
+/* Ctrl lands a picked controller's knob on its nearest spot (none: it stays). */
 static void armature_snap_knobs(Layer &armature)
 {
   for (Bone &b : armature.bones) {

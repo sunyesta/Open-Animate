@@ -137,12 +137,12 @@ ops.ed.undo()  # the refused ones made no step: this takes back the held key
 r.settle()
 assert 80 not in r.keys(), r.keys()
 
-# --- Ctrl lands on the nearest spot, rest or crossing of keys --------------------------------------------------
+# --- Ctrl lands on the nearest spot only: never the rest point or where keys cross ------------------------------------
 r.doc.frame_current = 90
 assert close(r.knob(6.0, 1.0, snap=True), (5.0, 0.0)), "onto the spot"
-assert close(r.knob(37.0, 2.0, snap=True), (40.0, 0.0)), "where keys cross: turn_r's end, look_up at rest"
-assert close(r.knob(2.0, 13.0, snap=True), (0.0, 15.0)), "the spot Up, nearer than look_up's end (0, 20)"
-assert close(r.knob(1.0, 1.0, snap=True), (0.0, 0.0)), "rest"
+assert close(r.knob(37.0, 2.0, snap=True), (5.0, 0.0)), "the spot Smile, not where keys cross (40, 0)"
+assert close(r.knob(2.0, 13.0, snap=True), (0.0, 15.0)), "the spot Up"
+assert close(r.knob(1.0, 1.0, snap=True), (5.0, 0.0)), "the spot Smile, not rest"
 
 # --- A hover shows the pose there and moves nothing ------------------------------------------------------------------------
 r.doc.frame_current = 90

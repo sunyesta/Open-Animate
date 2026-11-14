@@ -34,7 +34,10 @@ CMAKE = (r"C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/Common7/
 EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
-PENDING = []
+PENDING = [
+    ('src/anim/controller.cc', 'float2 best = knob.controller_spots.front().at;', 'float2 best(0.0f, 0.0f);',
+     "Ctrl lands the knob on spots only, never the rest point", 'tests/test_controller_spots.py'),
+]
 
 def build(root):
     return subprocess.run([CMAKE, "--build", "--preset", "release"], cwd=root, capture_output=True,

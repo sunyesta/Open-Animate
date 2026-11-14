@@ -122,7 +122,7 @@ const Bone *action_bone_of(const Layer &owner, const std::string &action);
 /* Where a controller's knob shows, in frames: where it is, or inside one of its own actions the frame shown on that
  * side. */
 float2 controller_knob_shown(const Document &doc, const Layer &owner, const Bone &knob);
-/* Ctrl on a knob: onto its nearest spot, rest, or crossing of keys (controller_knob_snap). */
+/* Ctrl on a knob: onto its nearest spot (controller_knob_snap). */
 void armature_knob_snap(const Layer &armature, Bone &knob);
 /* What the sides' actions key, found again after keys change (Bone::controller_keys). */
 void controllers_update(Document &doc);

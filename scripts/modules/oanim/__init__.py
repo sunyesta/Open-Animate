@@ -425,7 +425,7 @@ class _Layer:
     def bone_set(self, name, /, **values):
         """Pose or edit a bone: position=(x, y), angle, scale=(x, y) (x across the bone, y along
         it; one number sets both), length, strength, name; a controller's knob=(x, y) in frames,
-        knob_snap=True (after knob=: where Ctrl takes it, the nearest spot, fix pose, rest or crossing of keys) and
+        knob_snap=True (after knob=: where Ctrl takes it, the nearest spot; with none it stays) and
         controller_frame_size; and how it is drawn: shape ("BONE" or
         "CUSTOM", while the viewport shows custom bone shapes; a pin is a bone type, armature.bone_convert(type="PIN")),
         pin_size (a pin's), shape_layer (a

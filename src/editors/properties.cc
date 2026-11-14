@@ -1020,7 +1020,7 @@ static std::string controller_place_label(const Bone &knob, float2 at)
 
 /* A 2 Axis Controller's spots (the Bone tab): its box drawn small, a square at each spot, a violet dot at each fix
  * pose and a cross where the knob is. Click a square to put the knob there (Shift: keyed held there); click or drag
- * elsewhere to move the knob (Ctrl: onto the nearest spot, fix pose, rest or crossing of keys). Hover a square for its
+ * elsewhere to move the knob (Ctrl: onto the nearest spot). Hover a square for its
  * name and a picture of its pose, the viewport showing it; right-click for Move Here, Fix This Pose Here, Rename and
  * Delete. Beside the box: + saves where the knob is, - removes the spot the knob is on, the menu's Add Corners. Under
  * it, the spot the knob is on (its name, to rename it) or where the knob is. */

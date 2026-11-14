@@ -343,36 +343,17 @@ void controller_knob_move(Bone &knob, const BonePose &pose, float2 delta)
   knob.position = bone_position_from_transform(knob, keyed / size);
 }
 
-void controller_knob_snap(Bone &knob, const std::vector<float2> &also)
+void controller_knob_snap(Bone &knob)
 {
-  const auto nearest = [&](float at, int plus, int minus) {
-    float best = 0.0f;
-    for (const int side : {plus, minus}) {
-      const float sign = controller_side_sign(side);
-      for (const int frame : knob.controller_keys[side]) {
-        const float there = controller_side_reach(knob, side, float(frame)) * sign;
-        if (std::fabs(there - at) < std::fabs(best - at)) {
-          best = there;
-        }
-      }
-      /* A side with no keys yet still has its end. */
-      if (const float end = controller_side_reach(knob, side, controller_side_frames(knob, side)) * sign;
-          std::fabs(end - at) < std::fabs(best - at))
-      {
-        best = end;
-      }
-    }
-    return best;
-  };
+  /* Spots only: not the rest point or where its actions' keys cross (the box no longer marks those). */
+  if (knob.controller_spots.empty()) {
+    return;
+  }
   const float2 at = controller_knob_seen(knob);
-  /* The nearest crossing of keys is the nearest along each axis; a spot or fix pose nearer than that wins. */
-  float2 best(nearest(at.x, CONTROLLER_RIGHT, CONTROLLER_LEFT), nearest(at.y, CONTROLLER_UP, CONTROLLER_DOWN));
   const auto dist = [&](float2 p) { return std::hypot(p.x - at.x, p.y - at.y); };
+  float2 best = knob.controller_spots.front().at;
   for (const ControllerSpot &spot : knob.controller_spots) {
     best = dist(spot.at) < dist(best) ? spot.at : best;
-  }
-  for (const float2 &p : also) {
-    best = dist(p) < dist(best) ? p : best;
   }
   controller_knob_put(knob, best);
 }

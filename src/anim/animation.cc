@@ -4399,7 +4399,7 @@ float2 controller_knob_shown(const Document &doc, const Layer &owner, const Bone
 
 void armature_knob_snap(const Layer & /*armature*/, Bone &knob)
 {
-  controller_knob_snap(knob, {});
+  controller_knob_snap(knob);
 }
 
 /* A bone's own action bone actions, the one that turns it the plain way first. */
