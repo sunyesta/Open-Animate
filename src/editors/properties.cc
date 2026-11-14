@@ -590,55 +590,67 @@ static void collection_chips(Context &C, const std::vector<uint64_t> &ids, const
   const float avail = ImGui::GetContentRegionAvail().x;
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 field = ImGui::GetCursorScreenPos();
-  /* The field behind the chips, drawn once their lines are known. */
-  dl->ChannelsSplit(2);
-  dl->ChannelsSetCurrent(1);
-  const float inner = pad * 0.5f;
-  ImGui::SetCursorScreenPos(ImVec2(field.x + inner, field.y + inner));
-  const float right = field.x + avail - inner;
+  const float inner = std::max(2.0f, pad * 0.5f);
   const float chip_h = h - inner * 2.0f;
-  float x = field.x + inner, y = field.y + inner;
-  const auto place = [&](float w) {
-    if (x > field.x + inner && x + w > right) {
-      x = field.x + inner;
-      y += chip_h + style.ItemSpacing.y * 0.5f;
-    }
-    ImGui::SetCursorScreenPos(ImVec2(x, y));
-    x += w + style.ItemSpacing.x * 0.5f;
+  const float left = field.x + inner, right = field.x + avail - inner;
+  const float gap_x = style.ItemSpacing.x * 0.5f, gap_y = style.ItemSpacing.y * 0.5f;
+
+  /* Laid out first (chips wrap, + last on the line it fits), so the field behind them is drawn first. */
+  struct Chip {
+    const Collection *c;
+    ImVec2 at;
+    float w, text_w;
   };
+  std::vector<Chip> chips;
+  float x = left, y = field.y + inner;
+  const auto place = [&](float w) {
+    if (x > left && x + w > right) {
+      x = left;
+      y += chip_h + gap_y;
+    }
+    const ImVec2 at(x, y);
+    x += w + gap_x;
+    return at;
+  };
+  for (const uint64_t id : ids) {
+    if (const Collection *c = collection_find(doc, id)) {
+      const float text_w = ImGui::CalcTextSize(c->name.c_str()).x;
+      const float w = std::min(text_w + pad * 2.0f + chip_h, right - left);
+      chips.push_back({c, place(w), w, text_w});
+    }
+  }
+  const ImVec2 plus_at = place(chip_h);
+  const float bottom = y + chip_h + inner;
+  dl->AddRectFilled(field, ImVec2(field.x + avail, bottom), ImGui::GetColorU32(ImGuiCol_FrameBg), style.FrameRounding);
+
   std::string take_off;
   bool take_all = false;
   const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text), dim = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-  for (const uint64_t id : ids) {
-    const Collection *c = collection_find(doc, id);
-    if (!c) {
-      continue;
-    }
-    ImGui::PushID(int(id));
-    const float text_w = ImGui::CalcTextSize(c->name.c_str()).x;
-    const float x_w = chip_h;
-    const float w = std::min(text_w + pad * 2.0f + x_w, right - (field.x + inner));
-    place(w);
-    const ImVec2 at = ImGui::GetCursorScreenPos();
+  for (const Chip &chip : chips) {
+    const Collection &c = *chip.c;
+    const ImVec2 at = chip.at;
+    const float w = chip.w, x_w = chip_h;
+    ImGui::PushID(int(c.id));
+    ImGui::SetCursorScreenPos(at);
     ImGui::InvisibleButton("##chip", ImVec2(w, chip_h));
+    const bool hovered = ImGui::IsItemHovered();
     const bool over_x = ImGui::IsMouseHoveringRect(ImVec2(at.x + w - x_w, at.y), ImVec2(at.x + w, at.y + chip_h));
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && over_x) {
-      take_off = c->name;
+      take_off = c.name;
       take_all = ImGui::GetIO().KeyAlt;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       if (over_x) {
-        ImGui::SetTooltip("Take it out of %s (Alt: %s too)", c->name.c_str(), alt_what);
+        ImGui::SetTooltip("Take it out of %s (Alt: %s too)", c.name.c_str(), alt_what);
       }
-      else if (text_w + pad * 2.0f + x_w > w) {
-        ImGui::SetTooltip("%s", c->name.c_str());
+      else if (chip.text_w + pad * 2.0f + x_w > w) {
+        ImGui::SetTooltip("%s", c.name.c_str());
       }
     }
-    const bool hovered = ImGui::IsItemHovered();
     dl->AddRectFilled(at, ImVec2(at.x + w, at.y + chip_h),
                       ImGui::GetColorU32(hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Button), chip_h * 0.5f);
     dl->PushClipRect(at, ImVec2(at.x + w - x_w, at.y + chip_h), true);
-    dl->AddText(ImVec2(at.x + pad, at.y + (chip_h - ImGui::GetTextLineHeight()) * 0.5f), text, c->name.c_str());
+    dl->AddText(ImVec2(at.x + pad, at.y + (chip_h - ImGui::GetTextLineHeight()) * 0.5f), text, c.name.c_str());
     dl->PopClipRect();
     /* The x. */
     const ImVec2 xc(at.x + w - x_w * 0.5f, at.y + chip_h * 0.5f);
@@ -648,9 +660,7 @@ static void collection_chips(Context &C, const std::vector<uint64_t> &ids, const
     dl->AddLine(ImVec2(xc.x - r, xc.y + r), ImVec2(xc.x + r, xc.y - r), xcol, 1.4f);
     ImGui::PopID();
   }
-  /* + last, on the line it fits. */
-  place(chip_h);
-  const ImVec2 plus_at = ImGui::GetCursorScreenPos();
+  ImGui::SetCursorScreenPos(plus_at);
   if (ImGui::InvisibleButton("##collection_plus", ImVec2(chip_h, chip_h))) {
     ImGui::OpenPopup("##collection_chip_add");
   }
@@ -664,10 +674,7 @@ static void collection_chips(Context &C, const std::vector<uint64_t> &ids, const
     dl->AddLine(ImVec2(pc.x - r, pc.y), ImVec2(pc.x + r, pc.y), pcol, 1.4f);
     dl->AddLine(ImVec2(pc.x, pc.y - r), ImVec2(pc.x, pc.y + r), pcol, 1.4f);
   }
-  const float bottom = y + chip_h + inner;
-  dl->ChannelsSetCurrent(0);
-  dl->AddRectFilled(field, ImVec2(field.x + avail, bottom), ImGui::GetColorU32(ImGuiCol_FrameBg), style.FrameRounding);
-  dl->ChannelsMerge();
+  /* The field's whole height, so what follows starts under it. */
   ImGui::SetCursorScreenPos(field);
   ImGui::Dummy(ImVec2(avail, bottom - field.y));
   if (ImGui::BeginPopup("##collection_chip_add")) {
@@ -694,28 +701,27 @@ static void collection_chips(Context &C, const std::vector<uint64_t> &ids, const
   }
 }
 
-/* The Bone tab's Collections: the active bone's. */
+/* The Bone tab's Collections: the active bone's. A box of its own, not a panel's two columns, so the chips
+ * have its whole width. */
 static void bone_collections_chips_panel(Context &C, Layer &armature)
 {
   const Bone *active = bone_find(armature, armature.active_bone);
-  if (!active || !ui_panel_begin("Collections")) {
+  if (!active || !ui_collapsing_header("Collections", true)) {
     return;
   }
   const std::vector<uint64_t> ids = active->collections;
   collection_chips(C, ids, "armature.bone_collection_link",
                    {{"armature", std::to_string(armature.id)}, {"bone", active->name}}, "every selected bone");
-  ui_panel_end();
 }
 
 /* The Layer tab's Collections: the active layer's. */
 static void layer_collections_chips_panel(Context &C, Layer &layer)
 {
-  if (!ui_panel_begin("Collections")) {
+  if (!ui_collapsing_header("Collections", true)) {
     return;
   }
   const std::vector<uint64_t> ids = layer.collections;
   collection_chips(C, ids, "layer.collection_link", {{"layer", std::to_string(layer.id)}}, "every picked layer");
-  ui_panel_end();
 }
 
 /* Blender's bone Relations, for the active bone: its parent (a searchable list and an eyedropper; on the
