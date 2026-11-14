@@ -93,6 +93,10 @@ PENDING = [
      "Assign Selected counts the drawings shown with the bones", 'tests/test_collection_row_menu.py'),
     ('src/data/bones.cc', '      left += int(std::erase(b.collections, id));', '      left += int(std::count(b.collections.begin(), b.collections.end(), id));',
      "Unassign takes every bone out of the collection", 'tests/test_collection_row_menu.py'),
+    ('src/data/bones.cc', '    if ((l->selected || l->id == layer) &&', '    if ((l->id == layer) &&',
+     "a Layer tab chip's Assign Selected counts the picked layers", 'tests/test_collection_row_menu.py'),
+    ('src/ops/rig_ops.cc', '        armature_poll, [assign](Context &C) {', '        bone_layer_active, [assign](Context &C) {',
+     "Assign Selected works with a drawing inside the rig active", 'tests/test_collection_row_menu.py'),
 ]
 
 def build(root):

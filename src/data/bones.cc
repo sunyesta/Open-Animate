@@ -2170,6 +2170,25 @@ std::string collection_change_text(int bones, int drawings)
   return text;
 }
 
+int collection_layers_change(Document &doc, uint64_t layer, uint64_t id, bool assign)
+{
+  /* As layer.collection_link with all: the layer and every picked one. */
+  int n = 0;
+  for (const Layer *l : document_layers_flat(doc)) {
+    if ((l->selected || l->id == layer) &&
+        (std::find(l->collections.begin(), l->collections.end(), id) != l->collections.end()) != assign)
+    {
+      n++;
+    }
+  }
+  return n;
+}
+
+std::string collection_layers_change_text(int layers)
+{
+  return layers == 0 ? std::string() : std::to_string(layers) + (layers == 1 ? " layer" : " layers");
+}
+
 int collection_unassign_all(Document &doc, uint64_t id)
 {
   return collection_empty(doc.layers, id);

@@ -253,6 +253,10 @@ void collection_selected_change(Document &doc, Layer &armature, uint64_t id, boo
                                 int *r_drawings);
 /* "2 bones, 1 drawing", "" for none: what Assign or Unassign Selected would change, as the menu shows it. */
 std::string collection_change_text(int bones, int drawings);
+/* How many of layer `layer` and the picked layers a Layer tab chip's Assign Selected (`assign`) or Unassign Selected
+ * would change for collection `id`, and that as its menu shows it ("2 layers", "" for none). */
+int collection_layers_change(Document &doc, uint64_t layer, uint64_t id, bool assign);
+std::string collection_layers_change_text(int layers);
 /* Ids as names, and names as ids (those not found left out). */
 std::vector<std::string> collection_names(const Document &doc, const std::vector<uint64_t> &ids);
 

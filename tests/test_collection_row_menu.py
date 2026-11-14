@@ -94,4 +94,34 @@ assert ops.collection_unassign_all(collection="Eyes") == {'CANCELLED'}, "nothing
 oanim.ops.ed.undo()
 assert bone("jaw")["collections"] == ["Eyes"] and fresh(mouth).collections == ["Eyes"], "undone in one step"
 
+# --- The Bone tab's chips, a drawing inside the rig active: the same, on the rig worked on -------------------------------
+assert ops.collection_unassign_all(collection="Eyes") == {'FINISHED'}
+pick(["brow"], [])
+layers.active = fresh(mouth)
+assert change() == "1 bone, 1 drawing", ("the active drawing shown with the bones counts", change())
+assert ops.collection_assign(collection="Eyes") == {'FINISHED'}, "the rig the active drawing is in"
+assert bone("brow")["collections"] == ["Eyes"] and fresh(mouth).collections == ["Eyes"]
+assert ops.collection_unassign(collection="Eyes") == {'FINISHED'}
+assert bone("brow")["collections"] == [] and fresh(mouth).collections == []
+
+# --- The Layer tab's chips: the layer and the picked layers --------------------------------------------------------------
+oanim.ops.layer.new()
+sky = layers.active
+oanim.ops.layer.new()
+sea = layers.active
+assert oanim.ops.layer.collection_link(layer=str(sky.id), collection="Back") == {'FINISHED'}
+for l in layers.all():
+    l.select = False
+layers.active = fresh(sky)
+for l in (sea, shade):
+    fresh(l).select = True
+assert wm.collection_layers_change(sky, "Back") == "2 layers", wm.collection_layers_change(sky, "Back")
+assert wm.collection_layers_change(sky, "Back", False) == "1 layer", "the layer itself is in it"
+assert oanim.ops.layer.collection_link(layer=str(sky.id), collection="Back", on="1", all="1") == {'FINISHED'}
+assert fresh(sea).collections == ["Back"] and fresh(shade).collections == ["Back"], "a drawing in the rig too"
+assert wm.collection_layers_change(sky, "Back") == ""
+assert wm.collection_layers_change(sky, "Back", False) == "3 layers"
+fresh(shade).select = False
+assert wm.collection_layers_change(sky, "Back", False) == "2 layers", "only what is picked"
+
 print("collection row menu: ok")

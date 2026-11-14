@@ -3966,9 +3966,10 @@ void rig_operators_register()
         assign ? "Put the selected bones, and the drawings inside this bone layer picked in the Layers editor, in the "
                  "active collection (or `collection`)"
                : "Take the selected bones, and the picked drawings, out of the active collection (or `collection`)",
-        bone_layer_active, [assign](Context &C) {
+        armature_poll, [assign](Context &C) {
+          /* The bone layer worked on: the active one, or the one a drawing being edited is in. */
           Document &doc = *C.document;
-          Layer &armature = *document_active_layer(doc);
+          Layer &armature = *active_armature(C);
           if (all_arg(C, armature)) {
             report(ReportType::Warning, "Every bone is in All: assign to (or remove from) another collection");
             return OpStatus::Cancelled;

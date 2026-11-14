@@ -532,6 +532,12 @@ def collection_selected_change(rig, collection, assign=True):
     return _oanim.collection_selected_change(getattr(rig, "id", rig), collection, bool(assign))
 
 
+def collection_layers_change(layer, collection, assign=True):
+    """Test hook: what a Layer tab chip's Assign Selected (assign=False: Unassign Selected) would change for `layer`
+    (a layer or its id) and the layers picked in the Layers editor: "2 layers", or "" (the item greyed)."""
+    return _oanim.collection_layers_change(getattr(layer, "id", layer), collection, bool(assign))
+
+
 def field_affected_go(layer, path, index, component=-1):
     """Test hook: clicks row `index` of the field's Affected By."""
     _oanim.field_affected_go(getattr(layer, "id", layer), path, int(component), int(index))

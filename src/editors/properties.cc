@@ -593,11 +593,26 @@ static void controller_side_row(Context &C, Layer &armature, const Bone &knob, i
   ImGui::PopID();
 }
 
+/* What a chip's Assign Selected (`assign`) or Unassign Selected would change, as its menu shows it: in the Bone tab
+ * (`armature`) the selected bones and the drawings shown with them (as the Collections list's rows), in the Layer tab
+ * the layer and the picked layers. */
+static std::string chip_change_text(Document &doc, Layer *armature, const Layer *layer, uint64_t id, bool assign)
+{
+  if (armature) {
+    int bones = 0, drawings = 0;
+    collection_selected_change(doc, *armature, id, assign, &bones, &drawings);
+    return collection_change_text(bones, drawings);
+  }
+  return collection_layers_change_text(collection_layers_change(doc, layer ? layer->id : 0, id, assign));
+}
+
 /* A bone's or layer's Collections: its collections as chips that wrap, each with an x that takes it out,
  * and + for a searchable list of the others (or a new one). Alt with + or x: every selected bone (or picked
- * layer) too. `op` puts it in or takes it out, given `args` and `collection`, `on` and `all`. */
+ * layer) too. `op` puts it in or takes it out, given `args` and `collection`, `on` and `all`. Right-click a chip
+ * for Assign Selected, Unassign Selected and Unassign, as the Collections list's rows: `armature` in the Bone tab,
+ * `layer` in the Layer tab. */
 static void collection_chips(Context &C, const std::vector<uint64_t> &ids, const char *op, const OpArgs &args,
-                             const char *alt_what)
+                             const char *alt_what, Layer *armature, const Layer *layer)
 {
   Document &doc = *C.document;
   const ImGuiStyle &style = ImGui::GetStyle();
@@ -641,6 +656,8 @@ static void collection_chips(Context &C, const std::vector<uint64_t> &ids, const
 
   std::string take_off;
   bool take_all = false;
+  std::string menu_op;
+  OpArgs menu_args;
   const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text), dim = ImGui::GetColorU32(ImGuiCol_TextDisabled);
   for (const Chip &chip : chips) {
     const Collection &c = *chip.c;
@@ -654,6 +671,44 @@ static void collection_chips(Context &C, const std::vector<uint64_t> &ids, const
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && over_x) {
       take_off = c.name;
       take_all = ImGui::GetIO().KeyAlt;
+    }
+    if (ImGui::BeginPopupContextItem("##chip_menu")) {
+      ImGui::TextDisabled("%s", c.name.c_str());
+      ImGui::Separator();
+      for (const bool assign : {true, false}) {
+        const std::string count = chip_change_text(doc, armature, layer, c.id, assign);
+        if (ImGui::MenuItem(assign ? "Assign Selected" : "Unassign Selected", count.c_str(), false, !count.empty())) {
+          if (armature) {
+            menu_op = assign ? "armature.collection_assign" : "armature.collection_unassign";
+            menu_args = {{"collection", c.name}};
+          }
+          else {
+            menu_op = op;
+            menu_args = args;
+            menu_args["collection"] = c.name;
+            menu_args["on"] = assign ? "1" : "0";
+            menu_args["all"] = "1";
+          }
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+          const std::string what = armature ? "the selected bones, and the drawings shown with the bones that are "
+                                              "picked or have points selected,"
+                                            : "this layer and the layers picked in the Layers editor";
+          const std::string tip = count.empty() ? (assign ? "Nothing selected is outside " : "Nothing selected is in ") + c.name
+                                  : assign      ? "Put " + what + " in " + c.name
+                                                : "Take " + what + " out of " + c.name;
+          ImGui::SetTooltip("%s", tip.c_str());
+        }
+      }
+      ImGui::Separator();
+      if (ImGui::MenuItem("Unassign")) {
+        menu_op = "armature.collection_unassign_all";
+        menu_args = {{"collection", c.name}};
+      }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip("Take every bone and layer out of it; it stays on the panels, empty");
+      }
+      ImGui::EndPopup();
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       if (over_x) {
@@ -708,6 +763,9 @@ static void collection_chips(Context &C, const std::vector<uint64_t> &ids, const
     }
     ImGui::EndPopup();
   }
+  if (!menu_op.empty()) {
+    operator_call(C, menu_op, menu_args);
+  }
   if (!take_off.empty()) {
     OpArgs off = args;
     off["collection"] = take_off;
@@ -727,7 +785,8 @@ static void bone_collections_chips_panel(Context &C, Layer &armature)
   }
   const std::vector<uint64_t> ids = active->collections;
   collection_chips(C, ids, "armature.bone_collection_link",
-                   {{"armature", std::to_string(armature.id)}, {"bone", active->name}}, "every selected bone");
+                   {{"armature", std::to_string(armature.id)}, {"bone", active->name}}, "every selected bone",
+                   &armature, nullptr);
 }
 
 /* The Layer tab's Collections: the active layer's. */
@@ -737,7 +796,8 @@ static void layer_collections_chips_panel(Context &C, Layer &layer)
     return;
   }
   const std::vector<uint64_t> ids = layer.collections;
-  collection_chips(C, ids, "layer.collection_link", {{"layer", std::to_string(layer.id)}}, "every picked layer");
+  collection_chips(C, ids, "layer.collection_link", {{"layer", std::to_string(layer.id)}}, "every picked layer",
+                   nullptr, &layer);
 }
 
 /* Blender's bone Relations, for the active bone: its parent (a searchable list and an eyedropper; on the
