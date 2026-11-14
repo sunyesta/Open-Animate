@@ -97,7 +97,23 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
       continue;
     }
     const Bone *bone = action_bone_of(owner, name);
-    const std::string other = action_mirror_name(name, bone->name);
+    std::string other = action_mirror_name(name, bone->name);
+    int side = 0;
+    if (bone_is_controller(*bone) && controller_of_action(owner, name, &side)) {
+      /* A knob's side: into the action its mirrored knob's side takes (named in `sides_later`, where a side can hold it),
+       * never over a bone's own action, a fix or another knob's side. */
+      const std::string knob_other = bone_mirror_name(bone->name);
+      const int side_other = side < 2 ? side ^ 1 : side;
+      const auto later = std::find_if(sides_later.begin(), sides_later.end(), [&](const auto &t) {
+        return std::get<0>(t) == knob_other && std::get<1>(t) == side_other;
+      });
+      if (later != sides_later.end()) {
+        other = std::get<2>(*later);
+      }
+      else if (other != name && !controller_side_refusal(owner, knob_other, side_other, other).empty()) {
+        continue;
+      }
+    }
     if (other == name) {
       centred.push_back(name);
     }
@@ -403,13 +419,17 @@ static void bone_outer_parent_clear(const Layer &inner, Bone &b)
 
 std::string armature_unique_bone_name(const Layer &armature, const std::string &base)
 {
-  if (!bone_find_by_name(armature, base)) {
+  /* Taken by another bone, or the name of a knob's side's action (the new bone would take it for its own). */
+  const auto taken = [&](const std::string &name) {
+    return bone_find_by_name(armature, name) || !controller_side_named(armature, name).empty();
+  };
+  if (!taken(base)) {
     return base;
   }
   for (int i = 1;; i++) {
     char suffix[16];
     std::snprintf(suffix, sizeof(suffix), ".%03d", i);
-    if (!bone_find_by_name(armature, base + suffix)) {
+    if (!taken(base + suffix)) {
       return base + suffix;
     }
   }
@@ -2121,13 +2141,44 @@ void rig_operators_register()
                    report(ReportType::Warning, "Select bones to convert");
                    return OpStatus::Cancelled;
                  }
+                 const BoneType type = to == "CONTROLLER_2D" ? BoneType::Controller2D
+                                       : to == "PIN"           ? BoneType::Pin
+                                                               : BoneType::Regular;
+                 int converted = 0;
                  for (const uint64_t id : picked) {
+                   const Bone *b = bone_find(armature, id);
+                   /* Already that type: nothing to do. */
+                   if (!b || b->type == type) {
+                     continue;
+                   }
+                   /* A controller made Regular or a Pin turns the actions named after it: never a knob's side. */
+                   if (bone_is_controller(*b) && type != BoneType::Controller2D) {
+                     if (const std::string why = controller_side_named(armature, b->name, b); !why.empty()) {
+                       report(ReportType::Warning, why + ": rename that action first");
+                       continue;
+                     }
+                   }
+                   converted++;
                    const std::string note = to == "CONTROLLER_2D" ? bone_convert_to_controller(doc, armature.id, id)
                                             : to == "PIN"           ? bone_convert_to_pin(doc, armature.id, id)
                                                                     : bone_convert_to_regular(doc, armature.id, id);
                    if (!note.empty()) {
                      report(ReportType::Warning, note);
                    }
+                 }
+                 if (!converted) {
+                   if (std::all_of(picked.begin(), picked.end(), [&](uint64_t id) {
+                         const Bone *b = bone_find(armature, id);
+                         return !b || b->type == type;
+                       }))
+                   {
+                     report(ReportType::Warning, std::string("The selected bones are ") +
+                                                     (type == BoneType::Controller2D ? "2 Axis Controllers"
+                                                      : type == BoneType::Pin        ? "Pins"
+                                                                                     : "Regular") +
+                                                     " already");
+                   }
+                   return OpStatus::Cancelled;
                  }
                  return OpStatus::Finished;
                },
@@ -2183,7 +2234,9 @@ void rig_operators_register()
                    return OpStatus::Cancelled;
                  }
                  const uint64_t owner = active_armature(C)->id, id = knob->id;
-                 const std::string name = document_action_new(doc, owner, knob->name + " " + controller_side_name(side));
+                 /* Named after the knob's side, never a bone's name (it would be that bone's own action). */
+                 const std::string name = document_action_new(
+                     doc, owner, controller_action_name_free(*layer_find(doc, owner), knob->name + " " + controller_side_name(side)));
                  if (name.empty()) {
                    return OpStatus::Cancelled;
                  }
@@ -2217,8 +2270,13 @@ void rig_operators_register()
                    return OpStatus::Cancelled;
                  }
                  const uint64_t owner = active_armature(C)->id, id = knob->id;
+                 /* Into the mirrored name, unless a side can't hold that (a bone's own action, a fix, another side's):
+                  * then a new action named after this side, so nothing is made or replaced to be refused after. */
+                 const Layer &rig = *layer_find(doc, owner);
                  std::string to = bone_mirror_name(from);
-                 to = to != from ? to : knob->name + " " + controller_side_name(side);
+                 if (to == from || !controller_side_refusal(rig, knob->name, side, to).empty()) {
+                   to = controller_action_name_free(rig, knob->name + " " + controller_side_name(side));
+                 }
                  std::string text = "Mirrored " + from + " into " + to;
                  for (const std::string &note : document_action_mirror(doc, owner, from, to)) {
                    text += "; " + note;
@@ -4127,11 +4185,16 @@ void rig_operators_register()
                      /* Left and Right swap, reading the other side's actions where they're there. */
                      for (int side = 0; side < CONTROLLER_SIDES; side++) {
                        const std::string from = src->controller_actions[side < 2 ? side ^ 1 : side];
-                       const std::string name = from.empty() ? from : action_mirror_name(from, src->name);
-                       const bool there = std::find(armature.actions.begin(), armature.actions.end(), name) != armature.actions.end();
+                       std::string name = from.empty() ? from : action_mirror_name(from, src->name);
                        /* Never one of its own sides: an action has one controller. */
                        const bool own = std::find(src->controller_actions.begin(), src->controller_actions.end(), name) !=
                                         src->controller_actions.end();
+                       /* Nor what a side can't hold (a bone's own action, a fix, another knob's side): a new action
+                        * named after the side instead, which Mirror Action Bone Actions mirrors into. */
+                       if (name != from && !own && !controller_side_refusal(armature, other, side, name).empty()) {
+                         name = controller_action_name_free(armature, other + " " + controller_side_name(side));
+                       }
+                       const bool there = std::find(armature.actions.begin(), armature.actions.end(), name) != armature.actions.end();
                        copy.controller_actions[side] = name != from && there && !own ? name : "";
                        if (name != from && !own) {
                          sides_later.emplace_back(other, side, name);

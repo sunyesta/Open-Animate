@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <string>
 
 #include "data/bones.hh"
 
@@ -66,6 +68,64 @@ const Bone *controller_dial_of_action(const Layer &owner, const std::string &act
 Bone *controller_dial_of_action(Layer &owner, const std::string &action)
 {
   return const_cast<Bone *>(controller_dial_of_action(const_cast<const Layer &>(owner), action));
+}
+
+std::string controller_side_refusal(const Layer &owner, const std::string &knob_name, int side, const std::string &action)
+{
+  if (action.empty()) {
+    return "";
+  }
+  if (std::any_of(owner.bone_fixes.begin(), owner.bone_fixes.end(), [&](const BoneFix &f) { return f.name == action; })) {
+    return action + " is a fix: it plays by itself as its bones move";
+  }
+  for (const Bone &in : owner.bones) {
+    for (int s = 0; bone_is_controller(in) && s < CONTROLLER_SIDES; s++) {
+      if (in.controller_actions[s] == action && !(in.name == knob_name && s == side)) {
+        return action + " is already " + in.name + "'s " + controller_side_name(s);
+      }
+    }
+  }
+  /* A bone's own action plays as that bone turns: a knob drives it through an ordinary action keying the turn. */
+  if (const Bone *bone = controller_dial_of_action(owner, action)) {
+    return action + " is " + bone->name + "'s own action: put an ordinary action that turns " + bone->name +
+           " in the side instead";
+  }
+  return "";
+}
+
+std::string controller_action_name_free(const Layer &owner, const std::string &base)
+{
+  const auto taken = [&](const std::string &name) {
+    if (std::find(owner.actions.begin(), owner.actions.end(), name) != owner.actions.end() ||
+        bone_find_by_name(owner, name))
+    {
+      return true;
+    }
+    return name.size() > 2 && name.compare(name.size() - 2, 2, " 2") == 0 &&
+           bone_find_by_name(owner, name.substr(0, name.size() - 2));
+  };
+  std::string name = base;
+  for (int i = 1; taken(name); i++) {
+    char suffix[16];
+    std::snprintf(suffix, sizeof(suffix), ".%03d", i);
+    name = base + suffix;
+  }
+  return name;
+}
+
+std::string controller_side_named(const Layer &owner, const std::string &name, const Bone *besides)
+{
+  for (const std::string &action : {name, name + " 2"}) {
+    for (const Bone &knob : owner.bones) {
+      for (int side = 0; &knob != besides && bone_is_controller(knob) && side < CONTROLLER_SIDES; side++) {
+        if (knob.controller_actions[side] == action) {
+          return action + " is " + knob.name + "'s " + controller_side_name(side) +
+                 ": a bone named so would take it for its own action";
+        }
+      }
+    }
+  }
+  return "";
 }
 
 float controller_side_frames(const Bone &knob, int side)

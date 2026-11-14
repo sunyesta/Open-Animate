@@ -384,22 +384,28 @@ static std::string incremented_path(const std::string &path)
   while (digits_at > 0 && std::isdigit(static_cast<unsigned char>(stem[digits_at - 1]))) {
     digits_at--;
   }
-  long long number = 0;
-  size_t width = 3;
+  /* As many digits as it has (take_09 -> take_10, not take_010, which sorts before it); three for a first. Counted up
+   * as text, so a number of any length goes on (as a long long, past 19 digits it wrapped round to a minus). */
+  std::string digits = "000";
   if (digits_at < stem.size()) {
-    number = std::atoll(stem.c_str() + digits_at);
-    /* As many digits as it has (take_09 -> take_10, not take_010, which sorts before it); three for a first. */
-    width = stem.size() - digits_at;
+    digits = stem.substr(digits_at);
     stem.resize(digits_at);
   }
   else {
     stem += "_";
   }
-  for (;;) {
-    std::string digits = std::to_string(++number);
-    if (digits.size() < width) {
-      digits.insert(0, width - digits.size(), '0');
+  const auto next = [](std::string d) {
+    for (size_t i = d.size(); i-- > 0;) {
+      if (d[i] != '9') {
+        d[i]++;
+        return d;
+      }
+      d[i] = '0';
     }
+    return "1" + d;
+  };
+  for (;;) {
+    digits = next(digits);
     const fs::path candidate = p.parent_path() / path_from_utf8(stem + digits + ".oanim");
     if (!fs::exists(candidate)) {
       return path_to_utf8(candidate);

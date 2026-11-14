@@ -4606,19 +4606,8 @@ bool controller_side_set(Document &doc, uint64_t owner_id, uint64_t knob_id, int
       *r_why = "There is no action \"" + action + "\"";
       return false;
     }
-    if (bone_fix_find(*owner, action)) {
-      *r_why = action + " is a fix: it plays by itself as its bones move";
-      return false;
-    }
-    int in_side = 0;
-    if (const Bone *in = controller_of_action(*owner, action, &in_side)) {
-      *r_why = action + " is already " + in->name + "'s " + controller_side_name(in_side);
-      return false;
-    }
-    /* A bone's own action plays as that bone turns: a knob drives it through an ordinary action keying the turn. */
-    if (const Bone *bone = controller_dial_of_action(*owner, action)) {
-      *r_why = action + " is " + bone->name + "'s own action: put an ordinary action that turns " + bone->name +
-               " in the side instead";
+    if (std::string why = controller_side_refusal(*owner, knob->name, side, action); !why.empty()) {
+      *r_why = std::move(why);
       return false;
     }
   }
@@ -4663,13 +4652,8 @@ int controller_links_undo(Document &doc)
         if (!dial) {
           continue;
         }
-        const std::string base = knob.name + " " + controller_side_name(side);
-        std::string name = base;
-        for (int i = 1; std::find(owner.actions.begin(), owner.actions.end(), name) != owner.actions.end(); i++) {
-          char suffix[16];
-          std::snprintf(suffix, sizeof(suffix), ".%03d", i);
-          name = base + suffix;
-        }
+        /* Never a bone's name either, or the new action would be a bone's own again, and converted on every open. */
+        const std::string name = controller_action_name_free(owner, knob.name + " " + controller_side_name(side));
         owner.actions.push_back(name);
         /* The new action turns the dial as its own action did, so the dial goes on playing that by its turn. */
         if (const auto it = dial->angle_keys.actions.find(old); it != dial->angle_keys.actions.end()) {
@@ -6197,6 +6181,23 @@ int keys_move_selected(Document &doc, const std::vector<Layer *> &layers_picked,
 
 std::pair<int, int> keys_span_frames_add(Document &doc, Layer &layer, int frame, int amount, bool together)
 {
+  if (amount > 0) {
+    /* The keys after the stretch go later by as much: never past the last frame there is (they stop there together, as
+     * moved keys do). */
+    int last = 0;
+    const auto latest = [&](auto &ch) {
+      for (const auto &k : ch.keys) {
+        last = std::max(last, k.frame);
+      }
+    };
+    layer_for_each_channel<false>(layer, [&](auto &ch, auto & /*value*/) { latest(ch); });
+    if (together && doc.time_together) {
+      for (const AnyChannel &c : together_candidates(doc)) {
+        any_visit(c, latest);
+      }
+    }
+    amount = std::min(amount, KEY_FRAME_LAST - last);
+  }
   if (amount == 0) {
     return {0, 0};
   }
@@ -6498,6 +6499,21 @@ int time_together_timing_follow(Document &doc, const TimingSnapshot &before)
   return followed;
 }
 
+/* Each channel of the timeline being edited: in an action its bone layer's, on the mainline every layer's, the
+ * Simulation's and the camera's. */
+template<typename F> static void timeline_for_each_channel(Document &doc, F &&f)
+{
+  if (!doc.action.empty()) {
+    if (Layer *owner = layer_find(doc, doc.action_layer)) {
+      owner_for_each_channel(*owner, f);
+    }
+    return;
+  }
+  layers_for_each_channel(doc.layers, f);
+  layer_for_each_channel(doc.simulation, f);
+  layer_for_each_channel(document_camera(doc), f);
+}
+
 int timeline_clear(Document &doc, bool count_only)
 {
   int count = 0;
@@ -6513,15 +6529,7 @@ int timeline_clear(Document &doc, bool count_only)
       drop_lone_setup_key(ch, value);
     }
   };
-  if (!doc.action.empty()) {
-    if (Layer *owner = layer_find(doc, doc.action_layer)) {
-      owner_for_each_channel(*owner, clear);
-    }
-    return count;
-  }
-  layers_for_each_channel(doc.layers, clear);
-  layer_for_each_channel(doc.simulation, clear);
-  layer_for_each_channel(document_camera(doc), clear);
+  timeline_for_each_channel(doc, clear);
   return count;
 }
 
@@ -6982,7 +6990,7 @@ static int clipboard_paste(const KeyClipboard &clipboard, const Document &doc, c
     sources.insert(c.layer);
   }
   /* Where a copied channel goes: the same layer, else one with the same name, else (keys copied
-   * from a single layer) the first layer that has the channel. */
+   * from a single layer, Copy Keys' only: a timeline pastes onto its own layers) the first layer that has the channel. */
   Layer *found = nullptr;
   const auto target = [&](const ClipboardChannel &c, ChannelRef *r_ref) -> bool {
     for (Layer *layer : layers) {
@@ -7004,7 +7012,7 @@ static int clipboard_paste(const KeyClipboard &clipboard, const Document &doc, c
         return true;
       }
     }
-    if (sources.size() == 1) {
+    if (sources.size() == 1 && !same_frames) {
       for (Layer *layer : layers) {
         if (layer_channel(*layer, c.path, r_ref)) {
           found = layer;
@@ -7017,20 +7025,23 @@ static int clipboard_paste(const KeyClipboard &clipboard, const Document &doc, c
   /* A knob's timing in a side's own action means nothing anywhere else: on the mainline it would move the knob. The
    * first key that pastes lands on `frame`. */
   const auto pastes = [&](const ClipboardChannel &c) { return c.knob_timing.empty() || c.knob_timing == doc.action; };
-  int first_frame = INT32_MAX;
+  int first_frame = INT32_MAX, last_frame = 0;
   for (const ClipboardChannel &c : clipboard.channels) {
     for (const auto &k : c.scalar) {
       first_frame = pastes(c) ? std::min(first_frame, k.frame) : first_frame;
+      last_frame = pastes(c) ? std::max(last_frame, k.frame) : last_frame;
     }
     for (const auto &k : c.vector) {
       first_frame = pastes(c) ? std::min(first_frame, k.frame) : first_frame;
+      last_frame = pastes(c) ? std::max(last_frame, k.frame) : last_frame;
     }
   }
   if (first_frame == INT32_MAX) {
     return 0;
   }
   layers_deselect_keys(layers);
-  const int offset = same_frames ? 0 : frame - first_frame;
+  /* Never past the last frame there is: pasted near it, the keys stop there together, as moved keys do. */
+  const int offset = same_frames ? 0 : std::min(frame - first_frame, KEY_FRAME_LAST - last_frame);
   int count = 0;
   /* The layers whose points or bones took a pose on the setup frame: their values follow the changes. */
   std::set<Layer *> posed_setup;
@@ -7221,8 +7232,23 @@ int timeline_paste(Document &doc)
   if (timeline_clipboard_empty()) {
     return 0;
   }
-  timeline_clear(doc);
-  return clipboard_paste(g_timeline_clipboard.keys, doc, timeline_edited_layers(doc), 0, true, nullptr, nullptr);
+  /* Cleared, but frame 0's keys stay as they are (their interpolation, path handles), so what pastes after them goes on
+   * from the same setup key; one left alone goes as Clear Timeline's would, if nothing pastes into its channel. */
+  std::set<const void *> lone;
+  timeline_for_each_channel(doc, [&](auto &ch, auto & /*value*/) {
+    const size_t before = ch.keys.size();
+    std::erase_if(ch.keys, [](const auto &key) { return key.frame != 0; });
+    if (ch.keys.size() != before && ch.keys.size() == 1) {
+      lone.insert(static_cast<const void *>(&ch));
+    }
+  });
+  const int count = clipboard_paste(g_timeline_clipboard.keys, doc, timeline_edited_layers(doc), 0, true, nullptr, nullptr);
+  timeline_for_each_channel(doc, [&](auto &ch, auto &value) {
+    if (lone.count(static_cast<const void *>(&ch))) {
+      drop_lone_setup_key(ch, value);
+    }
+  });
+  return count;
 }
 
 }  // namespace oanim

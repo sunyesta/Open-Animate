@@ -203,5 +203,9 @@ not a bug, check the times against the shutdown before shrinking.
   mid-stretch (the dots after it go back along the curve to the same place: no key and stretch pair shows that without
   control points) or Convert to Key behind such a bounce: what plays is Moho's (both halves the stretch's
   interpolation). Report it as a design question, not a bug to fix.
+- **Inside an action the saved bones are posed on the frame shown**: an op that goes to another frame (`fix_enter` with frame=) changes them with no step. The fuzzer compares such ops on the frame they started on (`check_op`'s `frame_before`); a probe saving snapshots must do the same.
+- **Names that mean something.** Where data is tied by name (a bone's own action is the action named after it), every path that makes or changes a name can break the tie: new actions, renames, new bones, conversions, Symmetrize and mirrors, and the upgrade on opening (which must not convert again on the next open). Probe them all together, and put the check in one place they all call.
+- **A fix made redundant.** A mutation entry missed because other code already does the job (a prune done earlier on the way): take that change back out, so no code stands that no test needs.
+- **An edit by nothing turned CANCELLED** leaves older tests that ran the real path with it (Alt S by 1) testing nothing: give them a hair off (1.00001) so their mutation entries still catch.
 - **A rig loop** (a bone's IK target riding on the chain, a constraint fed by what it moves) can make a pose depend on
   history by design: report it as a question, don't fix it as a bug.

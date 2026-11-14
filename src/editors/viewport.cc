@@ -13600,10 +13600,16 @@ static OpStatus points_transform_exec(Context &C, char kind)
   if (!modal_layers(C, moving, layers)) {
     return OpStatus::Cancelled;
   }
-  const SetupSnapshot kept = keep_poses_begin(C, editable_layer_ids(C));
   const float2 delta(op_arg_float(C, "move_x", 0.0f), op_arg_float(C, "move_y", 0.0f));
   const float2 scale(op_arg_float(C, "scale_x", 1.0f), op_arg_float(C, "scale_y", 1.0f));
-  modal_apply(C, moving, layers, kind, delta, op_arg_float(C, "angle", 0.0f) * PI / 180.0f, scale);
+  const float angle = op_arg_float(C, "angle", 0.0f);
+  /* By nothing (a grab let go where it began comes here too, its amounts 0): a step as Blender's, nothing written. Written
+   * back through the bones of a posed frame, the points and handles came back a hair off, and the handles were keyed. */
+  if (delta.x == 0.0f && delta.y == 0.0f && angle == 0.0f && scale.x == 1.0f && scale.y == 1.0f) {
+    return OpStatus::Finished;
+  }
+  const SetupSnapshot kept = keep_poses_begin(C, editable_layer_ids(C));
+  modal_apply(C, moving, layers, kind, delta, angle * PI / 180.0f, scale);
   keep_poses_end(C, kept);
   return OpStatus::Finished;
 }

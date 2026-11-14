@@ -96,6 +96,16 @@ const Bone *controller_of_action(const Layer &owner, const std::string &action, 
 /* The bone an action bone action belongs to by its name, a controller never. */
 const Bone *controller_dial_of_action(const Layer &owner, const std::string &action);
 Bone *controller_dial_of_action(Layer &owner, const std::string &action);
+/* Why `action` can't go in `side` of the knob named `knob_name` ("" when it can): a fix, another side's (another knob's
+ * or another of this one's), or a bone's own action. Whether there is such an action is the caller's to see. */
+std::string controller_side_refusal(const Layer &owner, const std::string &knob_name, int side, const std::string &action);
+/* `base`, else "base.001", ...: a name for a new action in a side that is no action yet and that no bone would take for
+ * its own (a bone's name, or one and " 2"), so it stays an ordinary action. */
+std::string controller_action_name_free(const Layer &owner, const std::string &base);
+/* Why a bone (not a controller) can't be named `name` ("" when it can): a knob's side plays an action of that name (or
+ * the name and " 2"), which would become the bone's own, as a side never plays. `besides`' own sides aside (a controller
+ * made Regular turns its own sides into its own actions). */
+std::string controller_side_named(const Layer &owner, const std::string &name, const Bone *besides = nullptr);
 
 /* A side's action's length in frames: 0 for a side with no action. */
 float controller_side_frames(const Bone &knob, int side);

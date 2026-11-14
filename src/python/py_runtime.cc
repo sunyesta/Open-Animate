@@ -3437,8 +3437,16 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         bone.strength = std::max(0.0f, value.cast<float>());
       }
       else if (key == "name") {
-        const std::string before = bone.name;
-        bone.name = value.cast<std::string>();
+        const std::string before = bone.name, to = value.cast<std::string>();
+        /* Never the name of a knob's side's action: it would become this bone's own. */
+        if (const std::string why = bone_is_controller(bone) || to == before
+                                        ? std::string()
+                                        : controller_side_named(*layer_find(*current_context().document, id), to);
+            !why.empty())
+        {
+          throw py::value_error(why);
+        }
+        bone.name = to;
         armature_bone_renamed(*current_context().document, id, before, bone.name);
       }
       else if (key == "ik_ignore") {

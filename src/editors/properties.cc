@@ -1781,8 +1781,18 @@ static void bone_panel(Context &C, Layer &armature)
       renaming_from = name_before;
     }
     if (ImGui::IsItemDeactivatedAfterEdit()) {
-      armature_bone_renamed(doc, armature.id, renaming_from, active->name);
-      C.undo->push("Rename Bone", doc);
+      /* Never the name of a knob's side's action: it would become this bone's own. */
+      const std::string why = bone_is_controller(*active) || active->name == renaming_from
+                                  ? std::string()
+                                  : controller_side_named(armature, active->name);
+      if (!why.empty()) {
+        active->name = renaming_from;
+        report(ReportType::Warning, why);
+      }
+      else {
+        armature_bone_renamed(doc, armature.id, renaming_from, active->name);
+        C.undo->push("Rename Bone", doc);
+      }
     }
     active = bone_find(armature, armature.active_bone);
     if (!active) {

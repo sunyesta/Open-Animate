@@ -1653,14 +1653,22 @@ def apply(op):
 
 
 # --- The checks -------------------------------------------------------------------------------------------------------
-def check_op(op, r, before, step_before):
+def check_op(op, r, before, step_before, frame_before=None):
     after, step_after = snap(), active_step()
     bn = bad_numbers(after)
     if bn:
         raise Failure(f"non-finite numbers at {bn[:3]}")
     check_fixes()
     if TABLE[op["op"]][1] == "op":
-        changed = edits(before, after)
+        same_frame = after
+        if frame_before is not None and doc.frame_current != frame_before:
+            # An op that goes to another frame (fix_enter with frame=): what is saved inside an action is posed on the
+            # frame shown, so it is compared on the frame it started on.
+            f = doc.frame_current
+            doc.frame_current = frame_before
+            same_frame = snap()
+            doc.frame_current = f
+        changed = edits(before, same_frame)
         if r == {'CANCELLED'} and changed:
             raise Failure(f"cancel-changed: {op['op']} returned CANCELLED but changed {changed[:3]}")
         if changed and step_after == step_before:
@@ -1779,7 +1787,7 @@ def main():
             # Written first, so a hang (the watchdog exits) leaves a log naming it; replaced or removed below.
             write_fail(f"crash-or-hang: {op['op']} crashed or did not finish in {HANG}s")
             faulthandler.dump_traceback_later(HANG, exit=True, file=hang_file)
-            before, step_before = snap(), active_step()
+            before, step_before, frame_before = snap(), active_step(), doc.frame_current
             try:
                 r = apply(op)
             except Failure:
@@ -1787,7 +1795,7 @@ def main():
             except Exception as e:
                 raise Failure(f"exception: {op['op']} raised {type(e).__name__}: {e}\n{traceback.format_exc()}")
             if r != "skip":
-                check_op(op, r, before, step_before)
+                check_op(op, r, before, step_before, frame_before)
                 kind = TABLE[op["op"]][1]
                 if kind == "op" and active_step() != step_before:
                     dirty = False
