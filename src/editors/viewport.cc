@@ -10128,9 +10128,9 @@ static constexpr float CONTROLLER_KNOB_RADIUS = 7.0f;
 /* Half a spot's square, and how near the mouse picks one. */
 static constexpr float CONTROLLER_SPOT_HALF = 3.5f, CONTROLLER_SPOT_PICK = 6.0f;
 
-/* A 2 Axis Controller: its box (the frames of its actions either way from the rest point), a tick on the edge for each
- * of their keys, the line of each fix that follows it (a dot where it plays), a square at each spot (named under the mouse), a ring where its
- * actions really are if not at the knob, and the knob. */
+/* A 2 Axis Controller: its box (the frames of its actions either way from the rest point), a square at each spot (named
+ * under the mouse), a ring where its actions really are if not at the knob, and the knob. Neither its actions' keys nor
+ * the lines of the fixes that follow it are drawn here: the box stays plain (the Bone tab shows the fixes' lines). */
 static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &armature, const Bone &bone,
                             const BonePose &pose, const ScreenBone &sb, const ViewMapping &view, bool picked, bool active,
                             bool faint, ImU32 fill, ImU32 edge)
@@ -10149,24 +10149,6 @@ static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &ar
   const ImU32 guide = IM_COL32(0xff, 0xff, 0xff, 70);
   dl->AddLine(at({lo.x, 0.0f}), at({hi.x, 0.0f}), guide);
   dl->AddLine(at({0.0f, lo.y}), at({0.0f, hi.y}), guide);
-  const auto tick = [&](ImVec2 from, ImVec2 toward) {
-    const ImVec2 d = toward - from;
-    const float n = std::sqrt(d.x * d.x + d.y * d.y);
-    dl->AddLine(from, n > 1e-3f ? from + d * (5.0f / n) : from, IM_COL32(0xff, 0xff, 0xff, 170), 1.0f);
-  };
-  for (int side = 0; side < CONTROLLER_SIDES; side++) {
-    const float sign = controller_side_sign(side);
-    for (const int frame : bone.controller_keys[side]) {
-      const float v = controller_side_reach(bone, side, float(frame)) * sign;
-      if (controller_side_axis(side) == 0) {
-        tick(at({v, lo.y}), at({v, hi.y}));
-      }
-      else {
-        tick(at({lo.x, v}), at({hi.x, v}));
-      }
-    }
-  }
-  bone_fix_lines_draw(dl, bone_fix_knob_lines(doc, armature, bone), at);
   const ImVec2 mouse = ImGui::GetIO().MousePos;
   for (const ControllerSpot &spot : bone.controller_spots) {
     const ImVec2 s = at(spot.at);

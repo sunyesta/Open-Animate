@@ -140,7 +140,7 @@ timelines swapped into the channels) and action bone actions (`apply_action_bone
 Controller (`src/anim/controller.*`, Convert To; the knob plays ordinary actions only, a bone's own action never in a side, older files' linked sides made ordinary on open by `controller_links_undo` in `src/anim/animation.cc`; its spots in the Bone tab, `controller_spots_panel` in `src/editors/properties.cc`, previews and thumbnails from posed copies in `src/anim/controller_preview.*` and `src/editors/controller_thumbnails.*`). Fix actions, which follow bones (`BoneFix` in `src/data/layer.hh`: an ordinary action
 whose keys on its bones are a line of poses; played by `bone_fix_play` in `src/anim/animation.cc` among the action bone
 actions (`action_bone_action_turns` orders them), faded by `BoneFix::fade`, made by `armature.bone_fix_new`; the Bone tab's
-`bone_fixes_panel` in `src/editors/properties.cc`; lines in a knob's box from `bone_fix_knob_lines`, drawn by
+`bone_fixes_panel` in `src/editors/properties.cc`; lines in the Spots panel's knob box (not the viewport's) from `bone_fix_knob_lines`, drawn by
 `bone_fix_lines_draw` in `src/editors/viewport.cc`; mirrored by Symmetrize through `document_bone_fix_mirror`). The Actions panel in the Armature
 tab (`actions_panel` in `src/editors/properties.cc`; `ActionPlay` in `src/data/layer.hh`: each action's Frame, mute and loop,
 played by `action_own_frames` and set by `action_frame_set`). Not yet: local
