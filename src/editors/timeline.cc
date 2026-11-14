@@ -4139,7 +4139,7 @@ static void timeline_body(Area &area, Context &C)
     const std::string &path = r >= 0 ? rows[r].filter.path : std::string();
     const bool one = r >= 0 && rows[r].layers.size() == 1 && !path.empty() && path.back() != '.';
     const bool reference = one && rows[r].layers[0]->is_reference() && rows[r].layers[0]->reference.own_channels.count(path);
-    if (one && (reference || !ui_affected_rows(doc, rows[r].layers[0]->id, path, -1).empty())) {
+    if (one && (reference || ui_affected_available(doc, rows[r].layers[0]->id, path))) {
       g_sync_layer = rows[r].layers[0]->id;
       g_sync_path = path;
       g_sync_reference = reference;

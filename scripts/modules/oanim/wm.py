@@ -515,6 +515,12 @@ def field_affected_summary(layer, path, component=-1):
     return _oanim.field_affected_summary(getattr(layer, "id", layer), path, int(component))
 
 
+def field_affected_count(layer, path, component=-1):
+    """Test hook: the number left of Affected By's arrow (what moves the field, its own value not counted), or None
+    where the field has no Affected By (a setting that can't be animated). 0 opens an empty submenu."""
+    return _oanim.field_affected_count(getattr(layer, "id", layer), path, int(component))
+
+
 def field_affected_go(layer, path, index, component=-1):
     """Test hook: clicks row `index` of the field's Affected By."""
     _oanim.field_affected_go(getattr(layer, "id", layer), path, int(component), int(index))

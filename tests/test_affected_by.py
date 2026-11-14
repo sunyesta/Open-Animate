@@ -211,4 +211,16 @@ r = wm.field_affected_by(lid.id, "rotation")
 assert [x["kind"] for x in r] == ["DRIVER"] and r[0]["detail"].startswith("2-Way Linked with "), r
 assert wm.field_affected_by(face.id, "rotation") == [], "the side read is moved by nothing"
 
+# --- Every animatable field has Affected By, its count left of the arrow; nothing moving it, 0 and empty ---------------
+assert wm.field_affected_count(rig.id, 'bones["stick"].position') == 0, "the knob: animatable, nothing moves it"
+assert wm.field_affected_by(rig.id, 'bones["stick"].position') == [], "empty, no own value line"
+assert wm.field_affected_count(face.id, "rotation") == 0
+assert wm.field_affected_count(lid.id, "rotation") == 1, "the driver"
+doc.frame_current = 30
+fresh().bone_set("stick", knob=(20.0, 20.0))
+settle()
+assert wm.field_affected_count(face.id, "points[2].pos") == 1, ("the fix, the own value not counted", rows("points[2].pos"))
+assert wm.field_affected_count(face.id, "name") is None, "a setting that can't be animated has none"
+assert wm.field_affected_count(face.id, "") is None
+
 print("affected by: ok")

@@ -5250,6 +5250,14 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   m.def("field_affected_summary", [](uint64_t id, const std::string &path, int component) {
     return ui_affected_summary(ui_affected_rows(*current_context().document, id, path, component));
   });
+  /* The count left of Affected By's arrow, or None where the field has no Affected By (not animatable). */
+  m.def("field_affected_count", [](uint64_t id, const std::string &path, int component) -> py::object {
+    Document &doc = *current_context().document;
+    if (!ui_affected_available(doc, id, path)) {
+      return py::none();
+    }
+    return py::int_(ui_affected_count(ui_affected_rows(doc, id, path, component)));
+  });
   m.def("field_affected_go", [](uint64_t id, const std::string &path, int component, size_t index) {
     Context &C = current_context();
     const std::vector<AffectedRow> rows = ui_affected_rows(*C.document, id, path, component);

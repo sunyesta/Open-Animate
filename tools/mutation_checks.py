@@ -79,6 +79,10 @@ PENDING = [
      'both sides of a 2-Way Link carry the link icon', 'tests/test_affected_by.py'),
     ('src/editors/driver_ui.cc', '    if (!d) {\n      continue;\n    }\n    AffectedRow row;', '    if (!d || d->two_way) {\n      continue;\n    }\n    AffectedRow row;',
      "Affected By lists a 2-Way Link's driver on its driven side", 'tests/test_affected_by.py'),
+    ('src/editors/driver_ui.cc', 'return r.kind != "OWN"; }', 'return true; }',
+     "Affected By's count leaves out the own value", 'tests/test_affected_by.py'),
+    ('src/editors/driver_ui.cc', '  return layer && layer_channel(*layer, path, &ref);', '  return layer && (layer_channel(*layer, path, &ref) || true);',
+     "only animatable fields have Affected By", 'tests/test_affected_by.py'),
 ]
 
 def build(root):

@@ -296,16 +296,36 @@ void ui_affected_go(Context &C, uint64_t layer, const std::string &path, int com
   properties_show_bone(C, row.layer, !row.bone.empty(), row.kind == "FIX" ? row.action : std::string());
 }
 
+bool ui_affected_available(Document &doc, uint64_t layer_id, const std::string &path)
+{
+  Layer *layer = path.empty() ? nullptr : layer_find(doc, layer_id);
+  ChannelRef ref;
+  return layer && layer_channel(*layer, path, &ref);
+}
+
+int ui_affected_count(const std::vector<AffectedRow> &rows)
+{
+  return int(std::count_if(rows.begin(), rows.end(), [](const AffectedRow &r) { return r.kind != "OWN"; }));
+}
+
 bool ui_affected_menu(Context &C, uint64_t layer, const std::string &path, int component)
 {
-  if (!C.document) {
+  /* On every animatable property, empty when nothing moves it. */
+  if (!C.document || !ui_affected_available(*C.document, layer, path)) {
     return false;
   }
   const std::vector<AffectedRow> rows = ui_affected_rows(*C.document, layer, path, component);
-  if (rows.empty()) {
-    return false;
-  }
-  if (ui_submenu_begin("Affected By")) {
+  /* How many move it, left of the arrow: measured on this menu before the submenu opens (then it is the current
+   * window), the label's spaces keeping room for it however narrow the menu is. */
+  ImGuiWindow *menu = ImGui::GetCurrentWindow();
+  const float y = ImGui::GetCursorScreenPos().y;
+  const bool open = ui_submenu_begin("Affected By      ###affected_by");
+  const std::string count = std::to_string(ui_affected_count(rows));
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float right = menu->Pos.x + menu->Size.x - style.WindowPadding.x - ImGui::GetFontSize() * 1.25f;
+  menu->DrawList->AddText(ImVec2(right - ImGui::CalcTextSize(count.c_str()).x, y),
+                          ImGui::GetColorU32(ImGuiCol_TextDisabled), count.c_str());
+  if (open) {
     const float s = ImGui::GetFontSize() * 0.36f;
     const float indent = ImGui::GetFontSize() * 1.4f;
     for (size_t i = 0; i < rows.size(); i++) {
