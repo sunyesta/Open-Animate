@@ -4440,15 +4440,17 @@ static void timeline_body(Area &area, Context &C)
   timeline_media_menu(C);
   timeline_space_menus(C);
   if (ui_menu_begin("##reference_channel")) {
-    if (ui_affected_menu(C, g_sync_layer, g_sync_path, -1) && g_sync_reference) {
-      ImGui::Separator();
-    }
     if (g_sync_reference && ui_menu_item("Reset Channel to Original")) {
       operator_call(C, "layer.reference_sync", {{"layer", std::to_string(g_sync_layer)}, {"path", g_sync_path}});
     }
     if (g_sync_reference && ui_menu_item("Reset Layer Animation to Original")) {
       operator_call(C, "layer.reference_sync", {{"layer", std::to_string(g_sync_layer)}});
     }
+    /* Last, as in a field's menu. */
+    if (g_sync_reference && ui_affected_available(doc, g_sync_layer, g_sync_path)) {
+      ImGui::Separator();
+    }
+    ui_affected_menu(C, g_sync_layer, g_sync_path, -1);
     ui_menu_end();
   }
   if (g_press.active && g_press.scrub && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {

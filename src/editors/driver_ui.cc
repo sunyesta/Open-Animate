@@ -457,9 +457,6 @@ void ui_driver_field_end(Context &C, uint64_t layer, const std::string &path, in
     }
   }
   if (ui_menu_begin("##driver_menu")) {
-    if (ui_affected_menu(C, layer, path, component)) {
-      ImGui::Separator();
-    }
     const bool driven = field_state(doc, field) > 0;
     const std::vector<OpArgs> args = field_args(field);
     if (driven) {
@@ -533,6 +530,11 @@ void ui_driver_field_end(Context &C, uint64_t layer, const std::string &path, in
       if (ui_menu_item("Delete Driver")) {
         operator_call(C, "anim.driver_remove", args[0]);
       }
+    }
+    /* Last, under what the field does itself. */
+    if (ui_affected_available(doc, layer, path)) {
+      ImGui::Separator();
+      ui_affected_menu(C, layer, path, component);
     }
     ui_menu_end();
   }
