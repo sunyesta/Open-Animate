@@ -1957,17 +1957,6 @@ static void bone_panel(Context &C, Layer &armature)
           }
         });
       }
-      label("Frame Size");
-      if (ui_drag_float("##controller_frame_size", &active->controller_frame_size, 0.0001f, 0.00001f, 10.0f, "%.4f")) {
-        active->controller_size_auto = false;
-      }
-      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-        ImGui::SetTooltip("How far one action frame is. The box is its actions' lengths times this; on the setup frame "
-                          "its corners drag it too");
-      }
-      if (ImGui::IsItemDeactivatedAfterEdit()) {
-        C.undo->push("Controller Frame Size", doc);
-      }
       label("");
       if (ImGui::Checkbox("Contain Knob in Box", &active->controller_contain_knob)) {
         C.undo->push("Contain Knob in Box", doc);
@@ -2149,155 +2138,14 @@ static void color_set_swatches(ImDrawList *dl, ImVec2 at, float w, float h, cons
   }
 }
 
-/* Blender's Bone > Viewport Display: what the bone is drawn as (Bone, Pin or another layer's
- * drawing) and its colour set. Only how it looks, so any frame. */
-static void bone_display_panel(Context &C, Layer &armature)
+/* Bone Color (Blender's sets, each with its regular, selected and active shades) and, for a custom set, its three
+ * colours: rows of Viewport Display. */
+static void bone_color_rows(Context &C, Bone &bone)
 {
   Document &doc = *C.document;
-  Bone *active = bone_find(armature, armature.active_bone);
-  if (!active || !ui_panel_begin("Viewport Display")) {
-    return;
-  }
+  Bone *active = &bone;
   const ImGuiStyle &style = ImGui::GetStyle();
   const float h = ImGui::GetFrameHeight();
-
-  /* Shape: Bone | Custom, as Blender's tabs (a pin is a bone type: drawn as a pin whatever this says). */
-  props_label("Shape");
-  {
-    static const char *const names[] = {"Bone", "Custom"};
-    static const char *const tips[] = {"Drawn as a bone",
-                                       "Drawn as a vector layer's drawing, where that layer sits at rest"};
-    const float gap = 1.0f;
-    const float w = (ImGui::GetContentRegionAvail().x - gap) / 2.0f;
-    ImGui::BeginDisabled(bone_is_pin(*active));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(gap, style.ItemSpacing.y));
-    for (int k = 0; k < 2; k++) {
-      if (k > 0) {
-        ImGui::SameLine();
-      }
-      const bool on = int(active->shape) == k;
-      if (on) {
-        const ImVec4 blue = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
-        ImGui::PushStyleColor(ImGuiCol_Button, blue);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(blue.x * 1.15f, blue.y * 1.15f, blue.z * 1.15f, blue.w));
-      }
-      if (ImGui::Button(names[k], ImVec2(w, 0.0f)) && !on) {
-        active->shape = BoneShape(k);
-        C.undo->push("Bone Shape", doc);
-      }
-      if (on) {
-        ImGui::PopStyleColor(2);
-      }
-      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-        ImGui::SetTooltip("%s\n(Shown while Viewport Overlays > Custom Bone Shapes is on)", tips[k]);
-      }
-    }
-    ImGui::PopStyleVar();
-    ImGui::EndDisabled();
-  }
-  if (bone_is_pin(*active)) {
-    props_label("Pin Size");
-    ui_drag_float("##pin_size", &active->pin_size, 0.01f, 0.1f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Against the standard pin; it keeps its size on screen, whatever the zoom");
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-      C.undo->push("Pin Size", doc);
-    }
-  }
-  if (bone_is_controller(*active)) {
-    /* Show Box: when the box shows in the viewport; the knob always does. Only how it looks, so any frame. */
-    props_label("Show Box");
-    static const char *const shows[] = {"Always", "When Selected", "Never"};
-    const int show = int(active->controller_box_show);
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##controller_box_show", shows[show])) {
-      for (int k = 0; k < 3; k++) {
-        if (ImGui::Selectable(shows[k], k == show) && k != show) {
-          active->controller_box_show = ControllerBoxShow(k);
-          C.undo->push("Show Box", doc);
-        }
-      }
-      ImGui::EndCombo();
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("When the box shows in the viewport: always, only while the controller is selected (hovering\n"
-                        "the knob shows it faintly), or never. The knob always shows, and Ctrl still lands on its spots");
-    }
-  }
-  if (active->shape == BoneShape::Custom) {
-    /* The layer: a list to pick from (or drop a layer from the Layers editor), the eyedropper,
-     * and a button that clears it. */
-    props_label("Layer");
-    const Layer *shape_layer = active->shape_layer ? layer_find(doc, active->shape_layer) : nullptr;
-    const bool missing = active->shape_layer != 0 && !shape_layer;
-    const float buttons = h * (active->shape_layer ? 2.0f : 1.0f) + style.ItemInnerSpacing.x * (active->shape_layer ? 2.0f : 1.0f);
-    ImGui::SetNextItemWidth(-buttons);
-    if (missing) {
-      ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0xff, 0x80, 0x70, 255));
-    }
-    const std::string preview = shape_layer ? shape_layer->name : missing ? "(missing layer)" : "";
-    const bool open = ImGui::BeginCombo("##shape_layer", preview.c_str());
-    if (missing) {
-      ImGui::PopStyleColor();
-    }
-    if (preview.empty() && !open) {
-      /* A placeholder, as Blender's empty object field. */
-      const ImVec2 min = ImGui::GetItemRectMin();
-      ImGui::GetWindowDrawList()->AddText(ImVec2(min.x + style.FramePadding.x, min.y + style.FramePadding.y),
-                                          ImGui::GetColorU32(ImGuiCol_TextDisabled), "Layer");
-    }
-    if (open) {
-      for (const Layer *l : document_layers_flat(doc)) {
-        if (l->type != LayerType::Vector) {
-          continue;
-        }
-        if (ImGui::Selectable(l->name.c_str(), l->id == active->shape_layer)) {
-          active->shape_layer = l->id;
-          C.undo->push("Bone Shape Layer", doc);
-        }
-      }
-      ImGui::EndCombo();
-    }
-    if (ImGui::BeginDragDropTarget()) {
-      if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("OANIM_LAYER")) {
-        uint64_t id = 0;
-        std::memcpy(&id, payload->Data, sizeof(id));
-        const Layer *dropped = layer_find(doc, id);
-        if (dropped && dropped->type == LayerType::Vector) {
-          active->shape_layer = id;
-          C.undo->push("Bone Shape Layer", doc);
-        }
-      }
-      ImGui::EndDragDropTarget();
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("The vector layer the bone is drawn as: its drawing where it sits at rest, moving with\n"
-                        "the bone. Pick it here, drop one from the Layers editor, or use the eyedropper");
-    }
-    ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    if (ImGui::Button("##shape_eyedropper", ImVec2(h, h))) {
-      ui_layer_eyedropper_start(armature.id, active->id);
-    }
-    ui_eyedropper_icon(ImGui::GetWindowDrawList(), ImVec2(at.x + h * 0.5f, at.y + h * 0.5f), h * 0.32f,
-                       IM_COL32(0xe6, 0xe6, 0xe6, 255));
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Eyedropper: click a layer in the viewport or the Layers editor (Esc cancels)");
-    }
-    if (active->shape_layer) {
-      ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
-      if (ImGui::Button("X##clear_shape_layer", ImVec2(h, h))) {
-        active->shape_layer = 0;
-        C.undo->push("Bone Shape Layer", doc);
-      }
-      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-        ImGui::SetTooltip("Clear: drawn as a bone until a layer is picked");
-      }
-    }
-  }
-
-  /* Bone Color: Blender's sets, each with its regular, selected and active shades. */
   props_label("Bone Color");
   {
     const float copy_w = h + style.ItemInnerSpacing.x;
@@ -2377,6 +2225,179 @@ static void bone_display_panel(Context &C, Layer &armature)
         C.undo->push("Bone Custom Color", doc);
       }
     }
+  }
+}
+
+/* Blender's Bone > Viewport Display: what the bone is drawn as (Bone, Pin or another layer's
+ * drawing) and its colour set. Only how it looks, so any frame. */
+static void bone_display_panel(Context &C, Layer &armature)
+{
+  Document &doc = *C.document;
+  Bone *active = bone_find(armature, armature.active_bone);
+  if (!active || !ui_panel_begin("Viewport Display")) {
+    return;
+  }
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float h = ImGui::GetFrameHeight();
+  const bool controller = bone_is_controller(*active);
+  /* A controller's colour first: it colours the knob and box, whatever its shape. */
+  if (controller) {
+    bone_color_rows(C, *active);
+  }
+
+  /* Shape: Bone | Custom, as Blender's tabs (a pin is a bone type: drawn as a pin whatever this says). */
+  props_label("Shape");
+  {
+    static const char *const names[] = {"Bone", "Custom"};
+    static const char *const tips[] = {"Drawn as a bone",
+                                       "Drawn as a vector layer's drawing, where that layer sits at rest"};
+    const float gap = 1.0f;
+    const float w = (ImGui::GetContentRegionAvail().x - gap) / 2.0f;
+    ImGui::BeginDisabled(bone_is_pin(*active));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(gap, style.ItemSpacing.y));
+    for (int k = 0; k < 2; k++) {
+      if (k > 0) {
+        ImGui::SameLine();
+      }
+      const bool on = int(active->shape) == k;
+      if (on) {
+        const ImVec4 blue = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+        ImGui::PushStyleColor(ImGuiCol_Button, blue);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(blue.x * 1.15f, blue.y * 1.15f, blue.z * 1.15f, blue.w));
+      }
+      if (ImGui::Button(names[k], ImVec2(w, 0.0f)) && !on) {
+        active->shape = BoneShape(k);
+        C.undo->push("Bone Shape", doc);
+      }
+      if (on) {
+        ImGui::PopStyleColor(2);
+      }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip("%s\n(Shown while Viewport Overlays > Custom Bone Shapes is on)", tips[k]);
+      }
+    }
+    ImGui::PopStyleVar();
+    ImGui::EndDisabled();
+  }
+  if (bone_is_pin(*active)) {
+    props_label("Pin Size");
+    ui_drag_float("##pin_size", &active->pin_size, 0.01f, 0.1f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Against the standard pin; it keeps its size on screen, whatever the zoom");
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+      C.undo->push("Pin Size", doc);
+    }
+  }
+  if (active->shape == BoneShape::Custom) {
+    /* The layer: a list to pick from (or drop a layer from the Layers editor), the eyedropper,
+     * and a button that clears it. */
+    props_label("Layer");
+    const Layer *shape_layer = active->shape_layer ? layer_find(doc, active->shape_layer) : nullptr;
+    const bool missing = active->shape_layer != 0 && !shape_layer;
+    const float buttons = h * (active->shape_layer ? 2.0f : 1.0f) + style.ItemInnerSpacing.x * (active->shape_layer ? 2.0f : 1.0f);
+    ImGui::SetNextItemWidth(-buttons);
+    if (missing) {
+      ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0xff, 0x80, 0x70, 255));
+    }
+    const std::string preview = shape_layer ? shape_layer->name : missing ? "(missing layer)" : "";
+    const bool open = ImGui::BeginCombo("##shape_layer", preview.c_str());
+    if (missing) {
+      ImGui::PopStyleColor();
+    }
+    if (preview.empty() && !open) {
+      /* A placeholder, as Blender's empty object field. */
+      const ImVec2 min = ImGui::GetItemRectMin();
+      ImGui::GetWindowDrawList()->AddText(ImVec2(min.x + style.FramePadding.x, min.y + style.FramePadding.y),
+                                          ImGui::GetColorU32(ImGuiCol_TextDisabled), "Layer");
+    }
+    if (open) {
+      for (const Layer *l : document_layers_flat(doc)) {
+        if (l->type != LayerType::Vector) {
+          continue;
+        }
+        if (ImGui::Selectable(l->name.c_str(), l->id == active->shape_layer)) {
+          active->shape_layer = l->id;
+          C.undo->push("Bone Shape Layer", doc);
+        }
+      }
+      ImGui::EndCombo();
+    }
+    if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("OANIM_LAYER")) {
+        uint64_t id = 0;
+        std::memcpy(&id, payload->Data, sizeof(id));
+        const Layer *dropped = layer_find(doc, id);
+        if (dropped && dropped->type == LayerType::Vector) {
+          active->shape_layer = id;
+          C.undo->push("Bone Shape Layer", doc);
+        }
+      }
+      ImGui::EndDragDropTarget();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("The vector layer the bone is drawn as: its drawing where it sits at rest, moving with\n"
+                        "the bone. Pick it here, drop one from the Layers editor, or use the eyedropper");
+    }
+    ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    if (ImGui::Button("##shape_eyedropper", ImVec2(h, h))) {
+      ui_layer_eyedropper_start(armature.id, active->id);
+    }
+    ui_eyedropper_icon(ImGui::GetWindowDrawList(), ImVec2(at.x + h * 0.5f, at.y + h * 0.5f), h * 0.32f,
+                       IM_COL32(0xe6, 0xe6, 0xe6, 255));
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Eyedropper: click a layer in the viewport or the Layers editor (Esc cancels)");
+    }
+    if (active->shape_layer) {
+      ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+      if (ImGui::Button("X##clear_shape_layer", ImVec2(h, h))) {
+        active->shape_layer = 0;
+        C.undo->push("Bone Shape Layer", doc);
+      }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip("Clear: drawn as a bone until a layer is picked");
+      }
+    }
+  }
+
+  if (controller) {
+    /* The box: when it shows (the knob always does; only how it looks, so any frame) and how big a frame is. */
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Box");
+    props_label("Show");
+    static const char *const shows[] = {"Always", "When Selected", "Never"};
+    const int show = int(active->controller_box_show);
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##controller_box_show", shows[show])) {
+      for (int k = 0; k < 3; k++) {
+        if (ImGui::Selectable(shows[k], k == show) && k != show) {
+          active->controller_box_show = ControllerBoxShow(k);
+          C.undo->push("Show Box", doc);
+        }
+      }
+      ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("When the box shows in the viewport: always, only while the controller is selected (hovering\n"
+                        "the knob shows it faintly), or never. The knob always shows, and Ctrl still lands on its spots");
+    }
+    props_label("Frame Size");
+    if (ui_drag_float("##controller_frame_size", &active->controller_frame_size, 0.0001f, 0.00001f, 10.0f, "%.4f")) {
+      active->controller_size_auto = false;
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("How far one action frame is. The box is its actions' lengths times this; on the setup frame "
+                        "its corners drag it too");
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+      C.undo->push("Controller Frame Size", doc);
+    }
+  }
+  if (!controller) {
+    bone_color_rows(C, *active);
   }
   ui_panel_end();
 }
