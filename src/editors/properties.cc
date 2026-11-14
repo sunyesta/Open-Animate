@@ -92,13 +92,9 @@ static void document_tab(Context &C)
       if (on) {
         ImGui::PopStyleColor();
       }
-      /* A chain: two links joined, or apart when off. */
-      ImDrawList *dl = ImGui::GetWindowDrawList();
-      const ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
-      const ImVec2 c(at.x + h * 0.5f, at.y + h * 0.5f);
-      const float lw = h * 0.22f, lh = h * 0.13f, gap = on ? h * 0.06f : h * 0.16f;
-      dl->AddRect(ImVec2(c.x - gap - lw * 1.6f, c.y - lh), ImVec2(c.x - gap + lw * 0.4f, c.y + lh), col, lh, 0, 1.4f);
-      dl->AddRect(ImVec2(c.x + gap - lw * 0.4f, c.y - lh), ImVec2(c.x + gap + lw * 1.6f, c.y + lh), col, lh, 0, 1.4f);
+      /* The link icon: joined, or apart when off. */
+      ui_link_icon(ImGui::GetWindowDrawList(), ImVec2(at.x + h * 0.5f, at.y + h * 0.5f), h * 0.3f,
+                   ImGui::GetColorU32(ImGuiCol_Text), on);
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
         ImGui::SetTooltip(on ? "Linked: changing the width changes the height too, keeping the shape (click to unlink)"
                              : "Link width and height: changing one changes the other, keeping the shape");
@@ -5570,7 +5566,7 @@ static void modifiers_panel(Context &C, Layer &layer)
 
 static constexpr const char *CONSTRAINT_PAYLOAD = "OANIM_BONE_CONSTRAINT";
 
-/* A constraint's icon: a spring for Dynamics, a chain for IK, two linked rings for the rest (as
+/* A constraint's icon: a spring for Dynamics, the link icon for IK (a chain), two linked rings for the rest (as
  * Blender marks constraints). */
 static void constraint_type_icon(ImDrawList *dl, ImVec2 c, float s, BoneConstraintType type)
 {
@@ -5582,9 +5578,7 @@ static void constraint_type_icon(ImDrawList *dl, ImVec2 c, float s, BoneConstrai
     dl->AddPolyline(pts, 7, COL_MOD_ICON, 0, 1.3f);
   }
   else if (type == BoneConstraintType::IK) {
-    dl->AddRect(ImVec2(c.x - s, c.y - s * 0.35f), ImVec2(c.x - s * 0.1f, c.y + s * 0.35f), COL_MOD_ICON, s * 0.3f, 0, 1.3f);
-    dl->AddRect(ImVec2(c.x + s * 0.1f, c.y - s * 0.35f), ImVec2(c.x + s, c.y + s * 0.35f), COL_MOD_ICON, s * 0.3f, 0, 1.3f);
-    dl->AddLine(ImVec2(c.x - s * 0.4f, c.y), ImVec2(c.x + s * 0.4f, c.y), COL_MOD_ICON, 1.3f);
+    ui_link_icon(dl, c, s, COL_MOD_ICON);
   }
   else {
     dl->AddCircle(ImVec2(c.x - s * 0.35f, c.y), s * 0.55f, COL_MOD_ICON, 0, 1.3f);

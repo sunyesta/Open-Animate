@@ -195,4 +195,20 @@ fresh().select_bone("dial")
 wm.field_affected_go(face.id, "points[2].pos", 1)
 assert bone("stick")["active"] and bone("stick")["selected"] and not bone("dial")["selected"], "the fix's bone"
 
+# --- How drivers show: a knob is no link; a 2-Way Link's driven side is purple, both sides carry the link icon ---------
+assert wm.field_driver_look(rig.id, 'bones["stick"].position') == ("NONE", False), \
+    ("a knob plays its sides' actions: nothing links it", wm.field_driver_look(rig.id, 'bones["stick"].position'))
+assert wm.field_driver_look(face.id, "opacity") == ("DRIVEN", False), "an ordinary driver: purple, no link icon"
+doc.frame_current = 0
+ops.layer.new()
+lid = layers.active
+var = '[{"name": "d", "layer": %d, "path": "rotation", "component": -1}]' % face.id
+assert ops.anim.driver_add(layer=str(lid.id), path="rotation", vars=var, expression="-d * 0.5") == {'FINISHED'}
+assert ops.anim.driver_two_way(layer=str(lid.id), path="rotation") == {'FINISHED'}
+assert wm.field_driver_look(lid.id, "rotation") == ("DRIVEN", True), wm.field_driver_look(lid.id, "rotation")
+assert wm.field_driver_look(face.id, "rotation") == ("NONE", True), "the side read: its own colours, the link icon"
+r = wm.field_affected_by(lid.id, "rotation")
+assert [x["kind"] for x in r] == ["DRIVER"] and r[0]["detail"].startswith("2-Way Linked with "), r
+assert wm.field_affected_by(face.id, "rotation") == [], "the side read is moved by nothing"
+
 print("affected by: ok")

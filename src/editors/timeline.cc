@@ -92,22 +92,10 @@ static void diamond(ImDrawList *dl, ImVec2 c, float r, ImU32 col)
   dl->AddQuadFilled(ImVec2(c.x, c.y - r), ImVec2(c.x + r, c.y), ImVec2(c.x, c.y + r), ImVec2(c.x - r, c.y), col);
 }
 
-/* Two slanted chain links (Time Together's mark), `s` from the middle to the ends. */
+/* The link icon (Time Together's mark, Key Together's rows, 2-Way Linked rows), `s` from the middle to the ends. */
 static void chain_draw(ImDrawList *dl, ImVec2 c, float s, ImU32 col)
 {
-  const ImVec2 d(s * 0.42f, -s * 0.42f);
-  const float r = s * 0.36f, t = std::max(1.2f, s * 0.24f);
-  for (const float side : {-1.0f, 1.0f}) {
-    const ImVec2 m = c + ImVec2(d.x * side, d.y * side);
-    const ImVec2 a = m - ImVec2(d.x * 0.55f, d.y * 0.55f), b = m + ImVec2(d.x * 0.55f, d.y * 0.55f);
-    const ImVec2 n(r * 0.7071f, r * 0.7071f);
-    dl->AddLine(a + n, b + n, col, t);
-    dl->AddLine(a - n, b - n, col, t);
-    dl->PathArcTo(a, r, 0.75f * 3.14159265f, 1.75f * 3.14159265f, 8);
-    dl->PathStroke(col, 0, t);
-    dl->PathArcTo(b, r, -0.25f * 3.14159265f, 0.75f * 3.14159265f, 8);
-    dl->PathStroke(col, 0, t);
-  }
+  ui_link_icon(dl, c, s, col);
 }
 
 static void icon_draw(ImDrawList *dl, Icon icon, ImVec2 c, float s, bool on)

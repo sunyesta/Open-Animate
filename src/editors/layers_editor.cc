@@ -202,9 +202,8 @@ static void icon_layer_type(ImDrawList *dl, ImVec2 c, float s, const Layer &laye
     dl->AddCircleFilled(c + ImVec2(s * 0.8f, -s * 0.5f), s * 0.18f, col);
   }
   if (layer.is_reference()) {
-    /* Two chain links for a reference. */
-    dl->AddCircle(c + ImVec2(s * 0.55f, s * 0.6f), s * 0.25f, COL_REFERENCE, 8, 1.2f);
-    dl->AddCircle(c + ImVec2(s * 0.85f, s * 0.6f), s * 0.25f, COL_REFERENCE, 8, 1.2f);
+    /* The link icon, small, for a reference. */
+    ui_link_icon(dl, c + ImVec2(s * 0.7f, s * 0.6f), s * 0.42f, COL_REFERENCE);
   }
 }
 
@@ -799,8 +798,7 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
          * pick names it has no drawing for. */
         const ImVec2 c(after + h * 0.4f, cy);
         const ImU32 teal = IM_COL32(0x4f, 0xc8, 0xc8, 255);
-        dl->AddCircle(c - ImVec2(icon * 0.45f, 0), icon * 0.55f, teal, 0, 1.6f);
-        dl->AddCircle(c + ImVec2(icon * 0.45f, 0), icon * 0.55f, teal, 0, 1.6f);
+        ui_link_icon(dl, c, icon * 0.95f, teal);
         ImGui::SetCursorScreenPos(ImVec2(after, row_min.y));
         const uint64_t link_id = link->id;
         if (ImGui::InvisibleButton("##link", ImVec2(h * 0.8f, h))) {

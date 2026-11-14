@@ -73,6 +73,12 @@ PENDING = [
      "a fix's Affected By row goes to its bone", 'tests/test_affected_by.py'),
     ('src/anim/animation.cc', '        source.amount = at.strength;', '        source.amount = 1.0f;',
      "a fix's Affected By row says its strength", 'tests/test_affected_by.py'),
+    ('src/editors/driver_ui.cc', '    *r_linked = linked;\n  }\n  return state;', '    *r_linked = linked;\n  }\n  return linked ? 0 : state;',
+     "a 2-Way Link's driven side is purple like any driver", 'tests/test_affected_by.py'),
+    ('src/editors/driver_ui.cc', '    linked = linked || driver_two_way_role(doc, r) != 0;', '    linked = false;',
+     'both sides of a 2-Way Link carry the link icon', 'tests/test_affected_by.py'),
+    ('src/editors/driver_ui.cc', '    if (!d) {\n      continue;\n    }\n    AffectedRow row;', '    if (!d || d->two_way) {\n      continue;\n    }\n    AffectedRow row;',
+     "Affected By lists a 2-Way Link's driver on its driven side", 'tests/test_affected_by.py'),
 ]
 
 def build(root):

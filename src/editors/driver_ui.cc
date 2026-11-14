@@ -27,8 +27,6 @@ namespace oanim {
 /* Blender's driven purple, and red for a driver that doesn't work. */
 static const ImVec4 DRIVEN_BG(0.40f, 0.22f, 0.62f, 1.0f), DRIVEN_HOVER(0.47f, 0.27f, 0.71f, 1.0f);
 static const ImVec4 BROKEN_BG(0.62f, 0.17f, 0.17f, 1.0f), BROKEN_HOVER(0.70f, 0.22f, 0.22f, 1.0f);
-/* Two-way links: teal, either side, still editable (an edit to the driven side goes back into the other). */
-static const ImVec4 LINKED_BG(0.10f, 0.40f, 0.42f, 1.0f), LINKED_HOVER(0.13f, 0.48f, 0.50f, 1.0f);
 
 namespace {
 
@@ -66,8 +64,9 @@ std::vector<OpArgs> field_args(const Field &f)
   return {args};
 }
 
-/* 0: not driven; 1: driven; 2: a driver that doesn't work; 3: in a two-way link (either side). */
-int field_state(Document &doc, const Field &f)
+/* 0: not driven; 1: driven (purple, a two-way link's driven side too); 2: a driver that doesn't work. `r_linked`: in a
+ * two-way link, either side (the link icon in the field). */
+int field_state(Document &doc, const Field &f, bool *r_linked = nullptr)
 {
   int state = 0;
   bool linked = false;
@@ -77,7 +76,10 @@ int field_state(Document &doc, const Field &f)
     }
     linked = linked || driver_two_way_role(doc, r) != 0;
   }
-  return state == 2 ? 2 : linked ? 3 : state;
+  if (r_linked) {
+    *r_linked = linked;
+  }
+  return state;
 }
 
 /* The other side of a field's two-way links, as words ("Dial: Rotation, factor -0.5"). */
@@ -234,22 +236,29 @@ std::vector<AffectedRow> ui_affected_rows(Document &doc, uint64_t layer_id, cons
     }
     rows.push_back(std::move(row));
   }
-  /* Drivers (not a two-way link's: its field says so in teal). */
+  /* Drivers, a two-way link's driven side's too (named by what it follows). */
   static const char *const TYPES[] = {"", "Average of variables", "Sum of variables", "Smallest of variables",
                                       "Largest of variables"};
   for (const DriverRef &r : driver_field_refs(doc, layer_id, path, component)) {
     const Driver *d = driver_find(doc, r);
-    if (!d || d->two_way) {
+    if (!d) {
       continue;
     }
     AffectedRow row;
     row.kind = "DRIVER";
     row.name = "Driver";
-    row.detail = d->type == DriverType::Expression ? d->expression : std::string(TYPES[int(d->type)]);
+    row.detail = d->two_way && d->vars.size() == 1 ? "2-Way Linked with " + driver_ref_label(doc, d->vars.front().source)
+                 : d->type == DriverType::Expression ? d->expression
+                                                     : std::string(TYPES[int(d->type)]);
     row.layer = layer_id;
     rows.push_back(std::move(row));
   }
   return rows;
+}
+
+int ui_driver_field_look(Document &doc, uint64_t layer, const std::string &path, int component, bool *r_linked)
+{
+  return field_state(doc, {layer, path, component}, r_linked);
 }
 
 std::string ui_affected_summary(const std::vector<AffectedRow> &rows)
@@ -359,8 +368,8 @@ int ui_driver_field_begin(Context &C, uint64_t layer, const std::string &path, i
   if (state == 0) {
     return 0;
   }
-  const ImVec4 bg = state == 2 ? BROKEN_BG : state == 3 ? LINKED_BG : DRIVEN_BG;
-  const ImVec4 hover = state == 2 ? BROKEN_HOVER : state == 3 ? LINKED_HOVER : DRIVEN_HOVER;
+  const ImVec4 bg = state == 2 ? BROKEN_BG : DRIVEN_BG;
+  const ImVec4 hover = state == 2 ? BROKEN_HOVER : DRIVEN_HOVER;
   ImGui::PushStyleColor(ImGuiCol_FrameBg, bg);
   ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, hover);
   ImGui::PushStyleColor(ImGuiCol_FrameBgActive, hover);
@@ -386,18 +395,25 @@ void ui_driver_field_end(Context &C, uint64_t layer, const std::string &path, in
     ImGui::OpenPopup("##driver_menu");
     g_menu_frame = ImGui::GetFrameCount();
   }
+  bool linked = false;
+  field_state(doc, field, &linked);
+  if (linked) {
+    /* Either side of a two-way link: the link icon at the field's right end. */
+    const float h = hi.y - lo.y;
+    ui_link_icon(ImGui::GetWindowDrawList(), ImVec2(hi.x - h * 0.55f, (lo.y + hi.y) * 0.5f), h * 0.28f,
+                 ImGui::GetColorU32(ImGuiCol_Text));
+  }
   if (!ImGui::IsAnyItemActive() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
     /* What else moves it, one line (its rows in the right-click menu's Affected By). */
     const std::vector<AffectedRow> rows = ui_affected_rows(doc, layer, path, component);
     std::string summary = ui_affected_summary(rows);
-    if (pushed > 0) {
-      /* A driver alone is what its purple and "Driven:" already say. */
+    if (pushed > 0 || linked) {
+      /* A driver alone is what its purple and "Driven:" (or its link) already say. */
       if (std::all_of(rows.begin(), rows.end(), [](const AffectedRow &r) { return r.kind == "DRIVER"; })) {
         summary.clear();
       }
-      const std::string linked = linked_text(doc, field);
-      ImGui::SetTooltip("%s%s%s", linked.empty() ? field_tooltip(doc, field).c_str()
-                                                 : (linked + "\nEdit either side. Right-click: Select Linked, Unlink").c_str(),
+      const std::string link = linked_text(doc, field);
+      ImGui::SetTooltip("%s%s%s", link.empty() ? field_tooltip(doc, field).c_str() : (link + "\nEdit either side").c_str(),
                         summary.empty() ? "" : "\n", summary.c_str());
     }
     else if (!summary.empty()) {

@@ -281,6 +281,9 @@ void ui_point_eyedropper_pick(Context &C, uint64_t point);
 void ui_layer_eyedropper_overlay();
 /* A pipette icon, as on Blender's eyedropper buttons. */
 void ui_eyedropper_icon(ImDrawList *dl, ImVec2 center, float size, ImU32 color);
+/* The link (chain) icon, the one everywhere something is linked or keyed as one: `s` from its middle to its ends;
+ * `joined` false, its two links apart. */
+void ui_link_icon(ImDrawList *dl, ImVec2 center, float s, ImU32 color, bool joined = true);
 
 /* M (and Shift M): a menu of every collection, ticked where all the selection is in it, each putting the
  * selection in it or taking it out; opened by the editor under the mouse when asked. `in_layers`: the Layers

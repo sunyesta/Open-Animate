@@ -5241,6 +5241,12 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return rows;
   });
+  m.def("field_driver_look", [](uint64_t id, const std::string &path, int component) {
+    bool linked = false;
+    static const char *const LOOKS[] = {"NONE", "DRIVEN", "BROKEN"};
+    const int look = ui_driver_field_look(*current_context().document, id, path, component, &linked);
+    return py::make_tuple(std::string(LOOKS[std::clamp(look, 0, 2)]), linked);
+  });
   m.def("field_affected_summary", [](uint64_t id, const std::string &path, int component) {
     return ui_affected_summary(ui_affected_rows(*current_context().document, id, path, component));
   });

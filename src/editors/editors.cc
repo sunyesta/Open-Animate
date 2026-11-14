@@ -1494,6 +1494,30 @@ void ui_eyedropper_icon(ImDrawList *dl, ImVec2 center, float size, ImU32 color)
   eyedropper_icon(dl, center, size, color);
 }
 
+void ui_link_icon(ImDrawList *dl, ImVec2 c, float s, ImU32 col, bool joined)
+{
+  /* Two rounded links on a slant, a bar across them (the link mark of Tabler's icons, on its 24 grid): apart, the
+   * links pulled away from each other and no bar. */
+  const float k = s / 9.0f, t = std::max(1.2f, s * 0.2f), apart = joined ? 0.0f : 1.6f;
+  const auto at = [&](float x, float y, float shift) {
+    return ImVec2(c.x + (x - 12.0f + shift) * k, c.y + (y - 12.0f - shift) * k);
+  };
+  constexpr float PI_F = 3.14159265f;
+  /* Top right: round the far end, from (11, 6) to (18, 13), about (15, 9). */
+  dl->PathLineTo(at(11.0f, 6.0f, apart));
+  dl->PathArcTo(at(15.0f, 9.0f, apart), 5.0f * k, -0.75f * PI_F, 0.25f * PI_F, 12);
+  dl->PathLineTo(at(18.0f, 13.0f, apart));
+  dl->PathStroke(col, 0, t);
+  /* Bottom left, the same turned round, about (9, 15). */
+  dl->PathLineTo(at(13.0f, 18.0f, -apart));
+  dl->PathArcTo(at(9.0f, 15.0f, -apart), 5.0f * k, 0.25f * PI_F, 1.25f * PI_F, 12);
+  dl->PathLineTo(at(6.0f, 11.0f, -apart));
+  dl->PathStroke(col, 0, t);
+  if (joined) {
+    dl->AddLine(at(9.0f, 15.0f, 0.0f), at(15.0f, 9.0f, 0.0f), col, t);
+  }
+}
+
 namespace {
 
 struct LayerEyedropper {

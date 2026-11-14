@@ -504,6 +504,12 @@ def field_affected_by(layer, path, component=-1):
     return list(_oanim.field_affected_by(getattr(layer, "id", layer), path, int(component)))
 
 
+def field_driver_look(layer, path, component=-1):
+    """Test hook: how a field shows its drivers, (look, linked): look "NONE", "DRIVEN" (purple: a 2-Way Link's driven
+    side too) or "BROKEN" (red); linked: either side of a 2-Way Link (the link icon in the field)."""
+    return tuple(_oanim.field_driver_look(getattr(layer, "id", layer), path, int(component)))
+
+
 def field_affected_summary(layer, path, component=-1):
     """Test hook: the field's tooltip line, "Moved by 2 action bones, 1 fix", or ""."""
     return _oanim.field_affected_summary(getattr(layer, "id", layer), path, int(component))

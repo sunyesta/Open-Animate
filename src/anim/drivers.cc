@@ -1,7 +1,5 @@
 #include "anim/drivers.hh"
 
-#include "anim/controller.hh"
-
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1157,12 +1155,6 @@ int driver_two_way_role(Document &doc, const DriverRef &ref)
     if (d.vars.front().source == ref) {
       return 2;
     }
-  }
-  const Layer *layer = ref.path.rfind("bones[\"", 0) == 0 ? layer_find(doc, ref.layer) : nullptr;
-  const size_t end = layer ? ref.path.find("\"].") : std::string::npos;
-  const Bone *bone = end != std::string::npos ? bone_find_by_name(*layer, ref.path.substr(7, end - 7)) : nullptr;
-  if (bone && bone_is_controller(*bone) && ref.path.compare(end + 3, std::string::npos, "position") == 0) {
-    return 2;
   }
   return 0;
 }
