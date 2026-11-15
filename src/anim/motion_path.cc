@@ -328,11 +328,13 @@ static bool action_played_apart(const Layer &owner, const std::string &name, con
         return false;
       }
       /* Moved by nothing but its keys (its own sides' actions key its timing; a fix following it keeps its line in
-       * them, never played onto it). */
+       * them, never played onto it), or by actions played apart from `bone` themselves (a knob another controller's
+       * side or a head turn moves): where it is then doesn't follow `bone` either. */
       for (const auto &[by, keys] : holder->position_keys.actions) {
         if (std::find(holder->controller_actions.begin(), holder->controller_actions.end(), by) ==
                 holder->controller_actions.end() &&
-            !bone_fix_line_of(owner, by, *holder, &holder->position_keys))
+            !bone_fix_line_of(owner, by, *holder, &holder->position_keys) &&
+            !action_played_apart(owner, by, bone, depth + 1, values))
         {
           return false;
         }
@@ -365,7 +367,11 @@ static bool action_offsets_apart(const Document &doc, const Layer &owner, const 
   const bool action_bone = std::any_of(owner.actions.begin(), owner.actions.end(), [&](const std::string &name) {
     return controller_dial_of_action(owner, name) == &b;
   });
-  if (bone_is_controller(b) || (action_bone && !values) || !doc.action.empty()) {
+  /* A controller's knob plays its sides' actions, which may move it; one whose sides have none plays nothing (a pupil
+   * keyed in its eye) and is apart as any bone. */
+  const bool plays = bone_is_controller(b) && std::any_of(b.controller_actions.begin(), b.controller_actions.end(),
+                                                          [](const std::string &a) { return !a.empty(); });
+  if (plays || (action_bone && !values) || !doc.action.empty()) {
     return false;
   }
   const auto apart = [&](const auto &actions) {
@@ -539,17 +545,46 @@ static bool offsets_inputs_same(KeptActionOffsets &kept, const Document &inputs)
   if (fi < 0 || di < 0) {
     return false;
   }
-  Bone &f = fl->bones[size_t(fi)];
-  const Bone &d = dl->bones[size_t(di)];
-  std::vector<Key<float2>> position = std::move(f.position_keys.keys), scale = std::move(f.scale_keys.keys);
-  std::vector<Key<float>> angle = std::move(f.angle_keys.keys);
-  f.position_keys.keys = d.position_keys.keys;
-  f.angle_keys.keys = d.angle_keys.keys;
-  f.scale_keys.keys = d.scale_keys.keys;
+  /* Its own keys, and those of the other bones of its layer whose keys what the actions add to it doesn't follow
+   * (action_played_apart from them): two pupils' timing edited together keeps both kept. */
+  std::vector<uint64_t> bones = {kept.bone};
+  const Bone &k = fl->bones[size_t(fi)];
+  const auto apart_from = [&](const Bone &o) {
+    const auto each = [&](const auto &actions) {
+      return std::all_of(actions.begin(), actions.end(),
+                         [&](const auto &a) { return action_played_apart(*fl, a.first, o); });
+    };
+    return each(k.position_keys.actions) && each(k.angle_keys.actions) && each(k.scale_keys.actions);
+  };
+  for (const Bone &o : fl->bones) {
+    if (o.id != kept.bone && apart_from(o)) {
+      bones.push_back(o.id);
+    }
+  }
+  struct Swapped {
+    Bone *bone;
+    std::vector<Key<float2>> position, scale;
+    std::vector<Key<float>> angle;
+  };
+  std::vector<Swapped> swapped;
+  for (const uint64_t id : bones) {
+    const int bi = bone_index(*fl, id), ci = bone_index(*dl, id);
+    if (bi < 0 || ci < 0) {
+      continue;
+    }
+    Bone &f = fl->bones[size_t(bi)];
+    const Bone &d = dl->bones[size_t(ci)];
+    swapped.push_back({&f, std::move(f.position_keys.keys), std::move(f.scale_keys.keys), std::move(f.angle_keys.keys)});
+    f.position_keys.keys = d.position_keys.keys;
+    f.angle_keys.keys = d.angle_keys.keys;
+    f.scale_keys.keys = d.scale_keys.keys;
+  }
   const bool same = *kept.from == inputs;
-  f.position_keys.keys = std::move(position);
-  f.angle_keys.keys = std::move(angle);
-  f.scale_keys.keys = std::move(scale);
+  for (Swapped &sw : swapped) {
+    sw.bone->position_keys.keys = std::move(sw.position);
+    sw.bone->angle_keys.keys = std::move(sw.angle);
+    sw.bone->scale_keys.keys = std::move(sw.scale);
+  }
   return same;
 }
 

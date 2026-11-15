@@ -92,6 +92,13 @@ PENDING = [
      "One span picked on several paths: a timing edit reaches them all", 'tests/test_stretch_pick_hidden_path.py'),
     ('src/editors/timeline.cc', '      f.teals.push_back({others, f.start, f.end, false});', '      f.teals.push_back({others, f.start, f.end, true});',
      "One span picked on several paths: the path picked last the lighter teal", 'tests/test_stretch_pick_hidden_path.py'),
+    ('src/anim/motion_path.cc', '  if (plays || (action_bone && !values) || !doc.action.empty()) {',
+     '  if (bone_is_controller(b) || (action_bone && !values) || !doc.action.empty()) {',
+     "A controller whose sides have no actions keeps what actions add to it", 'tests/test_motion_path_pupil_offsets.py'),
+    ('src/anim/motion_path.cc', '            !action_played_apart(owner, by, bone, depth + 1, values))', '            true)',
+     "A knob moved by actions apart from the bone counts as moved by its keys", 'tests/test_motion_path_pupil_offsets.py'),
+    ('src/anim/motion_path.cc', '    if (o.id != kept.bone && apart_from(o)) {', '    if (o.id != kept.bone && apart_from(o) && false) {',
+     "Kept action offsets stay good while other bones' keys they don't follow change", 'tests/test_motion_path_pupil_offsets.py'),
 ]
 
 def build(root):
