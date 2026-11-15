@@ -2315,6 +2315,94 @@ static void bone_color_rows(Context &C, Bone &bone)
   }
 }
 
+/* The Bone tab as Drawing: with a bone layer worked in and only points of the drawings edited with its bones picked, those
+ * drawings' colour with the bones and their collections (the first's shown; edits go to them all). */
+static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &drawings)
+{
+  Document &doc = *C.document;
+  Layer &first = *drawings.front();
+  std::string ids, others;
+  for (const Layer *l : drawings) {
+    ids += (ids.empty() ? "" : ",") + std::to_string(l->id);
+    if (l != &first) {
+      others += (others.empty() ? "" : ",") + std::to_string(l->id);
+    }
+  }
+  const std::string header = drawings.size() > 1 ? first.name + " +" + std::to_string(drawings.size() - 1) : first.name;
+  if (ui_panel_begin("Drawing", header, 0u)) {
+    const ImGuiStyle &style = ImGui::GetStyle();
+    const float sw = ImGui::GetFrameHeight() * 0.42f;
+    props_label("Color");
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##drawing_color", "", ImGuiComboFlags_CustomPreview)) {
+      for (int set = 0; set <= BONE_COLOR_CUSTOM; set++) {
+        ImGui::PushID(set);
+        const ImVec2 row = ImGui::GetCursorScreenPos();
+        const bool chosen = ImGui::Selectable("##set", set == first.color_set, 0, ImVec2(0, ImGui::GetTextLineHeight()));
+        const bool theme = set > 0 && set < BONE_COLOR_CUSTOM;
+        if (theme) {
+          color_set_swatches(ImGui::GetWindowDrawList(), row, sw, ImGui::GetTextLineHeight(), bone_color_set(set));
+        }
+        ImGui::GetWindowDrawList()->AddText(ImVec2(row.x + (theme ? sw * 3.0f + style.ItemInnerSpacing.x : 0.0f), row.y),
+                                            ImGui::GetColorU32(ImGuiCol_Text), bone_color_set_name(set));
+        if (chosen) {
+          operator_call(C, "layer.color_set", {{"color_set", bone_color_set_identifier(set)}, {"layers", ids}});
+        }
+        ImGui::PopID();
+      }
+      ImGui::EndCombo();
+    }
+    if (ImGui::BeginComboPreview()) {
+      float x = ImGui::GetCursorScreenPos().x;
+      if (first.color_set > 0) {
+        color_set_swatches(ImGui::GetWindowDrawList(), ImGui::GetCursorScreenPos(), sw, ImGui::GetTextLineHeight(),
+                           layer_colors(first));
+        x += sw * 3.0f + style.ItemInnerSpacing.x;
+      }
+      ImGui::GetWindowDrawList()->AddText(ImVec2(x, ImGui::GetCursorScreenPos().y), ImGui::GetColorU32(ImGuiCol_Text),
+                                          bone_color_set_name(first.color_set));
+      ImGui::EndComboPreview();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("The colours its wires and points are drawn in, as a bone's: its\n"
+                        "regular shade, and its selected shade where picked. Default Colors: the overlays' own.\n"
+                        "Set on every drawing with points picked");
+    }
+    if (first.color_set == BONE_COLOR_CUSTOM) {
+      props_label("Custom Colors");
+      static const char *const shade_names[] = {"Regular", "Select"};
+      const float gap = 1.0f;
+      const float w = (ImGui::GetContentRegionAvail().x - gap) / 2.0f;
+      for (int k = 0; k < 2; k++) {
+        if (k > 0) {
+          ImGui::SameLine(0.0f, gap);
+        }
+        const Color c = first.custom_colors[size_t(k)];
+        float rgba[4] = {c.r, c.g, c.b, 1.0f};
+        bool finished = false;
+        if (ui_color_edit(shade_names[k], rgba, false, &finished, 0.0f, w)) {
+          for (Layer *l : drawings) {
+            if (l->color_set == BONE_COLOR_CUSTOM) {
+              l->custom_colors[size_t(k)] = {rgba[0], rgba[1], rgba[2], 1.0f};
+            }
+          }
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+          ImGui::SetTooltip("%s", k == 0 ? "Regular: its wires and points as they are drawn" : "Select: where picked");
+        }
+        if (finished) {
+          C.undo->push("Drawing Custom Color", doc);
+        }
+      }
+    }
+    ui_panel_end();
+  }
+  if (ui_collapsing_header("Collections", true)) {
+    collection_chips(C, first.collections, "layer.collection_link",
+                     {{"layer", std::to_string(first.id)}, {"layers", others}}, "every picked layer", nullptr, &first);
+  }
+}
+
 /* Blender's Bone > Viewport Display: what the bone is drawn as (Bone, Pin or another layer's
  * drawing) and its colour set. Only how it looks, so any frame. */
 static void bone_display_panel(Context &C, Layer &armature)
@@ -10257,9 +10345,14 @@ std::vector<PropertiesTabEntry> properties_tabs(Document &doc)
       tabs.push_back({"Shape", TAB_SHAPE});
     }
     if (bones) {
-      tabs.push_back({"Bone", TAB_BONE});
-      /* A controller's too: its knob takes what places a bone, its box what turns one. */
-      tabs.push_back({"Bone Constraints", TAB_CONSTRAINTS});
+      /* With only the points of drawings edited with the bones picked, the tab is theirs: Drawing, and no constraints
+       * (a drawing has none). */
+      const bool drawing = !bone_tab_drawings(doc).empty();
+      tabs.push_back({drawing ? "Drawing" : "Bone", TAB_BONE});
+      if (!drawing) {
+        /* A controller's too: its knob takes what places a bone, its box what turns one. */
+        tabs.push_back({"Bone Constraints", TAB_CONSTRAINTS});
+      }
     }
     if (reference) {
       tabs.push_back({"Reference", TAB_REFERENCE});
@@ -10362,6 +10455,12 @@ void properties_draw(Area &area, Context &C)
         drawing_tab(C, true);
         break;
       case TAB_BONE: {
+        /* Only drawings' points picked: those drawings (the tab is Drawing). */
+        if (const std::vector<Layer *> drawings = bone_tab_drawings(*C.document); !drawings.empty()) {
+          controller_preview_clear();
+          bone_tab_drawing_panels(C, drawings);
+          break;
+        }
         /* The active bone alone; with none, the tab stays and says how to get one. */
         Layer &armature = *armature_worked_on(*C.document, C.document->active_layer);
         if (!bone_find(armature, armature.active_bone)) {

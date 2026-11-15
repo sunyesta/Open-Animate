@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "data/bones.hh"
+
 namespace oanim {
 
 bool modifier_makes_points(const Modifier &m)
@@ -563,6 +565,18 @@ const rna::StructRNA &Layer::rna()
                         "group is the active layer. It is then in the bone group's All collection; Assign or M put "
                         "it in others",
                         &Layer::edit_with_bones),
+        def_enum_fn<Layer>(
+            "color_set", "Color",
+            "Edited with its bones: the colour set its wires and points are drawn in, as a bone's (DEFAULT: the "
+            "overlays' own colours)",
+            [] {
+              std::vector<EnumItem> items;
+              for (int set = 0; set <= BONE_COLOR_CUSTOM; set++) {
+                items.push_back({bone_color_set_identifier(set), bone_color_set_name(set)});
+              }
+              return items;
+            }(),
+            [](const Layer &l) { return l.color_set; }, [](Layer &l, int v) { layer_set_color_set(l, v); }),
         def_bool<Layer>("ignore_group_deforms", "Ignore Group Deforms",
                         "The deform modifiers of the groups around this drawing leave it alone",
                         &Layer::ignore_group_deforms),

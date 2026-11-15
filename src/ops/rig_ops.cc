@@ -4328,22 +4328,79 @@ void rig_operators_register()
                  collection_panels_ensure(doc, &armature, {}, c->id, on);
                  return OpStatus::Finished;
                });
+  /* The layers named by `layers` (ids, comma-separated), those that are found. */
+  const auto layers_named = [](Document &doc, const std::string &ids) {
+    std::vector<Layer *> out;
+    size_t at = 0;
+    while (at < ids.size()) {
+      const size_t comma = std::min(ids.find(',', at), ids.size());
+      const uint64_t id = std::strtoull(ids.substr(at, comma - at).c_str(), nullptr, 10);
+      if (Layer *l = id ? layer_find(doc, id) : nullptr; l && std::find(out.begin(), out.end(), l) == out.end()) {
+        out.push_back(l);
+      }
+      at = comma + 1;
+    }
+    return out;
+  };
+  /* A drawing's colour with its bones (the Bone tab's Drawing). */
+  {
+    OperatorType ot;
+    ot.idname = "layer.color_set";
+    ot.name = "Drawing Color";
+    ot.description = "Give drawings edited with bones colour set `color_set` (DEFAULT, THEME01 to THEME15 or CUSTOM), "
+                     "their wires and points drawn in it as a bone is: the drawings `layers` (ids, comma-separated), "
+                     "by default those the Bone tab shows (points picked, no bones), else the active layer";
+    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+    ot.poll = [](Context &C) { return C.document != nullptr; };
+    ot.exec = [layers_named](Context &C) {
+      Document &doc = *C.document;
+      const int set = bone_color_set_from_identifier(op_arg(C, "color_set", "DEFAULT"));
+      if (set < 0) {
+        report(ReportType::Error, "Color is DEFAULT, THEME01 to THEME15 or CUSTOM");
+        return OpStatus::Cancelled;
+      }
+      std::vector<Layer *> layers = layers_named(doc, op_arg(C, "layers"));
+      if (op_arg(C, "layers").empty()) {
+        layers = bone_tab_drawings(doc);
+        if (layers.empty()) {
+          if (Layer *active = document_active_layer(doc); active && active->type == LayerType::Vector) {
+            layers.push_back(active);
+          }
+        }
+      }
+      bool changed = false;
+      for (Layer *l : layers) {
+        if (l->type == LayerType::Vector && l->color_set != set) {
+          layer_set_color_set(*l, set);
+          changed = true;
+        }
+      }
+      return changed ? OpStatus::Finished : OpStatus::Cancelled;
+    };
+    operators().add(std::move(ot));
+  }
   /* A layer joins or leaves a collection (its Layer tab's Collections panel). */
   for (const char *idname : {"layer.collection_link", "layer.bone_collection_toggle"}) {
     OperatorType ot;
     ot.idname = idname;
     ot.name = "Layer in Collection";
     ot.description = "Put layer `layer` (default the active layer) in collection `collection` (made if there is "
-                     "none), or take it out (`on` 0); `all` 1: every picked layer too";
+                     "none), or take it out (`on` 0); `layers` (ids, comma-separated) too; `all` 1: every picked "
+                     "layer too";
     ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
     ot.poll = [](Context &C) { return C.document != nullptr; };
-    ot.exec = [](Context &C) {
+    ot.exec = [layers_named](Context &C) {
       Document &doc = *C.document;
       const std::string id = op_arg(C, "layer");
       Layer *layer = id.empty() ? document_active_layer(doc) : layer_find(doc, std::strtoull(id.c_str(), nullptr, 10));
       std::vector<Layer *> layers;
       if (layer) {
         layers.push_back(layer);
+      }
+      for (Layer *l : layers_named(doc, op_arg(C, "layers"))) {
+        if (l != layer) {
+          layers.push_back(l);
+        }
       }
       if (op_arg(C, "all") == "1") {
         for (const Layer *l : document_layers_flat(doc)) {

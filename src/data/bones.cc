@@ -2044,6 +2044,23 @@ void bone_set_color_set(Bone &bone, int set)
   bone.color_set = std::clamp(set, 0, BONE_COLOR_CUSTOM);
 }
 
+BoneColors layer_colors(const Layer &layer)
+{
+  if (layer.color_set == BONE_COLOR_CUSTOM) {
+    return {layer.custom_colors[0], layer.custom_colors[1], layer.custom_colors[2]};
+  }
+  return bone_color_set(layer.color_set);
+}
+
+void layer_set_color_set(Layer &layer, int set)
+{
+  if (set == BONE_COLOR_CUSTOM && layer.color_set != BONE_COLOR_CUSTOM) {
+    const BoneColors from = layer_colors(layer);
+    layer.custom_colors = {from.regular, from.select, from.active};
+  }
+  layer.color_set = std::clamp(set, 0, BONE_COLOR_CUSTOM);
+}
+
 Collection *collection_find(Document &doc, uint64_t id)
 {
   for (Collection &c : doc.collections) {

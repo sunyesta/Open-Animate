@@ -656,6 +656,17 @@ static json layer_to_json(const Layer &layer)
   if (layer.shear.x != 0.0f || layer.shear.y != 0.0f) {
     j["shear"] = float2_to_json(layer.shear);
   }
+  /* A drawing's colour with its bones, written as a bone's. */
+  if (layer.color_set != 0) {
+    j["color_set"] = bone_color_set_identifier(layer.color_set);
+  }
+  if (layer.color_set == BONE_COLOR_CUSTOM) {
+    json shades = json::array();
+    for (const Color &c : layer.custom_colors) {
+      shades.push_back({num(c.r), num(c.g), num(c.b)});
+    }
+    j["custom_colors"] = shades;
+  }
   /* The action it last keyed together in: back on another timeline (the mainline, say) it fills only once something
    * there is keyed, the same after opening the file as before saving it. */
   if (layer.key_together && !layer.key_together_action.empty()) {
@@ -2642,6 +2653,14 @@ static Layer layer_from_json(const json &j, int depth)
   layer.render_visible = get_bool(j, "render_visible", true);
   layer.locked = get_bool(j, "locked", false);
   layer.edit_with_bones = get_bool(j, "edit_with_bones", false);
+  layer.color_set = std::max(0, bone_color_set_from_identifier(j.value("color_set", std::string("DEFAULT"))));
+  if (const json shades = j.value("custom_colors", json()); shades.is_array() && shades.size() == 3) {
+    for (size_t k = 0; k < 3; k++) {
+      if (shades[k].is_array() && shades[k].size() >= 3) {
+        layer.custom_colors[k] = {shades[k][0].get<float>(), shades[k][1].get<float>(), shades[k][2].get<float>(), 1.0f};
+      }
+    }
+  }
   layer.ignore_group_deforms = get_bool(j, "ignore_group_deforms", false);
   /* Files from before it: each point keyed on its own, as they were made. */
   layer.key_whole_drawing = get_bool(j, "key_whole_drawing", false);

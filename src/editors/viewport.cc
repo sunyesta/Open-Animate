@@ -8414,7 +8414,8 @@ uint64_t overlay_drawing_identity_test(const Layer &layer)
 /* The wires, handles and points of a drawing being edited (layer space): what the GPU overlays draw. */
 static OverlayGeometry overlay_geometry(const VectorDrawing &drawing, const VectorDrawing *wires, const Transform2D &to_document,
                                         bool show_wires, bool show_points, int quality, HandleDisplay handles, bool point_squares,
-                                        const LineCutter *cutter, float point_size, float handle_size, float pixel)
+                                        const LineCutter *cutter, float point_size, float handle_size, float pixel,
+                                        const BoneColors *tint = nullptr)
 {
   OverlayGeometry g;
   /* Wires show each curve as it is edited: at its shape's detail level, through the points shown
@@ -8428,8 +8429,11 @@ static OverlayGeometry overlay_geometry(const VectorDrawing &drawing, const Vect
   const bool cuts = cutter && !cutter->empty();
   std::vector<float2> line;
   std::vector<char> shows;
-  /* The colours that read on what is drawn under them (a layer-space place looked up in the canvas). */
-  const ContrastColors wire = wire_colors();
+  /* The colours that read on what is drawn under them (a layer-space place looked up in the canvas): the drawing's
+   * colour set's (Layer::color_set) in place of the overlays' own, its selected shade where picked. */
+  const ContrastColors wire = tint ? contrast_colors_of(tint->regular) : wire_colors();
+  const ImU32 wire_picked = tint ? contrast_u32(tint->select, 220.0f / 255.0f) : COL_WIRE_SELECTED;
+  const ImU32 point_picked = tint ? contrast_u32(tint->select, 1.0f) : COL_POINT_SELECTED;
   const CanvasSample *under = g_canvas_now;
   const std::function<bool(float2, Color &)> under_at = [&](float2 p, Color &c) {
     return under && under->at(to_document.apply(p), c);
@@ -8468,7 +8472,7 @@ static OverlayGeometry overlay_geometry(const VectorDrawing &drawing, const Vect
       const bool selected = picked_a && picked_b;
       /* One end picked (Blender's edit mode): orange at that end, fading along the segment to the other's colour. */
       const bool fades = picked_a != picked_b;
-      const ImU32 col = selected ? COL_WIRE_SELECTED : contrast_u32(wire.base, 0.92f);
+      const ImU32 col = selected ? wire_picked : contrast_u32(wire.base, 0.92f);
       const ImU32 faint = (col & ~IM_COL32_A_MASK) | IM_COL32(0, 0, 0, 110);
       const float thickness = selected ? 1.6f : 1.5f;
       if (curve.points[s].edge_hidden) {
@@ -8513,8 +8517,7 @@ static OverlayGeometry overlay_geometry(const VectorDrawing &drawing, const Vect
           along += length(p.b - p.a);
           const float t1 = along / total;
           const float f0 = picked_a ? t0 : 1.0f - t0, f1 = picked_a ? t1 : 1.0f - t1;
-          g.lines.push_back({p.a, p.b, u32_mix(COL_WIRE_SELECTED, own, f0), thickness,
-                             u32_mix(COL_WIRE_SELECTED, own, f1)});
+          g.lines.push_back({p.a, p.b, u32_mix(wire_picked, own, f0), thickness, u32_mix(wire_picked, own, f1)});
         }
       }
       else {
@@ -8608,7 +8611,7 @@ static OverlayGeometry overlay_geometry(const VectorDrawing &drawing, const Vect
       const float r = point_size * (coarse[i] ? 0.667f : 0.5f);
       /* The wire's colour, or the one that reads on what is under the point. */
       Color c;
-      const ImU32 fill = p.selected      ? COL_POINT_SELECTED
+      const ImU32 fill = p.selected      ? point_picked
                          : under_at(p.pos, c) ? contrast_u32(wire.of(contrast_pick(c, wire.base)), 1.0f)
                                               : contrast_u32(wire.base, 1.0f);
       g.marks.push_back({p.pos, fill, p.selected ? 0u : IM_COL32(0x10, 0x10, 0x10, 170), r, 1.0f});
@@ -8668,9 +8671,10 @@ OverlayColorsTest overlay_colors_test(const Document &doc, const Layer &layer, c
   const CanvasSample *was = g_canvas_now;
   g_canvas_now = &under;
   const Posed shown = posed(doc, layer);
+  const BoneColors tint = layer_colors(layer);
   const OverlayGeometry g = overlay_geometry(*shown.drawing, posed_wires(shown), layer_world_transform(doc, layer.id),
                                              true, true, 4, handles ? HandleDisplay::All : HandleDisplay::None, true, nullptr,
-                                             6.0f, 6.5f, pixel);
+                                             6.0f, 6.5f, pixel, layer.color_set != 0 ? &tint : nullptr);
   g_canvas_now = was;
   OverlayColorsTest out;
   const Transform2D to_document = layer_world_transform(doc, layer.id);
@@ -8721,6 +8725,16 @@ static void draw_drawing_overlay(uint64_t slot, const Layer &owner, const Posed 
     key = overlay_mix(key, uint64_t(prefs.wire_darker) | uint64_t(prefs.handle_color) << 24);
     key = overlay_mix(key, uint64_t(prefs.handle_selected));
   }
+  /* The drawing's colour set, and its shades. */
+  const BoneColors tint = layer_colors(owner);
+  key = overlay_mix(key, uint64_t(uint32_t(owner.color_set)));
+  if (owner.color_set != 0) {
+    for (const Color &c : {tint.regular, tint.select}) {
+      for (const float v : {c.r, c.g, c.b}) {
+        key = overlay_mix_float(key, v);
+      }
+    }
+  }
   /* Lines ended at masks' edges depend on where the drawing is: then exactly, with the cut and the place. */
   if (cuts) {
     key = overlay_mix(key, overlay_fingerprint(drawing, 0.0f));
@@ -8767,7 +8781,7 @@ static void draw_drawing_overlay(uint64_t slot, const Layer &owner, const Posed 
   if (!overlay_kept(slot, key)) {
     overlay_keep(slot, key,
                  overlay_geometry(drawing, wires, to_document, show_wires, show_points, quality, handles, point_squares,
-                                  cutter, point_size, handle_size, pixel),
+                                  cutter, point_size, handle_size, pixel, owner.color_set != 0 ? &tint : nullptr),
                  first);
   }
   /* Document to screen, as ViewMapping::to_screen; a drawing moved whole since they were made goes the

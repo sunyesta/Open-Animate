@@ -225,6 +225,9 @@ int bone_color_set_from_identifier(const std::string &identifier);
 BoneColors bone_colors(const Bone &bone);
 /* Gives a bone colour set `set`. Going to Custom starts from the shades it had, as in Blender. */
 void bone_set_color_set(Bone &bone, int set);
+/* The shades a drawing edited with bones is drawn in (Layer::color_set), and giving it a set, as a bone's. */
+BoneColors layer_colors(const Layer &layer);
+void layer_set_color_set(Layer &layer, int set);
 
 /* --- Collections ---------------------------------------------------------------------------- */
 

@@ -1268,6 +1268,12 @@ struct Layer {
    * layer, or a bone layer it is a sub bone group of, is the active one (it is in All, and can be put
    * in other collections too). */
   bool edit_with_bones = false;
+  /* Edited with its bones: the colour set its wires and points are drawn in, as a bone's (0 Default Colors: the
+   * overlays' own; see BONE_COLOR_CUSTOM), and for Custom its regular and selected shades (the active one kept beside
+   * them, as a bone's, unused): so a drawing reads as one with the bones it moves with. */
+  int color_set = 0;
+  std::array<Color, 3> custom_colors = {Color{0.6f, 0.6f, 0.6f, 1.0f}, Color{1.0f, 0.55f, 0.0f, 1.0f},
+                                        Color{1.0f, 0.75f, 0.31f, 1.0f}};
   /* The deform modifiers of the groups around this drawing leave it alone. */
   bool ignore_group_deforms = false;
   /* Key Whole Drawing (a vector layer; on for new ones, off for those opened from files made before it): the

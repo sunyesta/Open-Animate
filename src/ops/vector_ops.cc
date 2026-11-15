@@ -45,6 +45,38 @@ std::vector<Layer *> editable_layers(Context &C)
   return weights ? document_weight_layers(*C.document) : document_editable_layers(*C.document);
 }
 
+std::vector<Layer *> bone_tab_drawings(Document &doc)
+{
+  std::vector<Layer *> out;
+  const Layer *armature = document_active_layer(doc);
+  if (!armature || !armature->is_bone_layer()) {
+    return out;
+  }
+  for (const Layer *l : armature_family(doc, armature->id)) {
+    for (const Bone &b : l->bones) {
+      if (b.selected || b.select_head || b.select_tail) {
+        return out;
+      }
+    }
+  }
+  for (Layer *l : document_editable_layers(doc)) {
+    if (l == armature || l->type != LayerType::Vector) {
+      continue;
+    }
+    bool picked = std::any_of(l->drawing.points.begin(), l->drawing.points.end(),
+                              [](const MeshPoint &p) { return p.selected; });
+    for (const Curve &c : l->drawing.curves) {
+      for (const CurvePoint &cp : c.points) {
+        picked = picked || cp.select_in || cp.select_out;
+      }
+    }
+    if (picked) {
+      out.push_back(l);
+    }
+  }
+  return out;
+}
+
 std::vector<Layer *> document_weight_layers(Document &doc)
 {
   std::vector<Layer *> layers;
