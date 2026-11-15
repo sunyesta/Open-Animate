@@ -47,6 +47,9 @@ PENDING = [
     ('src/ops/vector_ops.cc', '            std::all_of(rigs.begin(), rigs.end(),',
      '            std::all_of(rigs.end() - 1, rigs.end(),',
      'A collection hidden on the bone layer worked in hides a sub bone group\'s drawings in it', 'tests/test_sub_group_collections.py'),
+    ('src/data/bones.cc', '  return std::all_of(panels.begin(), panels.end(),',
+     '  return std::all_of(panels.end() - 1, panels.end(),',
+     'A collection hidden on the bone layer worked in hides a sub bone group\'s bones in it', 'tests/test_sub_group_collections.py'),
 ]
 
 def build(root):

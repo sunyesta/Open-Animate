@@ -1740,15 +1740,17 @@ void armature_keep_children(Layer &armature, const std::vector<Bone> &original, 
 }
 
 void armature_select_joints_in(Layer &armature, bool setup_frame, const std::function<bool(float2)> &inside,
-                               bool extend, bool deselect)
+                               bool extend, bool deselect, const std::vector<const Layer *> *panels)
 {
+  const std::vector<const Layer *> own{&armature};
+  const std::vector<const Layer *> &through = panels ? *panels : own;
   const std::vector<BonePose> poses = armature_keyed_pose(armature, setup_frame);
   if (!extend && !deselect) {
     armature_deselect_all(armature);
   }
   uint64_t first = 0;
   for (size_t i = 0; i < armature.bones.size(); i++) {
-    if (!bone_shown(armature, armature.bones[i])) {
+    if (!bone_shown(through, armature.bones[i])) {
       continue;
     }
     Bone &b = armature.bones[i];
@@ -1785,15 +1787,17 @@ void armature_select_joints_in(Layer &armature, bool setup_frame, const std::fun
 }
 
 void armature_select_bones_in(Layer &armature, bool setup_frame, const std::function<bool(float2)> &inside,
-                              bool extend, bool deselect)
+                              bool extend, bool deselect, const std::vector<const Layer *> *panels)
 {
+  const std::vector<const Layer *> own{&armature};
+  const std::vector<const Layer *> &through = panels ? *panels : own;
   const std::vector<BonePose> poses = armature_keyed_pose(armature, setup_frame);
   if (!extend && !deselect) {
     armature_deselect_all(armature);
   }
   uint64_t first = 0;
   for (size_t i = 0; i < armature.bones.size(); i++) {
-    if (!bone_shown(armature, armature.bones[i])) {
+    if (!bone_shown(through, armature.bones[i])) {
       continue;
     }
     /* Any of eleven points along the bone, as Moho's gizmo tests. */
@@ -2282,6 +2286,40 @@ bool bone_collections_show(const Layer &armature, const std::vector<uint64_t> &c
 bool bone_shown(const Layer &armature, const Bone &bone)
 {
   return bone_collections_show(armature, bone.collections);
+}
+
+std::vector<const Layer *> bone_panels(const Document &doc, const Layer &armature)
+{
+  const Layer *worked = layer_find(doc, doc.active_layer);
+  if (!worked || worked == &armature || !worked->is_bone_layer() || !armature.sub_bone_group) {
+    return {&armature};
+  }
+  /* Down from the bone layer worked in through the sub bone groups shown inside it, as editable_layers walks. */
+  std::vector<const Layer *> path{worked};
+  const auto find = [&](auto &&self, const Layer &parent) -> bool {
+    for (const Layer &layer : parent.children) {
+      if (!layer.is_bone_layer()) {
+        if (self(self, layer)) {
+          return true;
+        }
+      }
+      else if (layer.sub_bone_group && layer.shown()) {
+        path.push_back(&layer);
+        if (&layer == &armature || self(self, layer)) {
+          return true;
+        }
+        path.pop_back();
+      }
+    }
+    return false;
+  };
+  return find(find, *worked) ? path : std::vector<const Layer *>{&armature};
+}
+
+bool bone_shown(const std::vector<const Layer *> &panels, const Bone &bone)
+{
+  return std::all_of(panels.begin(), panels.end(),
+                     [&](const Layer *panel) { return bone_collections_show(*panel, bone.collections); });
 }
 
 bool layer_edited_with_bones(const Document &doc, const Layer &layer)

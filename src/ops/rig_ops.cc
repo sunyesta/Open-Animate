@@ -33,6 +33,20 @@
 
 namespace oanim {
 
+/* Lets go of the bones hidden now: the bone layer's, and those of the sub bone groups inside it through every panel on
+ * the way (bone_panels), so a collection hidden on the panel worked in leaves no hidden inner bone picked. */
+static void family_deselect_hidden(Document &doc, Layer &armature)
+{
+  for (Layer *layer : armature_and_inside(doc, armature.id)) {
+    const std::vector<const Layer *> panels = bone_panels(doc, *layer);
+    for (Bone &b : layer->bones) {
+      if (!bone_shown(panels, b)) {
+        b.selected = b.select_head = b.select_tail = false;
+      }
+    }
+  }
+}
+
 /* How a Parent Bone moving a layer's points (Deform: Points) moves them now: the same for each point
  * (each is weighted all to it), identity when it doesn't. */
 static Transform2D points_bone_move(const Document &doc, const Layer &layer)
@@ -586,7 +600,7 @@ static void collection_panels_ensure(Document &doc, Layer *armature, const std::
     if (on) {
       bone_collection_ensure(*rig, id);
     }
-    armature_deselect_hidden(*rig);
+    family_deselect_hidden(doc, *rig);
   }
 }
 
@@ -930,8 +944,9 @@ void rig_operators_register()
                bone_layer_active, [select_editable_points](Context &C) {
                  for (Layer *layer : armature_and_inside(*C.document, C.document->active_layer)) {
                    Layer &armature = *layer;
+                   const std::vector<const Layer *> panels = bone_panels(*C.document, armature);
                    for (Bone &b : armature.bones) {
-                     bone_select(b, bone_shown(armature, b));
+                     bone_select(b, bone_shown(panels, b));
                    }
                    if (!bone_find(armature, armature.active_bone) && !armature.bones.empty()) {
                      armature.active_bone = armature.bones.front().id;
@@ -946,10 +961,11 @@ void rig_operators_register()
                bone_layer_active, [](Context &C) {
                  for (Layer *layer : armature_and_inside(*C.document, C.document->active_layer)) {
                    Layer &armature = *layer;
+                   const std::vector<const Layer *> panels = bone_panels(*C.document, armature);
                    for (Bone &b : armature.bones) {
                      /* A bone with only one end picked counts as picked, as it shows. */
                      const bool picked = b.selected || b.select_head || b.select_tail;
-                     bone_select(b, !picked && bone_shown(armature, b));
+                     bone_select(b, !picked && bone_shown(panels, b));
                    }
                    const Bone *active = bone_find(armature, armature.active_bone);
                    if (!active || !active->selected) {
@@ -4082,7 +4098,7 @@ void rig_operators_register()
           if (assign) {
             bone_collection_ensure(armature, id);
           }
-          armature_deselect_hidden(armature);
+          family_deselect_hidden(doc, armature);
           return OpStatus::Finished;
         });
   }
@@ -4139,7 +4155,7 @@ void rig_operators_register()
                    if (op_arg(C, "active") == "1") {
                      armature.active_collection = 0;
                    }
-                   armature_deselect_hidden(armature);
+                   family_deselect_hidden(doc, armature);
                    return OpStatus::Finished;
                  }
                  BoneCollection *c = collection_arg(C, armature);
@@ -4159,7 +4175,7 @@ void rig_operators_register()
                  if (op_arg(C, "active") == "1") {
                    armature.active_collection = c->id;
                  }
-                 armature_deselect_hidden(armature);
+                 family_deselect_hidden(doc, armature);
                  return OpStatus::Finished;
                });
   rig_operator("armature.collection_show_all", "Show All Collections", "Turn every collection's eye on",
@@ -4257,7 +4273,7 @@ void rig_operators_register()
                    else {
                      bone_collection_ensure(armature, id);
                    }
-                   armature_deselect_hidden(armature);
+                   family_deselect_hidden(doc, armature);
                    return OpStatus::Finished;
                  });
   }

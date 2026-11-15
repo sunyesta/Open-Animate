@@ -191,10 +191,11 @@ void armature_keep_children(Layer &armature, const std::vector<Bone> &original, 
  * selected); posing, a bone with either end inside is picked whole, as its pose mode does. Bones: a bone any part of
  * which is inside is picked whole, as Moho's gizmo does. `extend` keeps the selection; `deselect`
  * removes instead. */
+/* `panels` (bone_panels): the collections panels the bones show through; their own alone when null. */
 void armature_select_joints_in(Layer &armature, bool setup_frame, const std::function<bool(float2)> &inside,
-                               bool extend, bool deselect);
+                               bool extend, bool deselect, const std::vector<const Layer *> *panels = nullptr);
 void armature_select_bones_in(Layer &armature, bool setup_frame, const std::function<bool(float2)> &inside,
-                              bool extend, bool deselect);
+                              bool extend, bool deselect, const std::vector<const Layer *> *panels = nullptr);
 /* Puts bones' ends (setup pose, bone layer space) where `targets` says, by bone id, keeping every
  * other bone where it is (connected heads follow their parent's tail). `world_angles` (optional):
  * which way bones with no length point (bone layer space), as their ends can't say. */
@@ -276,6 +277,12 @@ bool bone_collection_all_shown(const Layer &armature);
  * collection holding it shows. All holds everything, so while it shows, everything does. */
 bool bone_collections_show(const Layer &armature, const std::vector<uint64_t> &collections);
 bool bone_shown(const Layer &armature, const Bone &bone);
+/* The collections panels a bone of `armature` shows through: while a bone layer around it is worked in (active) and it
+ * is a sub bone group shown inside that one, the worked-in one's and each sub bone group's on the way down to its own,
+ * so a collection hidden on the panel worked in hides the inner groups' bones in it too; else its own alone. */
+std::vector<const Layer *> bone_panels(const Document &doc, const Layer &armature);
+/* Whether a bone shows through every one of `panels` (from bone_panels). */
+bool bone_shown(const std::vector<const Layer *> &panels, const Bone &bone);
 /* Whether a drawing is edited along with its bone layer's bones: it is Editable in Bone Group, and
  * shows by its collections. */
 bool layer_edited_with_bones(const Document &doc, const Layer &layer);

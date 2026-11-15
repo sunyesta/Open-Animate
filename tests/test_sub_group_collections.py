@@ -1,7 +1,7 @@
-"""A drawing inside a sub bone group, worked with the bone layer around it, shows only while every collections
+"""A drawing or bone inside a sub bone group, worked with the bone layer around it, shows only while every collections
 panel on the way shows it: the one of the bone layer worked in and each sub bone group's down to its own. Hiding a
 collection in the outer panel hides the inner group's drawings in it (the Tongue in Secondary, hidden in Character's
-panel, kept its wire while the mouth group's own panel showed All).
+panel, kept its wire while the mouth group's own panel showed All; so did the Tongue_X bone).
 
 Run with:  OpenAnimate --background --python tests/test_sub_group_collections.py
 """
@@ -94,5 +94,52 @@ assert ops.armature.collection_set(collection="All", visible="1") == {'FINISHED'
 layers.active = fresh(outer)
 assert ops.armature.collection_set(collection="Secondary", solo="1") == {'FINISHED'}
 assert edited() == ["Brow", "Tongue"], edited()
+
+
+# --- Bones: the mouth group's bones in Secondary hide with it on Character's panel ---------------------------------
+layers.active = fresh(outer)
+assert ops.armature.collection_set(collection="Secondary", solo="0") == {'FINISHED'}
+assert ops.armature.collection_set(collection="Secondary", visible="1") == {'FINISHED'}
+layers.active = fresh(inner)
+assert ops.armature.bone_add(name="tongue_b", head_x="3", head_y="0", tail_x="3", tail_y="1", parent="") == {'FINISHED'}
+for b, c in (("jaw", "Main"), ("tongue_b", "Secondary")):
+    assert ops.armature.bone_collection_link(armature=str(inner.id), bone=b, collection=c, on="1") == {'FINISHED'}
+assert ops.armature.bone_collection_link(armature=str(outer.id), bone="head", collection="Main", on="1") == {'FINISHED'}
+
+
+def picked():
+    return sorted(b["name"] for l in (outer, inner) for b in fresh(l).bones if b["selected"])
+
+
+def select_all():
+    layers.active = fresh(outer)
+    ops.armature.select_none()
+    assert ops.armature.select_all() == {'FINISHED'}
+    return picked()
+
+
+assert select_all() == ["head", "jaw", "tongue_b"], select_all()
+
+# Picked, then Secondary hidden on Character's panel: the tongue bone lets go, as a hidden bone of Character's would.
+assert ops.armature.collection_set(collection="Secondary", visible="0") == {'FINISHED'}
+assert picked() == ["head", "jaw"], ("hiding lets go of the inner bone", picked())
+
+# A and a box from Character leave it alone while hidden.
+assert select_all() == ["head", "jaw"], select_all()
+layers.active = fresh(outer)
+ops.armature.select_none()
+fresh(inner).box_select_bones((-10, -10), (10, 10), whole=True)
+assert picked() == ["jaw"], ("a box", picked())
+
+# Worked in on its own, the mouth group's panel alone decides (Secondary shows there).
+layers.active = fresh(inner)
+ops.armature.select_none()
+assert ops.armature.select_all() == {'FINISHED'}
+assert sorted(b["name"] for b in fresh(inner).bones if b["selected"]) == ["jaw", "tongue_b"]
+
+# Shown again on Character's panel: back in A.
+layers.active = fresh(outer)
+assert ops.armature.collection_set(collection="Secondary", visible="1") == {'FINISHED'}
+assert select_all() == ["head", "jaw", "tongue_b"], select_all()
 
 print("sub group collections OK")

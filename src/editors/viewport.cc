@@ -10351,12 +10351,14 @@ static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armatur
 {
   OANIM_PROFILE("draw_bones");
   const std::vector<ScreenBone> sbs = screen_bones(doc, armature, view);
+  /* Through the panel worked in too, for a sub bone group drawn from the bone layer around it. */
+  const std::vector<const Layer *> panels = bone_panels(doc, armature);
   /* Physics ghosts: pale outlines where bone dynamics have the bones, for those they move. */
   if (g_keyed_bones && !ghost && !armature.dynamics_now.empty()) {
     const std::vector<ScreenBone> swung = screen_bones(doc, armature, view, false);
     const ImU32 col = IM_COL32(0x8c, 0xc8, 0xff, 200);
     for (size_t i = 0; i < swung.size() && i < sbs.size(); i++) {
-      if (i < armature.bones.size() && !bone_shown(armature, armature.bones[i])) {
+      if (i < armature.bones.size() && !bone_shown(panels, armature.bones[i])) {
         continue;
       }
       const ImVec2 dh = swung[i].head - sbs[i].head, dt = swung[i].tail - sbs[i].tail;
@@ -10395,7 +10397,7 @@ static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armatur
     const Layer *outer = bone.outer_bone != 0 ? layer_find(doc, bone.outer_layer) : nullptr;
     const Bone *outer_parent = outer ? bone_find(*outer, bone.outer_bone) : nullptr;
     if (!g_relationship_lines || bone.connected || (parent == armature.bones.end() && !outer_parent) ||
-        !bone_shown(armature, bone) || (!outer_parent && !bone_shown(armature, *parent)))
+        !bone_shown(panels, bone) || (!outer_parent && !bone_shown(panels, *parent)))
     {
       continue;
     }
@@ -10475,7 +10477,7 @@ static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armatur
       /* The active bone stands out only while it's selected, as in Blender. */
       const bool picked = bone.selected || bone.select_head || bone.select_tail;
       const bool active = bone.id == armature.active_bone && picked;
-      if ((picked || active) != (pass == 1) || !bone_shown(armature, bone)) {
+      if ((picked || active) != (pass == 1) || !bone_shown(panels, bone)) {
         continue;
       }
       /* Being moved on the setup frame: drawn as a bone until the move ends. */
@@ -10564,6 +10566,7 @@ static std::vector<BoneHit> pick_bone_parts(const Document &doc, const Layer &ar
                                             ImVec2 mouse, std::vector<std::pair<int, float>> *r_ranks = nullptr)
 {
   const std::vector<ScreenBone> sbs = screen_bones(doc, armature, view);
+  const std::vector<const Layer *> panels = bone_panels(doc, armature);
   const float2 m(mouse.x, mouse.y);
   struct Candidate {
     BoneHit hit;
@@ -10574,7 +10577,7 @@ static std::vector<BoneHit> pick_bone_parts(const Document &doc, const Layer &ar
   std::vector<Candidate> found;
   for (size_t i = 0; i < armature.bones.size(); i++) {
     const Bone &bone = armature.bones[i];
-    if (!bone_shown(armature, bone)) {
+    if (!bone_shown(panels, bone)) {
       continue;
     }
     /* A controller answers at its knob, so the box can sit over anything. On the setup frame, where the box is moved,
@@ -13086,13 +13089,14 @@ static void transform_bones_input(Context &C, Area &area, Layer &armature, const
             const ImVec2 lo_s(std::min(a.x, b.x), std::min(a.y, b.y)), hi_s(std::max(a.x, b.x), std::max(a.y, b.y));
             const auto box = [&](Layer &l) {
               const Transform2D l_to_document = layer_world_transform(doc, l.id);
+              const std::vector<const Layer *> panels = bone_panels(doc, l);
               armature_select_bones_in(
                   l, setup,
                   [&](float2 p) {
                     const ImVec2 s = view.to_screen(l_to_document.apply(p));
                     return s.x >= lo_s.x && s.x <= hi_s.x && s.y >= lo_s.y && s.y <= hi_s.y;
                   },
-                  kind == SelectBoxKind::Add, kind == SelectBoxKind::Remove);
+                  kind == SelectBoxKind::Add, kind == SelectBoxKind::Remove, &panels);
             };
             box_select_family(doc, armature, kind != SelectBoxKind::Set, box);
           }
@@ -15529,12 +15533,13 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
     /* Clicking a spot of a controller (not under its knob) puts the knob there; Shift keys it held there. */
     if (doc.frame_current != 0 && !io.KeyCtrl) {
       const std::vector<ScreenBone> sbs = screen_bones(doc, armature, view);
+      const std::vector<const Layer *> panels = bone_panels(doc, armature);
       const std::vector<BonePose> poses = armature_pose(armature, false);
       std::string knob_name, spot_name;
       float best = CONTROLLER_SPOT_PICK + 1.0f;
       for (size_t i = 0; i < armature.bones.size() && i < poses.size() && i < sbs.size(); i++) {
         const Bone &knob = armature.bones[i];
-        if (!bone_is_controller(knob) || !bone_shown(armature, knob) ||
+        if (!bone_is_controller(knob) || !bone_shown(panels, knob) ||
             !controller_box_shown(doc, knob, knob.selected || knob.select_head || knob.select_tail))
         {
           continue;
@@ -15622,13 +15627,14 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
         const ImVec2 lo(std::min(a.x, b.x), std::min(a.y, b.y)), hi(std::max(a.x, b.x), std::max(a.y, b.y));
         const auto box = [&](Layer &l) {
           const Transform2D to_document = layer_world_transform(doc, l.id);
+          const std::vector<const Layer *> panels = bone_panels(doc, l);
           armature_select_joints_in(
               l, doc.frame_current == 0,
               [&](float2 p) {
                 const ImVec2 s = view.to_screen(to_document.apply(p));
                 return s.x >= lo.x && s.x <= hi.x && s.y >= lo.y && s.y <= hi.y;
               },
-              io.KeyShift, io.KeyCtrl);
+              io.KeyShift, io.KeyCtrl, &panels);
         };
         box_select_family(doc, armature, io.KeyShift || io.KeyCtrl, box);
         if (!point_layers.empty()) {

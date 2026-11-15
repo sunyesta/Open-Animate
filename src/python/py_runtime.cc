@@ -3612,11 +3612,12 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     const float2 lo(std::min(x0, x1), std::min(y0, y1)), hi(std::max(x0, x1), std::max(y0, y1));
     const auto inside = [&](float2 p) { return p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y; };
     const bool setup = current_context().document->frame_current == 0;
+    const std::vector<const Layer *> panels = bone_panels(*current_context().document, layer);
     if (whole) {
-      armature_select_bones_in(layer, setup, inside, extend, deselect);
+      armature_select_bones_in(layer, setup, inside, extend, deselect, &panels);
     }
     else {
-      armature_select_joints_in(layer, setup, inside, extend, deselect);
+      armature_select_joints_in(layer, setup, inside, extend, deselect, &panels);
     }
   });
   m.def("layer_picked_bounds", [layer_or_raise](uint64_t id) -> py::object {
