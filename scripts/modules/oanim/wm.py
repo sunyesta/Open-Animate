@@ -549,6 +549,13 @@ def field_affected_go(layer, path, index, component=-1):
     _oanim.field_affected_go(getattr(layer, "id", layer), path, int(component), int(index))
 
 
+def select_box_kind(shift=False, ctrl=False, alt=False, transform_bones=False):
+    """Test hook: what a select box dragged with these keys held does, and how it shows while dragged: "SET" (a new
+    selection), "ADD" (Shift; a "+" by the corner) or "REMOVE" (Ctrl, or Alt in the Transform tool's box over bones,
+    `transform_bones`; red and dashed, a "-"). Ctrl wins over Shift."""
+    return _oanim.select_box_kind(bool(shift), bool(ctrl), bool(alt), bool(transform_bones))
+
+
 def overlay_colors(layer, left=(0.0, 0.0, 0.0), right=(1.0, 1.0, 1.0), split=0.0, pixel=0.01, handles=False):
     """Test hook: the colours ("#RRGGBB") the wires and points of `layer` (a layer or its id) and the motion paths'
     line pieces take over a canvas that is `left` left of x = `split` and `right` from there on, at `pixel` document

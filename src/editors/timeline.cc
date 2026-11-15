@@ -26,6 +26,7 @@
 #include "data/bones.hh"
 #include "data/document.hh"
 #include "editors/editors.hh"
+#include "editors/select_box.hh"
 #include "editors/timeline_media.hh"
 #include "editors/num_input.hh"
 #include "editors/timeline_path.hh"
@@ -4848,8 +4849,7 @@ static void timeline_body(Area &area, Context &C)
   }
 
   if (boxing) {
-    dl->AddRectFilled(g_press.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 20));
-    dl->AddRect(g_press.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 160));
+    select_box_draw(dl, g_press.start, io.MousePos, select_box_kind_now());
   }
   if (!transform_info.empty()) {
     dl->AddText(ImVec2(k0.x + 8.0f, p0.y + ruler_h + 4.0f), IM_COL32_WHITE, transform_info.c_str());

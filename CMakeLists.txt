@@ -92,6 +92,7 @@ set(OANIM_SOURCES
   src/editors/timeline_media.cc
   src/editors/timeline_path.cc
   src/editors/overlay_contrast.cc
+  src/editors/select_box.cc
   src/editors/viewport.cc
   src/gpu/brush_stroke.cc
   src/gpu/gl.cc
@@ -571,6 +572,8 @@ add_test(NAME frame_last_noop
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_frame_last_noop.py)
 add_test(NAME layer_symmetrize_keys
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_layer_symmetrize_keys.py)
+add_test(NAME select_box_kind
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_select_box_kind.py)
 add_test(NAME controller_step_end
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_step_end.py)
 add_test(NAME key_together_path_pick

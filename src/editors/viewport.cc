@@ -56,6 +56,7 @@
 #include "editors/brush_editor.hh"
 #include "media/media.hh"
 #include "editors/editors.hh"
+#include "editors/select_box.hh"
 #include "editors/ui.hh"
 #include "editors/text_tool.hh"
 #include "text/text_outline.hh"
@@ -799,8 +800,7 @@ static void motion_path_dot_box_update(Context &C, const ViewMapping &view, ImDr
   }
   b.box |= ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f);
   if (b.box) {
-    dl->AddRectFilled(b.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 20));
-    dl->AddRect(b.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 160));
+    select_box_draw(dl, b.start, io.MousePos, select_box_kind_now());
   }
   if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
     return;
@@ -9722,8 +9722,7 @@ static void weight_select_input(Context &C, Area &area, const ViewMapping &view,
   const ImVec2 d = io.MousePos - g_weight_select.start;
   const bool dragged = d.x * d.x + d.y * d.y > 9.0f;
   if (dragged) {
-    dl->AddRectFilled(g_weight_select.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 20));
-    dl->AddRect(g_weight_select.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 160));
+    select_box_draw(dl, g_weight_select.start, io.MousePos, select_box_kind_now());
   }
   if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
     if (dragged) {
@@ -12973,11 +12972,12 @@ static void transform_bones_input(Context &C, Area &area, Layer &armature, const
     switch (g.mode) {
       case GizmoMode::Select: {
         if (dragged) {
-          dl->AddRectFilled(g.start_screen, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 20));
-          dl->AddRect(g.start_screen, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 160));
+          /* Alt took bones out here before Ctrl did (Ctrl is the handles' distort and shear, never a box's). */
+          select_box_draw(dl, g.start_screen, io.MousePos, select_box_kind_now(true));
         }
         if (released) {
           if (dragged) {
+            const SelectBoxKind kind = select_box_kind_now(true);
             const ImVec2 a = g.start_screen, b = io.MousePos;
             const ImVec2 lo_s(std::min(a.x, b.x), std::min(a.y, b.y)), hi_s(std::max(a.x, b.x), std::max(a.y, b.y));
             const auto box = [&](Layer &l) {
@@ -12988,9 +12988,9 @@ static void transform_bones_input(Context &C, Area &area, Layer &armature, const
                     const ImVec2 s = view.to_screen(l_to_document.apply(p));
                     return s.x >= lo_s.x && s.x <= hi_s.x && s.y >= lo_s.y && s.y <= hi_s.y;
                   },
-                  io.KeyShift, io.KeyAlt);
+                  kind == SelectBoxKind::Add, kind == SelectBoxKind::Remove);
             };
-            box_select_family(doc, armature, io.KeyShift || io.KeyAlt, box);
+            box_select_family(doc, armature, kind != SelectBoxKind::Set, box);
           }
           else if (io.KeyAlt) {
             /* Alt-drag takes bones out of the selection; an Alt-click picks the layer. */
@@ -14961,8 +14961,7 @@ static void transform_points_input(Context &C, Area &area, const ViewMapping &vi
     switch (g.mode) {
       case GizmoMode::Select: {
         if (dragged) {
-          dl->AddRectFilled(g.start_screen, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 20));
-          dl->AddRect(g.start_screen, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 160));
+          select_box_draw(dl, g.start_screen, io.MousePos, select_box_kind_now());
         }
         if (released) {
           if (dragged) {
@@ -15353,8 +15352,7 @@ static void motion_path_vector_update(Context &C, Area &area, const ViewMapping 
   else {
     g.box |= ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f);
     if (g.box) {
-      dl->AddRectFilled(g.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 20));
-      dl->AddRect(g.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 160));
+      select_box_draw(dl, g.start, io.MousePos, select_box_kind_now());
     }
   }
   if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
@@ -15538,8 +15536,7 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
     const ImVec2 d = io.MousePos - g_bone_box.start;
     const bool dragged = d.x * d.x + d.y * d.y > 9.0f;
     if (dragged) {
-      dl->AddRectFilled(g_bone_box.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 20));
-      dl->AddRect(g_bone_box.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 160));
+      select_box_draw(dl, g_bone_box.start, io.MousePos, select_box_kind_now());
     }
     if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
       /* Drawings in shown bone collections: their points are picked along with the bones. */
@@ -17963,8 +17960,7 @@ static void viewport_draw_contents(Area &area, Context &C)
         }
         g_drag.box |= dragging;
         if (g_drag.box) {
-          dl->AddRectFilled(g_drag.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 20));
-          dl->AddRect(g_drag.start, io.MousePos, IM_COL32(0xff, 0xff, 0xff, 160));
+          select_box_draw(dl, g_drag.start, io.MousePos, select_box_kind_now());
         }
         break;
       case Tool::Draw:

@@ -86,6 +86,10 @@ PENDING = [
     ('src/ops/rig_ops.cc', '                 return made > 0 && changed ? OpStatus::Finished : OpStatus::Cancelled;',
      '                 return made > 0 ? OpStatus::Finished : OpStatus::Cancelled;',
      'Bone Symmetrize with nothing to do is cancelled', 'tests/test_action_mirror.py'),
+    ('src/editors/select_box.cc', '  if (ctrl || (alt && alt_removes)) {', '  if ((alt && alt_removes)) {',
+     'Ctrl drag takes out of a select box', 'tests/test_select_box_kind.py'),
+    ('src/editors/select_box.cc', '  if (ctrl || (alt && alt_removes)) {', '  if (ctrl) {',
+     'Alt still takes out in the Transform tool box over bones', 'tests/test_select_box_kind.py'),
 ]
 
 def build(root):

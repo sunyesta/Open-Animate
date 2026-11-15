@@ -66,6 +66,7 @@
 #include "wm/remote.hh"
 #include "editors/brush_editor.hh"
 #include "editors/overlay_contrast.hh"
+#include "editors/select_box.hh"
 #include "editors/editors.hh"
 #include "editors/statistics.hh"
 #include "editors/timeline_path.hh"
@@ -1523,6 +1524,10 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
     }
     return out;
+  });
+  m.def("select_box_kind", [](bool shift, bool ctrl, bool alt, bool alt_removes) {
+    const SelectBoxKind k = select_box_kind(shift, ctrl, alt, alt_removes);
+    return std::string(k == SelectBoxKind::Remove ? "REMOVE" : k == SelectBoxKind::Add ? "ADD" : "SET");
   });
   m.def("overlay_colors", [](uint64_t id, py::tuple left, py::tuple right, float split, float pixel, bool handles) {
     Context &C = current_context();
