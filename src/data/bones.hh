@@ -274,7 +274,8 @@ bool bone_collection_shown(const Layer &armature, const BoneCollection &collecti
 /* Whether All shows. */
 bool bone_collection_all_shown(const Layer &armature);
 /* Whether a bone (or an editable drawing, by its collections) shows: as in Blender, while any
- * collection holding it shows. All holds everything, so while it shows, everything does. */
+ * collection holding it shows, and always when none on this panel holds it (in no collection). All holds
+ * everything, so while it shows, everything does. */
 bool bone_collections_show(const Layer &armature, const std::vector<uint64_t> &collections);
 bool bone_shown(const Layer &armature, const Bone &bone);
 /* The collections panels a bone of `armature` shows through: while a bone layer around it is worked in (active) and it

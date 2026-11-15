@@ -3,7 +3,7 @@ works with, holding its bones and the drawings inside it marked Editable in Bone
 collections, tags any bone or layer can carry: tests/test_collections.py). A bone or drawing can be in
 several. Every bone layer has All first: every bone and editable drawing, nothing assigned to it or
 removed from it, and it can't be removed. As in Blender, a bone (or drawing) shows while any
-collection holding it shows (the eye, or, while any is soloed, the star), so while All shows,
+collection holding it shows (the eye, or, while any is soloed, the star), one in no collection always shows, so while All shows,
 everything does; hiding hides bones and drawings' points and wires (their artwork still renders). M
 and Shift M move or assign the selection.
 
@@ -111,13 +111,13 @@ assert all(b["selected"] for b in rig.bones), "All shows: every bone shows"
 assert lips.edited_with_bones, "and every editable drawing"
 # With All hidden, the others' eyes decide.
 assert ops.collection_set(collection="All", visible="0") == {'FINISHED'}
-assert not bone("lip_R")["selected"], "hiding deselects bones that no longer show (lip_R is only in All)"
+assert bone("lip_R")["selected"], "lip_R is in no collection: it shows with All hidden, as in Blender"
 assert bone("lip_L")["selected"] and bone("jaw")["selected"], "lip_L shows through Main, jaw through Collection"
 assert not lips.edited_with_bones, "lips is only in Mouth, hidden"
 assert ops.collection_set(collection="Main", visible="0") == {'FINISHED'}
 assert not bone("lip_L")["selected"], "Main and Mouth both hidden now"
 ops.select_all()
-assert not bone("lip_L")["selected"] and not bone("lip_R")["selected"] and bone("jaw")["selected"]
+assert not bone("lip_L")["selected"] and bone("lip_R")["selected"] and bone("jaw")["selected"]
 assert ops.collection_set(collection="Mouth", visible="1") == {'FINISHED'}
 ops.select_all()
 assert bone("lip_L")["selected"] and lips.edited_with_bones, "Mouth shows again"
@@ -128,7 +128,7 @@ assert ops.collection_set(collection="Mouth", solo="1") == {'FINISHED'}
 assert colls()["Mouth"]["shown"] and not colls()["Main"]["shown"] and not colls()["All"]["shown"]
 assert lips.edited_with_bones
 ops.select_all()
-assert not bone("jaw")["selected"] and bone("lip_L")["selected"] and not bone("lip_R")["selected"]
+assert not bone("jaw")["selected"] and bone("lip_L")["selected"] and bone("lip_R")["selected"], "lip_R: no collection"
 assert ops.collection_set(collection="All", solo="1") == {'FINISHED'}
 ops.select_all()
 assert all(b["selected"] for b in rig.bones), "All soloed: everything shows"

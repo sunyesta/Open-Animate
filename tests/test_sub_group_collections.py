@@ -142,4 +142,35 @@ layers.active = fresh(outer)
 assert ops.armature.collection_set(collection="Secondary", visible="1") == {'FINISHED'}
 assert select_all() == ["head", "jaw", "tongue_b"], select_all()
 
+
+# --- In no collection: always shown, with All hidden on every panel (as Blender shows bones in no collection) ---------
+layers.active = fresh(inner)
+assert ops.armature.bone_add(name="teeth_b", head_x="4", head_y="0", tail_x="4", tail_y="1", parent="") == {'FINISHED'}
+assert ops.armature.bone_add(name="lips_b", head_x="5", head_y="0", tail_x="5", tail_y="1", parent="") == {'FINISHED'}
+assert ops.armature.bone_collection_link(armature=str(inner.id), bone="lips_b", collection="Lips", on="1") == {'FINISHED'}
+assert ops.armature.collection_set(collection="All", visible="0") == {'FINISHED'}
+layers.active = fresh(outer)
+assert ops.armature.collection_set(collection="Secondary", visible="0") == {'FINISHED'}
+layers.active = fresh(outer)
+assert ops.layer.new() == {'FINISHED'}
+loose = layers.active
+loose.name = "Loose"
+loose.add_curve([(0.0, 5.0), (1.0, 5.0)])
+assert ops.layer.move_to_group(group=str(inner.id)) == {'FINISHED'}
+fresh(loose).edit_with_bones = True
+# teeth_b is in no collection; lips_b is in Lips, a collection Character's panel doesn't have, so only the mouth's
+# panel (Lips shown there) decides for it.
+assert select_all() == ["head", "jaw", "lips_b", "teeth_b"], select_all()
+for l in (tongue, lip, brow, loose):  # A above picked the points it reached then; clear them all
+    fresh(l).select_points(range(len(fresh(l).points)), False)
+layers.active = fresh(outer)
+ops.mesh.select_all(action="SELECT")
+assert any(p[2] for p in fresh(loose).points), "a drawing in no collection is edited with All hidden"
+assert not any(p[2] for p in fresh(tongue).points), "the Tongue, in Secondary, still hides"
+ops.mesh.select_none()
+# Lips hidden on the mouth's panel hides lips_b; teeth_b still shows.
+layers.active = fresh(inner)
+assert ops.armature.collection_set(collection="Lips", visible="0") == {'FINISHED'}
+assert select_all() == ["head", "jaw", "teeth_b"], select_all()
+
 print("sub group collections OK")

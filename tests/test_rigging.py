@@ -225,9 +225,11 @@ assert not any(p[2] for p in art.points), "Alt A deselects them with the bones"
 assert oanim.ops.mesh.select_all() == {'FINISHED'}
 assert oanim.wm.event_simulate("G", area="Viewport"), "G moves them, with no bone picked"
 oanim.ops.mesh.select_none()
-# Hiding the All collection hides them too: no longer edited with the bones.
+# Hiding the All collection leaves a drawing in no collection edited with the bones (as Blender shows bones in no
+# collection).
 assert oanim.ops.armature.collection_set(collection="All", visible="0") == {'FINISHED'}
-assert not art.edited_with_bones and oanim.ops.mesh.select_all() == {'CANCELLED'}
+assert art.edited_with_bones and oanim.ops.mesh.select_all() == {'FINISHED'}
+oanim.ops.mesh.select_none()
 assert oanim.ops.armature.collection_set(collection="All", visible="1") == {'FINISHED'}
 art.edit_with_bones = False
 

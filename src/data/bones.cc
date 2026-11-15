@@ -2271,16 +2271,22 @@ bool bone_collection_shown(const Layer &armature, const BoneCollection &collecti
 
 bool bone_collections_show(const Layer &armature, const std::vector<uint64_t> &collections)
 {
-  /* As in Blender: shown while any collection holding it shows; All holds everything. */
+  /* As in Blender: shown while any collection holding it shows; All holds everything. One in none of the panel's
+   * collections (in no collection at all, or, seen from a bone layer around its own, in none on this panel) has
+   * nothing here to hide it, so it shows even with All hidden, as Blender shows bones in no collection. */
   if (bone_collection_all_shown(armature)) {
     return true;
   }
+  bool held = false;
   for (const uint64_t id : collections) {
-    if (const BoneCollection *c = bone_collection_find(armature, id); c && bone_collection_shown(armature, *c)) {
-      return true;
+    if (const BoneCollection *c = bone_collection_find(armature, id)) {
+      if (bone_collection_shown(armature, *c)) {
+        return true;
+      }
+      held = true;
     }
   }
-  return false;
+  return !held;
 }
 
 bool bone_shown(const Layer &armature, const Bone &bone)

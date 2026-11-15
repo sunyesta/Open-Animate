@@ -50,6 +50,8 @@ PENDING = [
     ('src/data/bones.cc', '  return std::all_of(panels.begin(), panels.end(),',
      '  return std::all_of(panels.end() - 1, panels.end(),',
      'A collection hidden on the bone layer worked in hides a sub bone group\'s bones in it', 'tests/test_sub_group_collections.py'),
+    ('src/data/bones.cc', '  return !held;', '  return false;',
+     'A bone or drawing in no collection shows with All hidden', 'tests/test_sub_group_collections.py'),
 ]
 
 def build(root):

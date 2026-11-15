@@ -279,8 +279,8 @@ static void bone_collections_panel(Context &C, Layer &armature)
         }
       }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-        ImGui::SetTooltip(is_all ? "All: every bone, and every drawing Editable in Bone Group. Its eye shows or hides "
-                                   "them all; nothing is assigned to it"
+        ImGui::SetTooltip(is_all ? "All: every bone, and every drawing Editable in Bone Group. Its eye shows them all; "
+                                   "hidden, those in no collection still show. Nothing is assigned to it"
                                  : "Click to make it active; double-click to rename; right-click for more");
       }
       /* Right-click: rename it (everywhere), select or deselect its bones, or delete it (from everything). */
