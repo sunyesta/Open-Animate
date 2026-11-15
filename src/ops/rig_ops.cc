@@ -1601,7 +1601,7 @@ void rig_operators_register()
 
   rig_operator("armature.copy_bone_color_to_selected", "Copy Bone Color to Selected",
                "Give the other selected bones the active bone's colour set (and its custom colours), as "
-               "Blender's",
+               "Blender's, and the drawings edited with the bones that have points picked",
                [](Context &C) {
                  const Layer *l = C.document ? document_active_layer(*C.document) : nullptr;
                  return l && l->is_bone_layer() && bone_find(*l, l->active_bone);
@@ -1619,8 +1619,54 @@ void rig_operators_register()
                    b.custom_colors = from.custom_colors;
                    changed++;
                  }
+                 for (Layer *l : drawings_points_picked(*C.document)) {
+                   l->color_set = from.color_set;
+                   l->custom_colors = from.custom_colors;
+                   changed++;
+                 }
                  if (changed == 0) {
-                   report(ReportType::Warning, "Select other bones to copy this bone's colour to");
+                   report(ReportType::Warning, "Select other bones, or points of drawings, to copy this bone's colour to");
+                   return OpStatus::Cancelled;
+                 }
+                 return OpStatus::Finished;
+               });
+  rig_operator("layer.copy_color_to_selected", "Copy Color to Selected",
+               "Give the selected bones and the other drawings with points picked the colour set (and custom "
+               "colours) of drawing `layer` (by default the one the Bone tab shows as Drawing)",
+               [](Context &C) {
+                 const Layer *l = C.document ? document_active_layer(*C.document) : nullptr;
+                 return l && l->is_bone_layer();
+               },
+               [](Context &C) {
+                 Document &doc = *C.document;
+                 const std::string id = op_arg(C, "layer");
+                 const std::vector<Layer *> shown = bone_tab_drawings(doc);
+                 const Layer *source = !id.empty() ? layer_find(doc, std::strtoull(id.c_str(), nullptr, 10))
+                                       : shown.empty() ? nullptr
+                                                       : shown.front();
+                 if (!source || source->type != LayerType::Vector) {
+                   report(ReportType::Warning, "Pick a point of a drawing to copy its colour from");
+                   return OpStatus::Cancelled;
+                 }
+                 const int set = source->color_set;
+                 const std::array<Color, 3> shades = source->custom_colors;
+                 int changed = 0;
+                 for (Bone &b : active_armature(C)->bones) {
+                   if (b.selected || b.select_head || b.select_tail) {
+                     b.color_set = set;
+                     b.custom_colors = shades;
+                     changed++;
+                   }
+                 }
+                 for (Layer *l : drawings_points_picked(doc)) {
+                   if (l->id != source->id) {
+                     l->color_set = set;
+                     l->custom_colors = shades;
+                     changed++;
+                   }
+                 }
+                 if (changed == 0) {
+                   report(ReportType::Warning, "Select bones, or points of other drawings, to copy this colour to");
                    return OpStatus::Cancelled;
                  }
                  return OpStatus::Finished;

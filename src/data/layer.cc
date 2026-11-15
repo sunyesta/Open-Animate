@@ -1,6 +1,9 @@
 #include "data/layer.hh"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "data/bones.hh"
 
@@ -577,6 +580,37 @@ const rna::StructRNA &Layer::rna()
               return items;
             }(),
             [](const Layer &l) { return l.color_set; }, [](Layer &l, int v) { layer_set_color_set(l, v); }),
+        def_string_fn<Layer>(
+            "custom_colors", "Custom Colors",
+            "Its Custom colour set's regular, selected and active shades, \"#rrggbb #rrggbb #rrggbb\"; set, the colour "
+            "set becomes Custom",
+            [](const Layer &l) {
+              std::string out;
+              for (const Color &c : l.custom_colors) {
+                char hex[8];
+                std::snprintf(hex, sizeof(hex), "#%02x%02x%02x", int(std::lround(std::clamp(c.r, 0.0f, 1.0f) * 255.0f)),
+                              int(std::lround(std::clamp(c.g, 0.0f, 1.0f) * 255.0f)),
+                              int(std::lround(std::clamp(c.b, 0.0f, 1.0f) * 255.0f)));
+                out += (out.empty() ? "" : " ") + std::string(hex);
+              }
+              return out;
+            },
+            [](Layer &l, const std::string &v) {
+              std::array<Color, 3> shades = l.custom_colors;
+              size_t at = 0;
+              for (Color &c : shades) {
+                at = v.find('#', at);
+                if (at == std::string::npos || at + 7 > v.size()) {
+                  return;
+                }
+                const unsigned rgb = unsigned(std::strtoul(v.substr(at + 1, 6).c_str(), nullptr, 16));
+                c = {float((rgb >> 16) & 0xff) / 255.0f, float((rgb >> 8) & 0xff) / 255.0f, float(rgb & 0xff) / 255.0f,
+                     1.0f};
+                at += 7;
+              }
+              layer_set_color_set(l, BONE_COLOR_CUSTOM);
+              l.custom_colors = shades;
+            }),
         def_bool<Layer>("ignore_group_deforms", "Ignore Group Deforms",
                         "The deform modifiers of the groups around this drawing leave it alone",
                         &Layer::ignore_group_deforms),

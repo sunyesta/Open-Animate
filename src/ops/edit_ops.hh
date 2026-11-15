@@ -113,8 +113,11 @@ VectorDrawing *editable_drawing(Context &C, Layer **r_layer = nullptr);
  * delete and the other point operators act on all of them at once; drawing tools still draw on
  * the active layer. */
 std::vector<Layer *> editable_layers(Context &C);
-/* With a bone layer worked in and none of its family's bones picked, the drawings edited with its bones that have
- * points or handles picked (Layers editor order): what its Bone tab shows, as Drawing. */
+/* With a bone layer worked in, the drawings edited with its bones that have points or handles picked (Layers editor
+ * order). */
+std::vector<Layer *> drawings_points_picked(Document &doc);
+/* What a bone layer's Bone tab shows as Drawing: those drawings, the one clicked last first (Document::picked_drawing)
+ * while it has points picked, bones picked beside them or not; else only while none of its family's bones are picked. */
 std::vector<Layer *> bone_tab_drawings(Document &doc);
 /* The motion paths shown now (anim/motion_path.hh), with the Motion Path tool's Edit Layer: what the tool, its
  * operators and the timeline work on. One, the active path (motion_path_active), unless Show All Paths is on. */

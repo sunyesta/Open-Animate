@@ -98,3 +98,45 @@ nose = next(l for l in layers.all() if l.name == "Nose")
 assert (mouth.color_set, nose.color_set) == ("CUSTOM", "THEME01"), (mouth.color_set, nose.color_set)
 
 print("bone tab drawing: ok")
+
+# --- The last click decides: a point clicked makes it Drawing beside picked bones, a bone clicked makes it Bone ---------
+rig = next(l for l in layers.all() if l.type == "BONE")
+layers.active = rig
+picked(bone=True)
+assert "Bone" in wm.properties_tabs()
+wm.select_click(1.0, -2.0, 100.0)
+assert [p[2] for p in mouth.points] == [False, True, False], "the click picks the point"
+assert any(b["selected"] for b in rig.bones), "the bone stays picked beside it"
+tabs = wm.properties_tabs()
+assert "Drawing" in tabs and "Bone Constraints" not in tabs, ("the point clicked last", tabs)
+wm.bone_press(-2.0, 0.0, 100.0, transform_tool=True, shift=True)
+tabs = wm.properties_tabs()
+assert "Bone" in tabs and "Bone Constraints" in tabs, ("the bone clicked last", tabs)
+wm.select_click(1.0, -2.0, 100.0)
+assert "Drawing" in wm.properties_tabs()
+
+# --- Copy Color to Selected from the Drawing tab: to the picked bones and the other drawings, all three shades ----------
+mouth.color_set = "THEME04"
+mouth.color_set = "CUSTOM"
+assert mouth.custom_colors == "#0a3694 #3667df #5ec1ef", ("Custom starts from the set's three shades", mouth.custom_colors)
+nose.select_points([0])
+assert ops.layer.copy_color_to_selected() == {'FINISHED'}
+jaw = next(b for b in rig.bones if b["name"] == "jaw")
+assert jaw["color_set"] == "CUSTOM", jaw["color_set"]
+hexes = ["#%02x%02x%02x" % tuple(round(v * 255) for v in c) for c in jaw["colors"]]
+assert hexes == ["#0a3694", "#3667df", "#5ec1ef"], ("the bone takes all three shades", hexes)
+assert (nose.color_set, nose.custom_colors) == ("CUSTOM", "#0a3694 #3667df #5ec1ef"), (nose.color_set, nose.custom_colors)
+assert oanim.ops.ed.undo() == {'FINISHED'}
+jaw = next(b for b in rig.bones if b["name"] == "jaw")
+assert jaw["color_set"] == "DEFAULT" and nose.color_set == "THEME01", "one undo step"
+
+# --- Copy Bone Color to Selected: to the drawings with points picked too ------------------------------------------------
+wm.bone_press(-2.0, 0.0, 100.0, transform_tool=True)
+assert "Bone" in wm.properties_tabs()
+rig.bone_set("jaw", color_set="THEME09")
+assert ops.armature.copy_bone_color_to_selected() == {'CANCELLED'}, "nothing else picked"
+mouth.select_points([0])
+assert ops.armature.copy_bone_color_to_selected() == {'FINISHED'}
+assert mouth.color_set == "THEME09" and nose.color_set == "THEME01", (mouth.color_set, nose.color_set)
+
+print("bone tab drawing, copying: ok")

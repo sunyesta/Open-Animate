@@ -45,19 +45,12 @@ std::vector<Layer *> editable_layers(Context &C)
   return weights ? document_weight_layers(*C.document) : document_editable_layers(*C.document);
 }
 
-std::vector<Layer *> bone_tab_drawings(Document &doc)
+std::vector<Layer *> drawings_points_picked(Document &doc)
 {
   std::vector<Layer *> out;
   const Layer *armature = document_active_layer(doc);
   if (!armature || !armature->is_bone_layer()) {
     return out;
-  }
-  for (const Layer *l : armature_family(doc, armature->id)) {
-    for (const Bone &b : l->bones) {
-      if (b.selected || b.select_head || b.select_tail) {
-        return out;
-      }
-    }
   }
   for (Layer *l : document_editable_layers(doc)) {
     if (l == armature || l->type != LayerType::Vector) {
@@ -72,6 +65,25 @@ std::vector<Layer *> bone_tab_drawings(Document &doc)
     }
     if (picked) {
       out.push_back(l);
+    }
+  }
+  return out;
+}
+
+std::vector<Layer *> bone_tab_drawings(Document &doc)
+{
+  std::vector<Layer *> out = drawings_points_picked(doc);
+  /* The drawing clicked last, first: the tab is its, bones picked beside it or not. */
+  const auto clicked = std::find_if(out.begin(), out.end(), [&](const Layer *l) { return l->id == doc.picked_drawing; });
+  if (doc.picked_drawing != 0 && clicked != out.end()) {
+    std::rotate(out.begin(), clicked, clicked + 1);
+    return out;
+  }
+  for (const Layer *l : armature_family(doc, doc.active_layer)) {
+    for (const Bone &b : l->bones) {
+      if (b.selected || b.select_head || b.select_tail) {
+        return {};
+      }
     }
   }
   return out;

@@ -2227,6 +2227,24 @@ static void color_set_swatches(ImDrawList *dl, ImVec2 at, float w, float h, cons
 
 /* Bone Color (Blender's sets, each with its regular, selected and active shades) and, for a custom set, its three
  * colours: rows of Viewport Display. */
+/* A frame-high button drawn as two overlapping squares: copy. */
+static bool copy_icon_button(const char *id, const char *tooltip)
+{
+  const float h = ImGui::GetFrameHeight();
+  const ImVec2 at = ImGui::GetCursorScreenPos();
+  const bool pressed = ImGui::Button(id, ImVec2(h, h));
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImU32 icon = IM_COL32(0xe6, 0xe6, 0xe6, 255);
+  const float s = h * 0.24f;
+  const ImVec2 c(at.x + h * 0.5f, at.y + h * 0.5f);
+  dl->AddRect(ImVec2(c.x - s, c.y - s * 0.4f), ImVec2(c.x + s * 0.6f, c.y + s * 1.2f), icon, 1.0f, 0, 1.2f);
+  dl->AddRect(ImVec2(c.x - s * 0.4f, c.y - s * 1.2f), ImVec2(c.x + s * 1.2f, c.y + s * 0.4f), icon, 1.0f, 0, 1.2f);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("%s", tooltip);
+  }
+  return pressed;
+}
+
 static void bone_color_rows(Context &C, Bone &bone)
 {
   Document &doc = *C.document;
@@ -2274,19 +2292,11 @@ static void bone_color_rows(Context &C, Bone &bone)
                         "selected and active shades when picked. Default Colors: grey, orange when selected");
     }
     ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    if (ImGui::Button("##copy_bone_color", ImVec2(h, h))) {
+    if (copy_icon_button("##copy_bone_color",
+                         "Copy Bone Color to Selected: give the other selected bones, and the drawings with points\n"
+                         "picked, this bone's colours"))
+    {
       operator_call(C, "armature.copy_bone_color_to_selected");
-    }
-    /* Two overlapping squares: copy. */
-    ImDrawList *dl = ImGui::GetWindowDrawList();
-    const ImU32 icon = IM_COL32(0xe6, 0xe6, 0xe6, 255);
-    const float s = h * 0.24f;
-    const ImVec2 c(at.x + h * 0.5f, at.y + h * 0.5f);
-    dl->AddRect(ImVec2(c.x - s, c.y - s * 0.4f), ImVec2(c.x + s * 0.6f, c.y + s * 1.2f), icon, 1.0f, 0, 1.2f);
-    dl->AddRect(ImVec2(c.x - s * 0.4f, c.y - s * 1.2f), ImVec2(c.x + s * 1.2f, c.y + s * 0.4f), icon, 1.0f, 0, 1.2f);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Copy Bone Color to Selected: give the other selected bones this bone's colours");
     }
   }
   if (active->color_set == BONE_COLOR_CUSTOM) {
@@ -2333,7 +2343,7 @@ static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &draw
     const ImGuiStyle &style = ImGui::GetStyle();
     const float sw = ImGui::GetFrameHeight() * 0.42f;
     props_label("Color");
-    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::SetNextItemWidth(-(ImGui::GetFrameHeight() + style.ItemInnerSpacing.x));
     if (ImGui::BeginCombo("##drawing_color", "", ImGuiComboFlags_CustomPreview)) {
       for (int set = 0; set <= BONE_COLOR_CUSTOM; set++) {
         ImGui::PushID(set);
@@ -2368,12 +2378,19 @@ static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &draw
                         "regular shade, and its selected shade where picked. Default Colors: the overlays' own.\n"
                         "Set on every drawing with points picked");
     }
+    ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+    if (copy_icon_button("##copy_drawing_color",
+                         "Copy Color to Selected: give the selected bones, and the other drawings with points picked,\n"
+                         "this drawing's colours"))
+    {
+      operator_call(C, "layer.copy_color_to_selected", {{"layer", std::to_string(first.id)}});
+    }
     if (first.color_set == BONE_COLOR_CUSTOM) {
       props_label("Custom Colors");
-      static const char *const shade_names[] = {"Regular", "Select"};
+      static const char *const shade_names[] = {"Regular", "Select", "Active"};
       const float gap = 1.0f;
-      const float w = (ImGui::GetContentRegionAvail().x - gap) / 2.0f;
-      for (int k = 0; k < 2; k++) {
+      const float w = (ImGui::GetContentRegionAvail().x - 2.0f * gap) / 3.0f;
+      for (int k = 0; k < 3; k++) {
         if (k > 0) {
           ImGui::SameLine(0.0f, gap);
         }
@@ -2388,7 +2405,10 @@ static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &draw
           }
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-          ImGui::SetTooltip("%s", k == 0 ? "Regular: its wires and points as they are drawn" : "Select: where picked");
+          ImGui::SetTooltip("%s", k == 0   ? "Regular: its wires and points as they are drawn"
+                                  : k == 1 ? "Select: where picked"
+                                           : "Active: kept with the set, for a bone it is copied to (a drawing has no "
+                                             "active point)");
         }
         if (finished) {
           C.undo->push("Drawing Custom Color", doc);

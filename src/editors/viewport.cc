@@ -7849,6 +7849,7 @@ static void select_click(Context &C, const ViewMapping &view, float2 mouse_docum
     camera.selected &= shift || ctrl;
     if (flag) {
       document_set_active_shape(*C.document, *handle.layer, cp.point);
+      C.document->picked_drawing = handle.layer->id;
     }
     return;
   }
@@ -7897,6 +7898,7 @@ static void select_click(Context &C, const ViewMapping &view, float2 mouse_docum
     /* The shape clicked becomes the active one (its panels show it), unless the click took it out. */
     if (!picked.empty() && hit_layer->drawing.points[size_t(picked.front())].selected) {
       document_set_active_shape(*C.document, *hit_layer, picked.front(), hit_edge);
+      C.document->picked_drawing = hit_layer->id;
     }
   }
   /* The camera is picked by its frame's border where nothing else is, as Blender picks a camera by its
@@ -8000,6 +8002,7 @@ static Layer *select_press_grab_pick(Context &C, const PressGrab &grab)
     }
     drawing_expand_selection_by_mode(C, drawing);
     document_set_active_shape(*C.document, *layer, grab.points.front(), grab.edge);
+    C.document->picked_drawing = layer->id;
     document_camera(*C.document).selected = false;
   }
   return layer;
@@ -10789,6 +10792,9 @@ static void transform_bone_click_pick(Context &C, Layer &armature, const ViewMap
   if (!shift) {
     family_and_points_deselect(C, doc, armature);
   }
+  if (best.hit.bone) {
+    doc.picked_drawing = 0;
+  }
   if (other) {
     if (Bone *b = bone_find(*other, other_bone)) {
       bone_select(*b, true);
@@ -11816,6 +11822,7 @@ static const Bone *knob_press_pick(Context &C, Layer &armature, const ViewMappin
     family_and_points_deselect(C, doc, armature);
     bone_click_select(armature, under.front().hit, false);
   }
+  doc.picked_drawing = 0;
   return knob;
 }
 
@@ -15649,6 +15656,9 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
           }
           else {
             bone_click_select(armature, hit, io.KeyShift);
+          }
+          if (hit.bone) {
+            doc.picked_drawing = 0;
           }
           if (!io.KeyShift) {
             for (Layer *l : point_layers) {

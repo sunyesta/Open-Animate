@@ -275,6 +275,10 @@ struct Document {
    * selected (otherwise the topmost selected shape). */
   uint64_t active_shape_layer = 0;
   uint64_t active_shape = 0;
+  /* Not saved: the drawing whose point or handle was clicked last, since a bone was (a bone's click clears it): with a
+   * bone layer worked in, its Bone tab is Drawing, that drawing's, while it has points picked, bones picked beside them
+   * or not (bone_tab_drawings). */
+  uint64_t picked_drawing = 0;
   /* Top-level layers, top of the stack first. */
   std::vector<Layer> layers;
   uint64_t active_layer = 0;
