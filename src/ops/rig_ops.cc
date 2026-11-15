@@ -4400,7 +4400,16 @@ void rig_operators_register()
                  }
                  const std::vector<uint64_t> picked = sources;
                  const auto reflect = [](float2 p) { return float2(-p.x, p.y); };
+                 /* Both on unless turned off: Mirror Positions off leaves the other side's bones where they are (to
+                  * mirror only actions); a bone not there yet is still made, mirrored, its actions needing it. */
+                 const auto on = [&](const char *name) {
+                   const std::string v = op_arg(C, name, "1");
+                   return v == "1" || v == "True" || v == "true";
+                 };
+                 const bool positions = on("positions");
+                 const bool mirror_all = on("action_bone_actions");
                  int made = 0;
+                 bool changed = false;
                  /* Controller sides whose other side's action Mirror Action Bone Actions makes (or makes anew, which
                   * takes it off the side): set once it is there. */
                  std::vector<std::tuple<std::string, int, std::string>> sides_later;
@@ -4455,8 +4464,18 @@ void rig_operators_register()
                      bone_place(copy, parent_setup, reflect(sp->setup_head), reflect(sp->setup_tail));
                      copy.length = length;
                      copy.scale = src->scale;
-                     if (Bone *existing = const_cast<Bone *>(bone_find_by_name(armature, other))) {
+                     if (Bone *existing = const_cast<Bone *>(bone_find_by_name(armature, other)); existing && !positions) {
+                       /* Left where it is: only its empty sides take the mirrored ones. */
+                       for (int side = 0; bone_is_controller(*existing) && side < CONTROLLER_SIDES; side++) {
+                         if (existing->controller_actions[side].empty() && !copy.controller_actions[side].empty()) {
+                           existing->controller_actions[side] = copy.controller_actions[side];
+                           changed = true;
+                         }
+                       }
+                     }
+                     else if (existing) {
                        /* The other side exists: move it to match, keeping its id and bindings. */
+                       changed = true;
                        existing->parent = copy.parent;
                        existing->position = copy.position;
                        existing->angle = copy.angle;
@@ -4471,6 +4490,7 @@ void rig_operators_register()
                        existing->controller_box_show = copy.controller_box_show;
                      }
                      else {
+                       changed = true;
                        copy.id = armature.next_bone_id++;
                        armature.bones.push_back(copy);
                        for (BoneConstraint &c : armature.bones.back().constraints) {
@@ -4483,21 +4503,26 @@ void rig_operators_register()
                      it = sources.erase(it);
                    }
                  }
-                 const bool mirror_all = op_arg_bool(C, "action_bone_actions");
                  if (made > 0 && (mirror_all || !sides_later.empty())) {
+                   changed = true;
                    const uint64_t armature_id = armature.id;
                    mirror_action_bone_actions(C, armature_id, picked, op_arg(C, "direction", "L_TO_R") != "R_TO_L",
                                               sides_later, !mirror_all);
                  }
-                 return made > 0 ? OpStatus::Finished : OpStatus::Cancelled;
+                 return made > 0 && changed ? OpStatus::Finished : OpStatus::Cancelled;
                },
                [] {
+                 OpProperty positions = op_bool_property(
+                     "positions", "Mirror Positions",
+                     "Move the other side's bones to mirror these (off: only their actions are mirrored; a bone not there "
+                     "yet is still made)",
+                     "1");
                  OpProperty action_bone_actions = op_bool_property(
                      "action_bone_actions", "Mirror Action Bone Actions",
                      "Make each of these bones' action bone actions on the other side too, replacing what is there: _L and _R "
                      "bones and layers swap their keys, reflected, and _X ones swap them inside themselves. A 2 Axis "
                      "Controller's sides with no action on the other side are mirrored either way",
-                     "0");
+                     "1");
                  OpProperty direction;
                  direction.name = "direction";
                  direction.label = "Direction";
@@ -4507,9 +4532,9 @@ void rig_operators_register()
                  direction.fallback = "L_TO_R";
                  direction.visible = [](const OpArgs &args) {
                    const auto it = args.find("action_bone_actions");
-                   return it != args.end() && (it->second == "1" || it->second == "True" || it->second == "true");
+                   return it == args.end() || it->second == "1" || it->second == "True" || it->second == "true";
                  };
-                 return std::vector<OpProperty>{action_bone_actions, direction};
+                 return std::vector<OpProperty>{positions, action_bone_actions, direction};
                }());
 
   /* --- Modifiers ----------------------------------------------------------------------- */

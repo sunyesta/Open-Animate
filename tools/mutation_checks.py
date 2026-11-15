@@ -77,6 +77,15 @@ PENDING = [
      'Bone Symmetrize makes a knob side the other side has no action for, the option off', 'tests/test_controller.py'),
     ('src/ops/rig_ops.cc', '      if (picks(name)) {', '      if (true || picks(name)) {',
      'Symmetrize reports only the picked bones actions', 'tests/test_controller.py'),
+    ('src/ops/rig_ops.cc', 'bone_find_by_name(armature, other)); existing && !positions) {',
+     'bone_find_by_name(armature, other)); existing && false) {',
+     'Mirror Positions off leaves the other side bone where it is', 'tests/test_action_mirror.py'),
+    ('src/ops/rig_ops.cc', '                   const std::string v = op_arg(C, name, "1");',
+     '                   const std::string v = op_arg(C, name, "0");',
+     'Bone Symmetrize mirrors positions and actions by default', 'tests/test_action_mirror.py'),
+    ('src/ops/rig_ops.cc', '                 return made > 0 && changed ? OpStatus::Finished : OpStatus::Cancelled;',
+     '                 return made > 0 ? OpStatus::Finished : OpStatus::Cancelled;',
+     'Bone Symmetrize with nothing to do is cancelled', 'tests/test_action_mirror.py'),
 ]
 
 def build(root):

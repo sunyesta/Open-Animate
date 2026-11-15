@@ -141,12 +141,18 @@ def posed(rig, left, right):
     return {l.name: bezier(l) for l in layers.all() if l.type == 'VECTOR'}
 
 
-# --- Off, as it comes: bones only ----------------------------------------------------------------------------------
+# --- Both on, as it comes: bones and their actions ------------------------------------------------------------------
 rig = build()
 assert ops.armature.symmetrize() == {'FINISHED'}
-assert "Turn_R" in [b["name"] for b in rig.bones] and actions(rig) == ["Turn_L"]
+assert "Turn_R" in [b["name"] for b in rig.bones] and sorted(actions(rig)) == ["Turn_L", "Turn_R"], actions(rig)
 args = wm.last_operation()[1]
-assert args["action_bone_actions"] == "0", args
+assert args["action_bone_actions"] == "1" and args["positions"] == "1", args
+assert ops.ed.undo() == {'FINISHED'}
+
+# Mirror Action Bone Actions off: bones only.
+assert ops.armature.symmetrize(action_bone_actions="0") == {'FINISHED'}
+assert "Turn_R" in [b["name"] for b in rig.bones] and actions(rig) == ["Turn_L"], actions(rig)
+
 
 # Turned on in the ViewportActionPanel, it runs again in place of the first run.
 assert wm.redo_last(action_bone_actions=True) == "FINISHED"
@@ -299,3 +305,15 @@ layers.active = rig
 rig.select_bone("Arm_L")
 assert ops.armature.symmetrize(action_bone_actions="1") == {'FINISHED'}
 assert "No action bone actions" in wm.banner_report()[3], wm.banner_report()
+
+# --- Mirror Positions off: the other side's bone stays where it was put, its action made all the same ------------
+rig = build()
+assert ops.armature.symmetrize(action_bone_actions="0") == {'FINISHED'}
+turn_r = next(b for b in rig.bones if b["name"] == "Turn_R")
+rig.bone_set("Turn_R", position=(turn_r["position"][0] - 0.3, turn_r["position"][1] + 0.2))
+moved = next(b for b in rig.bones if b["name"] == "Turn_R")["head"]
+rig.select_bone("Turn_L")
+assert ops.armature.symmetrize(positions="0") == {'FINISHED'}
+assert next(b for b in rig.bones if b["name"] == "Turn_R")["head"] == moved, "left where it was"
+assert sorted(actions(rig)) == ["Turn_L", "Turn_R"], actions(rig)
+assert ops.armature.symmetrize(positions="0", action_bone_actions="0") == {'CANCELLED'}, "nothing to do"
