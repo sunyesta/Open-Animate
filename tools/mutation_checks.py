@@ -70,6 +70,11 @@ PENDING = [
      "The graph's Paste Interpolation pastes a span across breakdowns whole", 'tests/test_timing_interpolation_clipboard.py'),
     ('src/anim/motion_path.cc', '      s.interval = b.interval;', '      s.interval = settings.interval;',
      "The graph's Paste Interpolation keeps each key's hold and interval", 'tests/test_timing_interpolation_clipboard.py'),
+    ('src/ops/anim_ops.cc',
+     '    const bool edits = edited->contains(flat->id) || flat->id == doc.active_layer || family.contains(flat->id);',
+     '    const bool edits = edited->contains(flat->id) || flat->id == doc.active_layer;',
+     "Only Selected shows a bone picked in a sub bone group of the bone layer worked in",
+     'tests/test_timeline_sub_group_bones.py'),
 ]
 
 def build(root):

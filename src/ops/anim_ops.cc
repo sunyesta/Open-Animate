@@ -9,6 +9,7 @@
 
 #include "anim/switch.hh"
 #include "anim/animation.hh"
+#include "anim/bone_family.hh"
 #include "anim/controller.hh"
 #include "anim/keep_poses.hh"
 #include "anim/motion_path.hh"
@@ -186,14 +187,21 @@ static std::vector<Layer *> timeline_selected_layers(Context &C)
   Document &doc = *C.document;
   const std::shared_ptr<const std::set<uint64_t>> edited = editable_layer_ids(doc);
   const std::set<uint64_t> on_paths = motion_path_picked_owners(C).layers;
+  /* The bone layers worked in from the active one: its sub bone groups' bones are picked from it too. */
+  std::set<uint64_t> family;
+  if (const Layer *active = layer_find(doc, doc.active_layer); active && active->is_bone_layer()) {
+    for (const Layer *l : armature_family(doc, active->id)) {
+      family.insert(l->id);
+    }
+  }
   for (const Layer *flat : document_layers_flat(doc)) {
     if (flat->locked) {
       continue;
     }
     const bool picked = flat->selected || (flat->id == doc.active_layer && doc.active_unpicked != flat->id);
-    /* Points count in the layers being edited, bones in those and the active bone layer (where they are
-     * picked), as the timeline's red rows count them. */
-    const bool edits = edited->contains(flat->id) || flat->id == doc.active_layer;
+    /* Points count in the layers being edited, bones in those and the active bone layer and its family (where they
+     * are picked), as the timeline's red rows count them. */
+    const bool edits = edited->contains(flat->id) || flat->id == doc.active_layer || family.contains(flat->id);
     const bool holds = (edited->contains(flat->id) &&
                         std::any_of(flat->drawing.points.begin(), flat->drawing.points.end(),
                                     [](const MeshPoint &p) { return p.selected; })) ||
