@@ -72,6 +72,11 @@ PENDING = [
     ('src/anim/animation.cc', '  if (const float whole = std::round(t); std::abs(t - whole) < 1e-3f) {',
      '  if (const float whole = std::round(t); false && std::abs(t - whole) < 1e-3f) {',
      'A knob at its box edge plays the Step keys on its last frame', 'tests/test_controller_step_end.py'),
+    ('src/ops/rig_ops.cc', '                 if (made > 0 && (mirror_all || !sides_later.empty())) {',
+     '                 if (made > 0 && mirror_all) {',
+     'Bone Symmetrize makes a knob side the other side has no action for, the option off', 'tests/test_controller.py'),
+    ('src/ops/rig_ops.cc', '      if (picks(name)) {', '      if (true || picks(name)) {',
+     'Symmetrize reports only the picked bones actions', 'tests/test_controller.py'),
 ]
 
 def build(root):

@@ -76,8 +76,11 @@ static bool on_setup_frame(Context &C)
  * `left_to_right` says which is the source. */
 static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std::vector<uint64_t> &picked,
                                        bool left_to_right,
-                                       const std::vector<std::tuple<std::string, int, std::string>> &sides_later)
+                                       const std::vector<std::tuple<std::string, int, std::string>> &sides_later,
+                                       bool sides_only = false)
 {
+  /* `sides_only`: just the knobs' sides the other side has no action for yet (Symmetrize makes those even with Mirror
+   * Action Bone Actions off, a knob being nothing without them); nothing replaced, no fixes. */
   Document &doc = *C.document;
   const std::string was_action = doc.action;
   const uint64_t was_owner = doc.action_layer;
@@ -110,12 +113,21 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
       if (later != sides_later.end()) {
         other = std::get<2>(*later);
       }
-      else if (other != name && !controller_side_refusal(owner, knob_other, side_other, other).empty()) {
+      else if (sides_only || (other != name && !controller_side_refusal(owner, knob_other, side_other, other).empty())) {
+        continue;
+      }
+      if (sides_only && has(other)) {
         continue;
       }
     }
+    else if (sides_only) {
+      continue;
+    }
     if (other == name) {
-      centred.push_back(name);
+      /* Only the picked bones' (another bone's action is none of this). */
+      if (picks(name)) {
+        centred.push_back(name);
+      }
     }
     else if (action_bone_of(owner, other) == bone) {
       /* Its own bone's other action (a controller's Left for its Right): never mirrored over. */
@@ -130,7 +142,7 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
   const auto is_picked = [&](uint64_t id) { return std::find(picked.begin(), picked.end(), id) != picked.end(); };
   std::vector<std::string> fixes;
   for (const BoneFix &fix : owner.bone_fixes) {
-    if (std::none_of(fix.follows.begin(), fix.follows.end(), is_picked)) {
+    if (sides_only || std::none_of(fix.follows.begin(), fix.follows.end(), is_picked)) {
       continue;
     }
     std::vector<uint64_t> other = fix.follows;
@@ -188,7 +200,9 @@ static void mirror_action_bone_actions(Context &C, uint64_t owner_id, const std:
     document_set_action(doc, was_owner, was_action);
   }
   if (text.empty()) {
-    report(ReportType::Warning, "No action bone actions or fix actions of these bones to mirror");
+    if (!sides_only) {
+      report(ReportType::Warning, "No action bone actions or fix actions of these bones to mirror");
+    }
   }
   else {
     report(ReportType::Info, text);
@@ -4469,10 +4483,11 @@ void rig_operators_register()
                      it = sources.erase(it);
                    }
                  }
-                 if (made > 0 && op_arg_bool(C, "action_bone_actions")) {
+                 const bool mirror_all = op_arg_bool(C, "action_bone_actions");
+                 if (made > 0 && (mirror_all || !sides_later.empty())) {
                    const uint64_t armature_id = armature.id;
                    mirror_action_bone_actions(C, armature_id, picked, op_arg(C, "direction", "L_TO_R") != "R_TO_L",
-                                              sides_later);
+                                              sides_later, !mirror_all);
                  }
                  return made > 0 ? OpStatus::Finished : OpStatus::Cancelled;
                },
@@ -4480,7 +4495,8 @@ void rig_operators_register()
                  OpProperty action_bone_actions = op_bool_property(
                      "action_bone_actions", "Mirror Action Bone Actions",
                      "Make each of these bones' action bone actions on the other side too, replacing what is there: _L and _R "
-                     "bones and layers swap their keys, reflected, and _X ones swap them inside themselves",
+                     "bones and layers swap their keys, reflected, and _X ones swap them inside themselves. A 2 Axis "
+                     "Controller's sides with no action on the other side are mirrored either way",
                      "0");
                  OpProperty direction;
                  direction.name = "direction";

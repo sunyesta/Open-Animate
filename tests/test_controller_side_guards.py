@@ -151,7 +151,8 @@ for mirror in ("0", "1"):
     fresh(rig.id).select_bone("Knob_L")
     assert ops.armature.symmetrize(action_bone_actions=mirror) == {'FINISHED'}
     assert not own_held(rig), own_held(rig)
-    assert sides(rig)["Knob_R"]["RIGHT"] == ("Knob_R Right" if mirror == "1" else ""), (mirror, sides(rig))
+    # A new action named after the side, the option on or off (off, made as the other side has none).
+    assert sides(rig)["Knob_R"]["RIGHT"] == "Knob_R Right", (mirror, sides(rig))
     assert keys_in(rig, 'bones["spin_R"].angle', "spin_R") == spin_keys, "spin_R's own action was mirrored over"
     held = sides(rig)
     assert reopened_sides(rig) == held

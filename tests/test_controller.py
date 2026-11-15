@@ -427,7 +427,11 @@ rig.select_bone("lid_L")
 assert side("RIGHT", "lid_L Right") == {'FINISHED'} and side("LEFT", "lid_L Left") == {'FINISHED'}
 lid_sides = dict(bone("lid_L")["controller_actions"])
 assert ops.armature.symmetrize() == {'FINISHED'}
-assert not any(bone("lid_R")["controller_actions"].values()), ("no lid_R actions yet", bone("lid_R")["controller_actions"])
+# With Mirror Action Bone Actions off, sides with nothing on the other side are still made: a knob with empty sides does
+# nothing (the practice file's Eye_Blink_R.001 took no Down).
+assert bone("lid_R")["controller_actions"]["RIGHT"] == "lid_R Right", ("made anyway", bone("lid_R")["controller_actions"])
+assert bone("lid_R")["controller_actions"]["LEFT"] == "lid_R Left", bone("lid_R")["controller_actions"]
+assert bone("lid_L")["controller_actions"] == lid_sides, bone("lid_L")["controller_actions"]
 assert ops.ed.undo() == {'FINISHED'}
 assert ops.armature.symmetrize(action_bone_actions="1") == {'FINISHED'}
 assert bone("lid_L")["controller_actions"] == lid_sides, bone("lid_L")["controller_actions"]
@@ -446,10 +450,16 @@ rig.select_bone("brow_L")
 assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
 ordinary("Brow Right", 20, (0.3, 0.1))
 ordinary("Brow Left", 20, (-0.2, 0.0))
+# A bone with no side and its own action, not picked: none of this Symmetrize's business, nor its report's.
+ops.armature.select_none()
+ops.armature.bone_add(name="nose", head_x="0.0", head_y="-4.0", tail_x="0.0", tail_y="-3.5", parent="")
+rig.bone_set("nose", strength=0.0)
+action_bone("nose", 10, 0.3, (0.0, 0.05))
 ops.armature.select_none()
 rig.select_bone("brow_L")
 assert side("RIGHT", "Brow Right") == {'FINISHED'} and side("LEFT", "Brow Left") == {'FINISHED'}
 assert ops.armature.symmetrize(action_bone_actions="1") == {'FINISHED'}
+assert "nose" not in oanim.wm.banner_report()[3], ("only the picked bones' actions", oanim.wm.banner_report())
 assert bone("brow_L")["controller_actions"]["LEFT"] == "Brow Left", bone("brow_L")["controller_actions"]
 assert not any(bone("brow_R")["controller_actions"].values()), ("not brow_L's", bone("brow_R")["controller_actions"])
 for name, moved in (("Brow Left", (-0.2, 0.0)), ("Brow Right", (0.3, 0.1))):
