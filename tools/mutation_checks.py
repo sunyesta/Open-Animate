@@ -90,6 +90,12 @@ PENDING = [
      'Ctrl drag takes out of a select box', 'tests/test_select_box_kind.py'),
     ('src/editors/select_box.cc', '  if (ctrl || (alt && alt_removes)) {', '  if (ctrl) {',
      'Alt still takes out in the Transform tool box over bones', 'tests/test_select_box_kind.py'),
+    ('src/editors/viewport.cc', '    family_and_points_deselect(C, doc, armature);\n    bone_click_select(armature, under.front().hit, false);',
+     '    family_deselect_all(doc, armature);\n    bone_click_select(armature, under.front().hit, false);',
+     'A knob pressed lets go of the points picked before', 'tests/test_bone_pick_deselects_points.py'),
+    ('src/editors/viewport.cc', '  if (!shift) {\n    family_and_points_deselect(C, doc, armature);\n  }',
+     '  if (!shift) {\n    family_deselect_all(doc, armature);\n  }',
+     'A bone clicked with the Transform tool lets go of the points picked before', 'tests/test_bone_pick_deselects_points.py'),
 ]
 
 def build(root):

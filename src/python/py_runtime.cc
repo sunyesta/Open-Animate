@@ -1457,6 +1457,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return std::string(select_press_takes_test(current_context(), {x, y}, zoom));
   });
   m.def("select_click", [](float x, float y, float zoom) { select_click_test(current_context(), {x, y}, zoom); });
+  m.def("bone_press", [](float x, float y, float zoom, bool transform_tool, bool shift) {
+    return bone_press_test(current_context(), {x, y}, zoom, transform_tool, shift);
+  });
   m.def("handle_ends_shown", [](uint64_t id, int curve) {
     Context &C = current_context();
     animation_sync(*C.document);

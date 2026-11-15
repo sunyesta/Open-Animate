@@ -10751,6 +10751,46 @@ static void family_deselect_all(Document &doc, const Layer &armature)
   }
 }
 
+/* The family's bones and the points edited along with them (drawings in shown bone collections) let go: what picking a
+ * bone anew does first, so a point picked before never stays picked beside it (a knob's press and the Transform tool's
+ * click left them). */
+static void family_and_points_deselect(Context &C, Document &doc, const Layer &armature)
+{
+  family_deselect_all(doc, armature);
+  for (Layer *l : editable_layers(C)) {
+    deselect_all(l->drawing);
+  }
+}
+
+/* The Transform tool's click on bones: the best under it, one of its family's (the bone layer around it, a shown sub
+ * bone group) worked in instead, so a character's bones all answer clicks; Shift adds. */
+static void transform_bone_click_pick(Context &C, Layer &armature, const ViewMapping &view, ImVec2 mouse, bool shift)
+{
+  Document &doc = *C.document;
+  const std::vector<FamilyHit> hits = pick_family_parts(doc, armature, view, mouse);
+  const FamilyHit best = hits.empty() ? FamilyHit() : hits.front();
+  Layer *other = best.layer && best.layer->id != armature.id ? best.layer : nullptr;
+  const uint64_t picked = other ? 0 : best.hit.bone;
+  const uint64_t other_bone = other ? best.hit.bone : 0;
+  if (!shift) {
+    family_and_points_deselect(C, doc, armature);
+  }
+  if (other) {
+    if (Bone *b = bone_find(*other, other_bone)) {
+      bone_select(*b, true);
+      other->active_bone = other_bone;
+    }
+    /* Inside the bone layer worked in, it stays the one worked in. */
+    if (!shift && !layer_inside(doc, other->id, armature.id)) {
+      doc.active_layer = other->id;
+    }
+  }
+  else if (Bone *b = bone_find(armature, picked)) {
+    bone_select(*b, true);
+    armature.active_bone = picked;
+  }
+}
+
 /* A box dragged on `armature`: `select` picks in a bone layer what the box holds. It takes in the bone layers inside
  * `armature` too; unless `extending`, when that's no bones at all, the first of the family around it with bones in the
  * box is worked in instead, so a character's bones all answer boxes as they do clicks. */
@@ -11745,6 +11785,39 @@ static void bone_click_select(Layer &armature, BoneHit hit, bool extend)
   }
   armature_flush_selection(armature);
   armature.active_bone = bone->id;
+}
+
+/* The Select tool's press on a controller's knob (dragged at once after): picked alone unless it is already. The knob,
+ * or null when the press is on none. */
+static const Bone *knob_press_pick(Context &C, Layer &armature, const ViewMapping &view, ImVec2 mouse)
+{
+  Document &doc = *C.document;
+  const std::vector<FamilyHit> under = pick_family_parts(doc, armature, view, mouse);
+  const Bone *knob = !under.empty() && under.front().layer->id == armature.id ? bone_find(armature, under.front().hit.bone)
+                                                                            : nullptr;
+  if (!knob || !bone_is_controller(*knob)) {
+    return nullptr;
+  }
+  if (!knob->selected) {
+    family_and_points_deselect(C, doc, armature);
+    bone_click_select(armature, under.front().hit, false);
+  }
+  return knob;
+}
+
+bool bone_press_test(Context &C, float2 at, float zoom, bool transform_tool, bool shift)
+{
+  reach_update(C);
+  Layer *armature = C.document ? layer_find(*C.document, C.document->active_layer) : nullptr;
+  if (!armature || armature->type != LayerType::Bone) {
+    return false;
+  }
+  const ViewMapping view{{0.0f, 0.0f}, {1000.0f, 1000.0f}, {0.0f, 0.0f}, zoom};
+  if (transform_tool) {
+    transform_bone_click_pick(C, *armature, view, view.to_screen(at), shift);
+    return true;
+  }
+  return knob_press_pick(C, *armature, view, view.to_screen(at)) != nullptr;
 }
 
 /* ---------------------------------------------------------------------------------
@@ -12999,30 +13072,7 @@ static void transform_bones_input(Context &C, Area &area, Layer &armature, const
             break;
           }
           else {
-            /* The best under the click: one of its family's (the bone layer around it, a shown sub bone
-             * group) is worked in instead, so a character's bones all answer clicks. */
-            const std::vector<FamilyHit> hits = pick_family_parts(doc, armature, view, io.MousePos);
-            const FamilyHit best = hits.empty() ? FamilyHit() : hits.front();
-            Layer *other = best.layer && best.layer->id != armature.id ? best.layer : nullptr;
-            const uint64_t picked = other ? 0 : best.hit.bone;
-            const uint64_t other_bone = other ? best.hit.bone : 0;
-            if (!io.KeyShift) {
-              family_deselect_all(doc, armature);
-            }
-            if (other) {
-              if (Bone *b = bone_find(*other, other_bone)) {
-                bone_select(*b, true);
-                other->active_bone = other_bone;
-              }
-              /* Inside the bone layer worked in, it stays the one worked in. */
-              if (!io.KeyShift && !layer_inside(doc, other->id, armature.id)) {
-                doc.active_layer = other->id;
-              }
-            }
-            else if (Bone *b = bone_find(armature, picked)) {
-              bone_select(*b, true);
-              armature.active_bone = picked;
-            }
+            transform_bone_click_pick(C, armature, view, io.MousePos, io.KeyShift);
           }
           g.pivot_offset = {};
           push_undo(C, "Select Bones");
@@ -15478,19 +15528,11 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
       }
     }
     /* Pressing on a controller's knob, or on the setup frame its box, drags it at once (Ctrl: onto its keys). */
-    if (!io.KeyShift) {
-      const std::vector<FamilyHit> under = pick_family_parts(doc, armature, view, io.MousePos);
-      const Bone *knob = !under.empty() && under.front().layer->id == armature.id ? bone_find(armature, under.front().hit.bone) : nullptr;
-      if (knob && bone_is_controller(*knob)) {
-        if (!knob->selected) {
-          family_deselect_all(doc, armature);
-          bone_click_select(armature, under.front().hit, false);
-        }
-        if (bone_modal_start(C, area, 'G', view.to_document(io.MousePos))) {
-          g_bone_modal.tweak = true;
-        }
-        return;
+    if (!io.KeyShift && knob_press_pick(C, armature, view, io.MousePos)) {
+      if (bone_modal_start(C, area, 'G', view.to_document(io.MousePos))) {
+        g_bone_modal.tweak = true;
       }
+      return;
     }
     /* A shown handle of a drawing in a shown bone collection: pressing on it drags it at once, as on the
      * layer itself (Blender's tweak). */

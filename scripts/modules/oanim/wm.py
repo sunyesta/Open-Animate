@@ -642,6 +642,13 @@ def select_click(x, y, zoom=100.0):
     _oanim.select_click(float(x), float(y), float(zoom))
 
 
+def bone_press(x, y, zoom=100.0, transform_tool=False, shift=False):
+    """Test hook: on the active bone layer, the Select tool's press at document point (x, y) on a controller's knob
+    (True when it was on one; the drag after is left out), or with transform_tool the Transform tool's click on its
+    bones (Shift adds)."""
+    return bool(_oanim.bone_press(float(x), float(y), float(zoom), bool(transform_tool), bool(shift)))
+
+
 def canvas_hash(rgba, width, height, background=0.0):
     """Test hook: the fingerprint the viewport takes of a canvas read back (bytes, RGBA); the same picture, the same
     one, so a click that only picks something doesn't make the overlays work their colours out again."""
