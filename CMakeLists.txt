@@ -820,6 +820,8 @@ add_test(NAME layer_pick
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_layer_pick.py)
 add_test(NAME bone_collections
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_collections.py)
+add_test(NAME sub_group_collections
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sub_group_collections.py)
 add_test(NAME collections
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_collections.py)
 add_test(NAME collection_row_menu

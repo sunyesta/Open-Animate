@@ -175,26 +175,33 @@ std::vector<Layer *> document_editable_layers(Document &doc)
     }
   }
   /* A bone layer being worked in brings the drawings in its shown bone collections, and those of the sub bone groups
-   * shown inside it in theirs, as their bones are worked with it; a bone layer inside that isn't one keeps its own.
-   * Walked from the bone layer itself, as asking each layer of the document which bone layer holds it searches the
-   * whole tree each time (the toolbar asks every frame). */
+   * shown inside it while every panel on the way shows them: the one worked in and each sub bone group's down to
+   * their own, so a collection hidden on the panel worked in hides the inner groups' drawings in it too. A bone layer
+   * inside that isn't a sub bone group keeps its own. Walked from the bone layer itself, as asking each layer of the
+   * document which bone layer holds it searches the whole tree each time (the toolbar asks every frame). */
   if (Layer *bones = document_active_layer(doc); bones && bones->is_bone_layer()) {
-    const auto take = [&](auto &&self, Layer &parent, const Layer &rig) -> void {
+    std::vector<const Layer *> rigs;
+    const auto take = [&](auto &&self, Layer &parent) -> void {
       for (Layer &layer : parent.children) {
-        if (layer.edit_with_bones && layer.type == LayerType::Vector && bone_collections_show(rig, layer.collections) &&
-            layer.shown() && layer.has_drawing() && !layer.locked)
+        if (layer.edit_with_bones && layer.type == LayerType::Vector && layer.shown() && layer.has_drawing() &&
+            !layer.locked &&
+            std::all_of(rigs.begin(), rigs.end(),
+                        [&](const Layer *rig) { return bone_collections_show(*rig, layer.collections); }))
         {
           add(&layer);
         }
         if (!layer.is_bone_layer()) {
-          self(self, layer, rig);
+          self(self, layer);
         }
         else if (layer.sub_bone_group && layer.shown()) {
-          self(self, layer, layer);
+          rigs.push_back(&layer);
+          self(self, layer);
+          rigs.pop_back();
         }
       }
     };
-    take(take, *bones, *bones);
+    rigs.push_back(bones);
+    take(take, *bones);
   }
   return layers;
 }

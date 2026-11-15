@@ -44,6 +44,9 @@ PENDING = [
     ('src/anim/animation.cc', '                       [&](const auto &k) { return k.frame > 0 && distance(k.value, setup) > 1e-5f; });',
      '                       [&](const auto &k) { return k.frame > 0 && distance(k.value, setup) >= 0.0f; });',
      'A bone an action holds still isn\'t moved by it for Auto-Freeze', 'tests/test_auto_freeze_knob.py'),
+    ('src/ops/vector_ops.cc', '            std::all_of(rigs.begin(), rigs.end(),',
+     '            std::all_of(rigs.end() - 1, rigs.end(),',
+     'A collection hidden on the bone layer worked in hides a sub bone group\'s drawings in it', 'tests/test_sub_group_collections.py'),
 ]
 
 def build(root):
