@@ -141,6 +141,12 @@ PENDING = [
     ('src/data/bones.cc', '    layer.custom_colors = {from.regular, from.select, from.active};',
      '    layer.custom_colors = {from.regular, from.select, layer.custom_colors[2]};',
      'A drawing going Custom keeps the set\'s third shade', 'tests/test_bone_tab_drawing.py'),
+    ('src/anim/motion_path.cc', '          return value_distance(k.value, setup) > 1e-5f;',
+     '          return true;',
+     'A knob\'s keys stay off the path of a bone its action holds still', 'tests/test_motion_path_still_action.py'),
+    ('src/anim/motion_path.cc', '    moving(b.position_keys, b.setup_position);\n',
+     '',
+     'A knob\'s keys stay on the path of a bone its action carries', 'tests/test_motion_path_still_action.py'),
 ]
 
 def build(root):

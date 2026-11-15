@@ -968,6 +968,16 @@ std::vector<MotionPathTarget> motion_path_timing_targets(const Document &doc, co
   return out;
 }
 
+static float value_distance(const float a, const float b)
+{
+  return std::abs(a - b);
+}
+
+static float value_distance(const float2 a, const float2 b)
+{
+  return distance(a, b);
+}
+
 std::vector<int> motion_path_keys(const Document &doc, const MotionPathTarget &target)
 {
   if (target.drawing) {
@@ -1010,16 +1020,22 @@ std::vector<int> motion_path_keys(const Document &doc, const MotionPathTarget &t
     add(b.position_keys);
     add(b.angle_keys);
     add(b.scale_keys);
+    /* Only the actions that move it: a head turn's actions key every bone they hold still (a pupil at its setup on
+     * every key), and their knob's keys would split the pupil's own move where the head turns. */
     std::set<std::string> actions;
-    for (const auto &[name, action_keys] : b.position_keys.actions) {
-      actions.insert(name);
-    }
-    for (const auto &[name, action_keys] : b.angle_keys.actions) {
-      actions.insert(name);
-    }
-    for (const auto &[name, action_keys] : b.scale_keys.actions) {
-      actions.insert(name);
-    }
+    const auto moving = [&](const auto &ch, const auto setup) {
+      for (const auto &[name, action_keys] : ch.actions) {
+        const bool moves = std::any_of(action_keys.begin(), action_keys.end(), [&](const auto &k) {
+          return value_distance(k.value, setup) > 1e-5f;
+        });
+        if (moves) {
+          actions.insert(name);
+        }
+      }
+    };
+    moving(b.position_keys, b.setup_position);
+    moving(b.angle_keys, b.setup_angle);
+    moving(b.scale_keys, float2{1.0f, 1.0f});
     for (const std::string &name : actions) {
       if (const Bone *knob = controller_of_action(*layer, name)) {
         add(knob->position_keys);
