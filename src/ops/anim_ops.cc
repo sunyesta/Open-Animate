@@ -1062,7 +1062,7 @@ void anim_operators_register()
       "Alt click in a timeline row (Shift adds, extend=1): with the Motion Path tool, picks what the row's paths have "
       "on frame= (the dot there between keys, or the key on it; a bone's row its tip's and head's, a layer's or the "
       "Summary every path shown), so that stretch is the one edited; a row whose path is traced but hidden (another shown) "
-      "shows it first; without it, selects the key ending the stretch "
+      "shows it first, and with Shift the paths shown stay shown beside it, their picks kept; without it, selects the key ending the stretch "
       "there. The frame goes there either way. layers, kinds, selected_only, path, pinned and picked_bones: the row's "
       "channels, as anim.keys_select takes them. Not an undo step",
       OPTYPE_REGISTER, [](Context &C) {
@@ -1111,9 +1111,14 @@ void anim_operators_register()
             const bool was_set = wm.path_active_set;
             const MotionPathTarget was = wm.path_active;
             const uint64_t was_layer = wm.path_active_layer, was_bone = wm.path_active_bone;
+            const std::vector<MotionPathTarget> was_also = wm.path_also_shown;
+            /* Shift adds: the paths shown now stay shown beside it, their picks kept. */
+            const std::vector<MotionPathTarget> before = extend ? motion_path_targets(C)
+                                                               : std::vector<MotionPathTarget>{};
             for (const MotionPathTarget &t : want) {
               if (in_row(t)) {
                 motion_path_active_choose(C, t);
+                wm.path_also_shown = before;
                 targets = row_targets();
                 if (!targets.empty()) {
                   break;
@@ -1125,6 +1130,7 @@ void anim_operators_register()
               wm.path_active = was;
               wm.path_active_layer = was_layer;
               wm.path_active_bone = was_bone;
+              wm.path_also_shown = was_also;
             }
           }
           if (targets.empty()) {

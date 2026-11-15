@@ -86,6 +86,10 @@ PENDING = [
      "Each picked stretch is teal, the active one lighter", 'tests/test_stretch_sync.py'),
     ('src/ops/anim_ops.cc', '          if (targets.empty() && !doc.path_show_all) {', '          if (false) {',
      "Alt click in a row whose path is hidden shows it and picks there", 'tests/test_stretch_pick_hidden_path.py'),
+    ('src/ops/anim_ops.cc', '                wm.path_also_shown = before;', '                (void)before;',
+     "Shift Alt click on another path's row keeps the paths shown and their picks", 'tests/test_stretch_pick_hidden_path.py'),
+    ('src/ops/motion_path_ops.cc', '  if (picks.stretches.size() < 2) {', '  if (picks.spans < 2) {',
+     "One span picked on several paths: a timing edit reaches them all", 'tests/test_stretch_pick_hidden_path.py'),
 ]
 
 def build(root):

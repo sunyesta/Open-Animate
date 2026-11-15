@@ -501,6 +501,10 @@ struct WindowManager {
   bool path_active_set = false;
   MotionPathTarget path_active;
   uint64_t path_active_layer = 0, path_active_bone = 0;
+  /* Paths shown beside the chosen one while they keep picks: stretches Shift Alt clicked in another path's timeline
+   * row, so several bones' stretches stay picked together. Let go with the choice (another path chosen, another bone
+   * or layer made active) and each once nothing on it is picked. */
+  std::vector<MotionPathTarget> path_also_shown;
   /* The path handles and control points picked: handles never with keys, dots or other path things (a pick of one
    * kind drops the others), control points with keys too (L, Shift click); G R S, V and X act on them. The bones and
    * points traced stay picked, as they make the paths show. */

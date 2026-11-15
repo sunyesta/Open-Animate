@@ -97,6 +97,7 @@ void motion_path_active_choose(Context &C, const MotionPathTarget &target)
   }
   WindowManager &wm = *C.wm;
   wm.path_active_set = true;
+  wm.path_also_shown.clear();
   wm.path_active = target;
   wm.path_active_layer = C.document->active_layer;
   wm.path_active_bone = active_bone_now(*C.document);
@@ -171,17 +172,22 @@ bool motion_path_of_channel(Context &C, const Layer &layer, const std::string &p
  * hidden path through them: the dots, the path handles and control points, and the Path Timing graph's points (its
  * timing's: the path's own or the one it is timed by). Only what is stale is erased, so a caller going through the
  * picks while it asks for the paths again (the path shown the same) sees nothing move. */
-static void path_picks_prune(Context &C, const MotionPathTarget &shown)
+static bool path_shown_in(const std::vector<MotionPathTarget> &shown, const MotionPathTarget &t)
+{
+  return std::any_of(shown.begin(), shown.end(), [&](const MotionPathTarget &s) { return s.same(t); });
+}
+
+static void path_picks_prune(Context &C, const std::vector<MotionPathTarget> &shown)
 {
   WindowManager &wm = *C.wm;
-  std::erase_if(wm.path_dots, [&](const auto &d) { return !d.first.same(shown); });
-  std::erase_if(wm.path_handle_picks, [&](const MotionPathHandlePick &p) { return !p.target.same(shown); });
-  const MotionPathTarget owner = motion_path_timing_owner(*C.document, shown);
+  std::erase_if(wm.path_dots, [&](const auto &d) { return !path_shown_in(shown, d.first); });
+  std::erase_if(wm.path_handle_picks, [&](const MotionPathHandlePick &p) { return !path_shown_in(shown, p.target); });
   const MotionPathTarget &g = wm.path_timing_point_target;
-  const bool origin = !shown.bone && !shown.point && !shown.drawing;
-  if ((wm.path_timing_point >= 0 || !wm.path_timing_picks.empty()) && !g.same(shown) && !g.same(owner) &&
-      !(origin && g.drawing && g.layer == shown.layer))
-  {
+  const bool graph_shown = std::any_of(shown.begin(), shown.end(), [&](const MotionPathTarget &s) {
+    const bool origin = !s.bone && !s.point && !s.drawing;
+    return g.same(s) || g.same(motion_path_timing_owner(*C.document, s)) || (origin && g.drawing && g.layer == s.layer);
+  });
+  if ((wm.path_timing_point >= 0 || !wm.path_timing_picks.empty()) && !graph_shown) {
     wm.path_timing_point = -1;
     wm.path_timing_picks.clear();
   }
@@ -194,10 +200,27 @@ std::vector<MotionPathTarget> motion_path_targets(Context &C)
   if (C.document->path_show_all || all.size() < 2 || !motion_path_active(C, all, active)) {
     return all;
   }
+  std::vector<MotionPathTarget> shown = {active};
   if (C.wm) {
-    path_picks_prune(C, active);
+    WindowManager &wm = *C.wm;
+    /* Paths kept beside the chosen one while something on them is picked (dots, or the keys picked on them). */
+    if (!wm.path_active_set) {
+      wm.path_also_shown.clear();
+    }
+    std::erase_if(wm.path_also_shown, [&](const MotionPathTarget &t) {
+      const bool dots = std::any_of(wm.path_dots.begin(), wm.path_dots.end(),
+                                    [&](const auto &d) { return d.first.same(t); });
+      return t.same(active) || !path_shown_in(all, t) ||
+             (!dots && motion_path_selected_keys(*C.document, {t}).empty());
+    });
+    for (const MotionPathTarget &t : all) {
+      if (path_shown_in(wm.path_also_shown, t)) {
+        shown.push_back(t);
+      }
+    }
+    path_picks_prune(C, shown);
   }
-  return {active};
+  return shown;
 }
 
 std::vector<MotionPathTarget> motion_path_timing_targets(Context &C)
@@ -211,14 +234,14 @@ std::vector<MotionPathTarget> motion_path_timing_targets(Context &C)
   /* One path shown: its own timing, or the one it is timed by (a whole drawing's, a folded group's); and with a
    * layer's origin shown, its drawing's (its own row left out when the layer doesn't move itself). */
   const std::vector<MotionPathTarget> shown = motion_path_targets(C);
-  if (shown.size() != 1) {
+  if (shown.empty()) {
     return out;
   }
-  const MotionPathTarget &a = shown.front();
-  const MotionPathTarget owner = motion_path_timing_owner(doc, a);
-  const bool origin = !a.bone && !a.point && !a.drawing;
   std::erase_if(out, [&](const MotionPathTarget &t) {
-    return !t.same(a) && !t.same(owner) && !(origin && t.drawing && t.layer == a.layer);
+    return std::none_of(shown.begin(), shown.end(), [&](const MotionPathTarget &a) {
+      const bool origin = !a.bone && !a.point && !a.drawing;
+      return t.same(a) || t.same(motion_path_timing_owner(doc, a)) || (origin && t.drawing && t.layer == a.layer);
+    });
   });
   return out;
 }
@@ -289,7 +312,8 @@ void PickedStretchSync::start(Context &C)
     return;
   }
   const MotionPathPicks picks = motion_path_picks(C);
-  if (picks.spans < 2) {
+  /* Several stretches, or one span picked on several paths (two bones keyed on the same frames). */
+  if (picks.stretches.size() < 2) {
     return;
   }
   for (size_t i = 0; i < picks.stretches.size(); i++) {
