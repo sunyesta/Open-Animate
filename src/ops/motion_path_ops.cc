@@ -958,7 +958,7 @@ void motion_path_operators_register()
         return OpStatus::Cancelled;
       }
       /* Frame 0 only for its key, the setup's: picked for its out handle, never a dot to slide. */
-      const int frame = std::max(0, op_arg_int(C, "frame", doc.frame_current));
+      const int frame = std::clamp(op_arg_int(C, "frame", doc.frame_current), 0, KEY_FRAME_LAST);
       if (op_arg_bool(C, "go") && op_has_arg(C, "pick") && !op_arg_bool(C, "pick")) {
         doc.frame_current = frame;
         animation_sync(doc);

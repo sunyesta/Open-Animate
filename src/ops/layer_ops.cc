@@ -1325,6 +1325,19 @@ void layer_operators_register()
       "Set the active reference's Edit Points, Follow Original's Animation and Match Original (1 or 0; left out: "
       "unchanged)",
       reference_poll, [active_reference](Context &C) {
+        /* Each setting left out or already so, nothing changes: no undo step (capturing alone touches state that
+         * isn't saved). */
+        {
+          const ReferenceSettings &rs = active_reference(C)->reference;
+          const auto differs = [&C](const char *name, bool now) {
+            return !op_arg(C, name).empty() && op_arg_bool(C, name) != now;
+          };
+          if (!differs("edit_points", rs.edit_points) && !differs("follow_animation", rs.follow_animation) &&
+              !differs("match_original", rs.match_original))
+          {
+            return OpStatus::Cancelled;
+          }
+        }
         references_capture(*C.document);
         Layer &ref = *active_reference(C);
         if (const std::string v = op_arg(C, "edit_points"); !v.empty()) {

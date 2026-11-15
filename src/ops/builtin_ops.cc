@@ -261,7 +261,8 @@ static void playback_operators_register()
                             return OpStatus::Finished;
                           });
   frame_operator_register("screen.frame_offset_forward", "Next Frame", "Go forward one frame", [](Context &C) {
-    C.document->frame_current++;
+    /* Held at the last frame there is: past it the int wraps to a frame before the first. */
+    C.document->frame_current = std::min(C.document->frame_current, KEY_FRAME_LAST - 1) + 1;
     return OpStatus::Finished;
   });
   frame_operator_register("screen.frame_offset_backward", "Previous Frame", "Go back one frame", [](Context &C) {

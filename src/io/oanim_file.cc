@@ -3804,9 +3804,10 @@ bool oanim_document_from_json(const std::string &text, Document &r_doc, std::str
 
   Document doc;
   doc.name = get_string(j, "name", doc.name);
-  doc.frame_start = std::max(0, get_int(j, "frame_start", doc.frame_start));
-  doc.frame_end = std::max(doc.frame_start, get_int(j, "frame_end", doc.frame_end));
-  doc.frame_current = std::max(0, get_int(j, "frame_current", doc.frame_current));
+  /* Within the frames there are (a file edited by hand, or saved past them): past the last the next frame wraps. */
+  doc.frame_start = std::clamp(get_int(j, "frame_start", doc.frame_start), 0, KEY_FRAME_LAST);
+  doc.frame_end = std::clamp(get_int(j, "frame_end", doc.frame_end), doc.frame_start, KEY_FRAME_LAST);
+  doc.frame_current = std::clamp(get_int(j, "frame_current", doc.frame_current), 0, KEY_FRAME_LAST);
   doc.auto_key = get_bool(j, "auto_key", true);
   if (const int mode = Document::rna().find("auto_key_mode")->enum_index(get_string(j, "auto_key_mode", "")); mode >= 0) {
     doc.auto_key_mode = AutoKeyMode(mode);

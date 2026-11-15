@@ -50,24 +50,30 @@ def snap():
 SAVED_DEFAULTS = {"radius": 1.0}
 
 
-def diff(a, b, path="", out=None, eps=1e-5):
+UNEDITS = ("select", "active", "picked")
+
+
+def diff(a, b, path="", out=None, eps=1e-5, skip=False):
     """Where two snaps differ (at most ~9 places), relative tolerance eps on floats."""
     out = [] if out is None else out
     if len(out) > 8:
         return out
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a) | set(b), key=str):
+            # Left out as it goes, not after: the list stops at ~9, so picks first would hide every edit after.
+            if skip and any(w in str(k) for w in UNEDITS):
+                continue
             if (k not in a or k not in b) and k in SAVED_DEFAULTS:
-                diff(a.get(k, SAVED_DEFAULTS[k]), b.get(k, SAVED_DEFAULTS[k]), f"{path}.{k}", out, eps)
+                diff(a.get(k, SAVED_DEFAULTS[k]), b.get(k, SAVED_DEFAULTS[k]), f"{path}.{k}", out, eps, skip)
             elif k not in a or k not in b:
                 out.append(f"{path}.{k}: {'missing before' if k not in a else 'missing after'}")
             else:
-                diff(a[k], b[k], f"{path}.{k}", out, eps)
+                diff(a[k], b[k], f"{path}.{k}", out, eps, skip)
     elif isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
             out.append(f"{path}: len {len(a)} vs {len(b)}")
         for i, (x, y) in enumerate(zip(a, b)):
-            diff(x, y, f"{path}[{i}]", out, eps)
+            diff(x, y, f"{path}[{i}]", out, eps, skip)
     elif isinstance(a, float) or isinstance(b, float):
         try:
             if not (abs(a - b) <= eps * max(1.0, abs(a), abs(b))):
@@ -81,7 +87,7 @@ def diff(a, b, path="", out=None, eps=1e-5):
 
 def edits(a, b):
     """diff without selection and the active layer or bone: picking things is never an undo step (as Blender)."""
-    return [d for d in diff(a, b) if not any(w in d.split(":")[0] for w in ("select", "active", "picked"))]
+    return diff(a, b, skip=True)
 
 
 def bad_numbers(d, path="", out=None):

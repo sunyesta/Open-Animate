@@ -220,6 +220,16 @@ not a bug, check the times against the shutdown before shrinking.
   two on the layer): each fit is bent on by the next, which is where the sweep's 0.035 slip hid. Anything that writes
   a handle back through the deform (Smooth Points, place_handle, settle) must take the fit off first, and write a
   handle only by its own change, never the shown value back, or an option that moves nothing (Radius alone) moves it.
+- **An "empty step" note is a lead, not a bug.** `fuzz_timing` notes ops that push an undo step and change nothing it
+  sees. Diff the whole saved file around the op before fixing: a Move Keys noted so had moved a handle key the targets
+  don't list. Timing Decimate keeps its empty step on purpose (raising Ratio in Adjust Last Operation puts points back).
+  Settings set as they already are (Set Action, Reference Settings) were real: they now return CANCELLED.
+- **Diffs stop at about 9 places.** `edits()` used to cut the list first and drop selection lines after, so picks
+  sorted first hid every real edit (both `harness.py` and `fuzz_timing.py`, fixed: `diff(..., skip=True)` leaves them
+  out as it goes). Any new filter on a diff goes inside it, never on its capped result.
+- **`fuzz_fail_<seed>.json` exists while a run is going.** The fuzzer writes a "crash-or-hang" placeholder before
+  each op (so a crash leaves one): read it only once the run has ended, when the log's last line says "ops clean" or
+  FUZZ FAIL. A placeholder read mid-run looks exactly like a crash that won't replay.
 - **Smooth between two keys plays straight.** A test that needs two timings to differ (a retiming, Key Together's
   majority) uses Ease In/Out against Linear (`keyframe_set(path, frame, interp=)`), or it passes with the fix undone.
 - **A long fuzz log that won't shrink**: replay its first N ops with `OA_FUZZ_SAVE_END`, then replay the rest on that

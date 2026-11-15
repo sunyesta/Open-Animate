@@ -566,6 +566,8 @@ add_test(NAME key_together_sweep
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_sweep.py)
 add_test(NAME key_together_shown
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_shown.py)
+add_test(NAME frame_last_noop
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_frame_last_noop.py)
 add_test(NAME key_together_path_pick
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_path_pick.py)
 add_test(NAME timeline_switch_row

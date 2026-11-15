@@ -35,6 +35,18 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    ('src/ops/anim_ops.cc', 'const int frame = std::clamp(op_arg_int(C, "frame", doc.frame_current), 0, KEY_FRAME_LAST);\n                      if (frame != doc.frame_current) {', 'const int frame = std::max(0, op_arg_int(C, "frame", doc.frame_current));\n                      if (frame != doc.frame_current) {',
+     'Insert Keys in Row past the last frame keys the last frame', 'tests/test_frame_last_noop.py'),
+    ('src/ops/builtin_ops.cc', 'C.document->frame_current = std::min(C.document->frame_current, KEY_FRAME_LAST - 1) + 1;', 'C.document->frame_current++;',
+     'Next Frame on the last frame stays there', 'tests/test_frame_last_noop.py'),
+    ('src/io/oanim_file.cc', 'doc.frame_current = std::clamp(get_int(j, "frame_current", doc.frame_current), 0, KEY_FRAME_LAST);', 'doc.frame_current = std::max(0, get_int(j, "frame_current", doc.frame_current));',
+     'A file saved past the last frame opens on the last', 'tests/test_frame_last_noop.py'),
+    ('src/ops/anim_ops.cc', '      if (doc.layers == was) {\n        return OpStatus::Cancelled;\n      }\n      return OpStatus::Finished;\n    };\n    operators().add(std::move(ot));\n  }\n  {\n    OperatorType ot;\n    ot.idname = "anim.action_move";', '      return OpStatus::Finished;\n    };\n    operators().add(std::move(ot));\n  }\n  {\n    OperatorType ot;\n    ot.idname = "anim.action_move";',
+     'Set Action as it already is makes no undo step', 'tests/test_frame_last_noop.py'),
+    ('src/ops/anim_ops.cc', 'plays.erase(std::remove(plays.begin(), plays.end(), at_rest), plays.end());', '(void)plays;',
+     'Set Action as it already is keeps no entry for an action at rest', 'tests/test_frame_last_noop.py'),
+    ('src/ops/layer_ops.cc', '              !differs("match_original", rs.match_original))\n          {\n            return OpStatus::Cancelled;', '              !differs("match_original", rs.match_original) && false)\n          {\n            return OpStatus::Cancelled;',
+     'Reference Settings as they already are makes no undo step', 'tests/test_frame_last_noop.py'),
 ]
 
 def build(root):

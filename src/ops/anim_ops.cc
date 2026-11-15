@@ -823,6 +823,9 @@ void anim_operators_register()
         report(ReportType::Warning, "No action named " + name);
         return OpStatus::Cancelled;
       }
+      /* Set as it already is, nothing changes: no undo step, and no entry kept for an action left at rest. */
+      const std::vector<Layer> was = doc.layers;
+      const bool listed = action_play_find(*owner, name) != nullptr;
       if (op_has_arg(C, "loop")) {
         const std::string loop = op_arg(C, "loop");
         if (loop != "AUTO" && loop != "ON" && loop != "OFF") {
@@ -852,6 +855,17 @@ void anim_operators_register()
                                                                    : "Its bone has no keys in it yet to say how far");
           return OpStatus::Cancelled;
         }
+      }
+      if (!listed) {
+        ActionPlay at_rest;
+        at_rest.name = name;
+        at_rest.frame_keys.last = 0.0f;
+        at_rest.frame_keys.has_last = true;
+        auto &plays = owner->action_plays;
+        plays.erase(std::remove(plays.begin(), plays.end(), at_rest), plays.end());
+      }
+      if (doc.layers == was) {
+        return OpStatus::Cancelled;
       }
       return OpStatus::Finished;
     };
@@ -1009,7 +1023,8 @@ void anim_operators_register()
                       Document &doc = *C.document;
                       /* Edits not yet recorded belong to the frame they were made at. */
                       animation_record(doc);
-                      const int frame = std::max(0, op_arg_int(C, "frame", doc.frame_current));
+                      /* Past the last frame a key, or the playhead, wraps round the int on the next move. */
+                      const int frame = std::clamp(op_arg_int(C, "frame", doc.frame_current), 0, KEY_FRAME_LAST);
                       if (frame != doc.frame_current) {
                         doc.frame_current = frame;
                         C.wm->playing = false;
@@ -1042,7 +1057,7 @@ void anim_operators_register()
       "channels, as anim.keys_select takes them. Not an undo step",
       OPTYPE_REGISTER, [](Context &C) {
         Document &doc = *C.document;
-        const int frame = std::max(0, op_arg_int(C, "frame", doc.frame_current));
+        const int frame = std::clamp(op_arg_int(C, "frame", doc.frame_current), 0, KEY_FRAME_LAST);
         const bool extend = op_arg_bool(C, "extend");
         KeyFilter filter;
         filter.kinds = uint32_t(op_arg_int(C, "kinds", int(KEY_ALL)));

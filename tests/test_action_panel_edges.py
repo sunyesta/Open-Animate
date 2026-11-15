@@ -293,7 +293,10 @@ def bad_python_args():
     r.doc.frame_current = 5
     assert r.play("nope", frame=3) == {'CANCELLED'}
     assert r.play("wave", loop="SOMETIMES") == {'CANCELLED'}
+    r.play("wave", frame=2)
     assert r.play("wave", frame=-4) == {'FINISHED'} and r.action("wave")["frame"] == 0.0, r.action("wave")
+    # Already at rest: below 0 is 0 again, nothing changes.
+    assert r.play("wave", frame=-4) == {'CANCELLED'}, r.action("wave")
     r.play("wave", frame=2)
     assert r.play("wave", frame="abc") == {'CANCELLED'} and r.action("wave")["frame"] == 2.0, r.action("wave")
     assert r.play("wave", frame="") == {'CANCELLED'} and r.play("wave", frame="nan") == {'CANCELLED'}
