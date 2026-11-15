@@ -6647,8 +6647,18 @@ static void bend_drawing(const DeformShape &d, const PointGroup *group, float st
       const float2 p0 = base.points[size_t(cp.point)].pos, q0 = mapped[size_t(cp.point)];
       const float2 in = bent_handle(d, p0, q0, was.handle_in, own);
       const float2 out = bent_handle(d, p0, q0, was.handle_out, own);
+      /* A deform before this one fitted the wire (CurvePoint::wire_fit_in): the handle as bent at its own point is
+       * bent on too, so the fit stays what this point alone shows less the fitted handle, never stale. */
+      const bool fitted_before = was.wire_fit_in != float2() || was.wire_fit_out != float2();
+      const float2 shown_in = cp.handle_in - cp.wire_fit_in, shown_out = cp.handle_out - cp.wire_fit_out;
       cp.handle_in = cp.handle_in + (in - cp.handle_in) * w;
       cp.handle_out = cp.handle_out + (out - cp.handle_out) * w;
+      if (fitted_before) {
+        const float2 shown_in_bent = bent_handle(d, p0, q0, was.handle_in - was.wire_fit_in, own);
+        const float2 shown_out_bent = bent_handle(d, p0, q0, was.handle_out - was.wire_fit_out, own);
+        cp.wire_fit_in = cp.handle_in - (shown_in + (shown_in_bent - shown_in) * w);
+        cp.wire_fit_out = cp.handle_out - (shown_out + (shown_out_bent - shown_out) * w);
+      }
     }
   });
   if (g_wire > 0 && !resample) {

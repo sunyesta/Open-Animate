@@ -706,6 +706,8 @@ def apply_new(op):
         # design, the Info editor saying how many)
         # (not with auto-key off: going to another frame drops an edit not keyed, which isn't the fold's doing)
         frames = sorted(set(f for m in members(layer) for f in m.key_frames)) if turning_on and doc.auto_key else []
+        # (each frame compared only on the layers keyed there: another layer's in-between takes the new timing too)
+        keyed_on = {fr: {m.id for m in members(layer) if fr in m.key_frames} for fr in frames}
         before, f0 = {}, doc.frame_current
         for fr in frames:
             doc.frame_current = fr
@@ -715,7 +717,9 @@ def apply_new(op):
         if turning_on and r == {'FINISHED'} and os.environ.get("OA_FUZZ_FOLD_POSE", "1") == "1":
             for fr in frames:
                 doc.frame_current = fr
-                w, k = pose_diff(before[fr], full_pose())
+                now = full_pose()
+                w, k = pose_diff({k: v for k, v in before[fr].items() if k[0] in keyed_on[fr]},
+                                 {k: v for k, v in now.items() if k[0] in keyed_on[fr]})
                 if w > 1e-4:
                     raise Failure(f"fold-moves: folding {layer.name!r}'s row (Key Together on) changed frame {fr} "
                                   f"by {w:.5f} at {k}")

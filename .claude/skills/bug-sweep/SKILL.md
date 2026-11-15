@@ -57,6 +57,11 @@ its curve. `OA_FUZZ_SEED`, `OA_FUZZ_OPS`, `OA_FUZZ_OUT`, `OA_FUZZ_REPLAY`; shrin
 scripts/shrink_timing.py <exe> <tfuzz_fail_N.json>`. It compares undo states at the frame each step was pushed on and
 reopens every 10 ops (the undo stack keeps 64 steps, past which a push looks like none).
 
+For rigs, `scripts/rigfuzz.py` throws seeded rig ops at the file's bone layer (Convert To, the Actions panel, actions
+made, renamed, deleted and moved, controller spots, constraints, Apply Pose as Rest, controller sides, turn actions,
+collections, Symmetrize, fixes, dynamics): `RF_SEED`, `RF_OPS`, `RF_RIG` (the bone layer's name), with the fuzzer's
+`OA_SWEEP_FILE` and `OA_SWEEP_TMP`. It found a fix keeping a stale name after the action it named was deleted.
+
 Three invariants that caught bugs the area probes missed, worth checking after every op in any area: the frame shown
 equals the same frame left and reached again (an edit that changes keys must evaluate the frame shown, and so must
 whatever follows it, as Time Together's retiming); an edit that moves nothing (a click with a brush, strength 0, a
@@ -209,4 +214,16 @@ not a bug, check the times against the shutdown before shrinking.
 - **An edit by nothing turned CANCELLED** leaves older tests that ran the real path with it (Alt S by 1) testing nothing: give them a hair off (1.00001) so their mutation entries still catch.
 - **A rig loop** (a bone's IK target riding on the chain, a constraint fed by what it moves) can make a pose depend on
   history by design: report it as a question, don't fix it as a bug.
+- **Handles through a deform: the wire isn't what shows.** The edit wire refits each bent segment's handle lengths
+  (`evaluated_handles(shown=True)`), but the viewport draws, picks and drags each handle as bent at its own point
+  (`oanim.wm.handle_ends_shown`). Measure a neighbour's handle there, and stack deforms (a group's and the layer's,
+  two on the layer): each fit is bent on by the next, which is where the sweep's 0.035 slip hid. Anything that writes
+  a handle back through the deform (Smooth Points, place_handle, settle) must take the fit off first, and write a
+  handle only by its own change, never the shown value back, or an option that moves nothing (Radius alone) moves it.
+- **Smooth between two keys plays straight.** A test that needs two timings to differ (a retiming, Key Together's
+  majority) uses Ease In/Out against Linear (`keyframe_set(path, frame, interp=)`), or it passes with the fix undone.
+- **A long fuzz log that won't shrink**: replay its first N ops with `OA_FUZZ_SAVE_END`, then replay the rest on that
+  file as `OA_SWEEP_FILE` and shrink only those (seed 14's 210 ops came down to two this way in minutes).
+- **A rename on every change finds tests that read a name too early.** Fix names now follow at each undo push: a test
+  that reads a fix's name, then converts or deletes what it names, must read it again after.
 - **A field "missing before" can be a hair off its default.** The file leaves a point's width out at exactly 1.0; a fix playing a width can leave the stored 1.0 two rounding steps under it (0.9999999, settled, never growing) after some frames are visited, so the field appears. `SAVED_DEFAULTS` in harness.py and fuzz_timing.py compares a missing one as its default; add a key there when another such field shows up.

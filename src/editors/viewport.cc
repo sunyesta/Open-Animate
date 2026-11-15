@@ -9969,9 +9969,23 @@ static bool custom_shape_shows(const Document &doc, const Bone &bone)
     return false;
   }
   const Layer *source = layer_find(doc, bone.shape_layer);
-  return source && source->type == LayerType::Vector &&
-         std::any_of(source->drawing.shapes.begin(), source->drawing.shapes.end(),
-                     [](const Shape &s) { return !s.hidden && (s.has_fill || s.has_outline); });
+  if (!source || source->type != LayerType::Vector) {
+    return false;
+  }
+  /* As custom_shape_loops draws it: a line where it has an outline, a fill only where it closes (an open shape with
+   * only a fill draws nothing, and the pin would vanish). */
+  const VectorDrawing &drawing = source->drawing;
+  return std::any_of(drawing.shapes.begin(), drawing.shapes.end(), [&](const Shape &s) {
+    if (s.hidden || (!s.has_fill && !s.has_outline)) {
+      return false;
+    }
+    std::vector<float2> outline;
+    bool closed = false;
+    if (!shape_outline(drawing, s, 8, outline, nullptr, &closed, nullptr) || outline.size() < 2) {
+      return false;
+    }
+    return s.has_outline || (closed && outline.size() >= 3);
+  });
 }
 
 /* A Pin bone is drawn (and picked) as a pin, having no tip to show, unless its Custom shape shows: then as that, as a
@@ -13791,9 +13805,14 @@ static OpStatus smooth_points_exec(Context &C)
       VectorDrawing work = shown.storage;
       const int n = drawing_smooth_points(work, s);
       smoothed += n;
+      /* Only what the smoothing changed, taken back through the skin: what shows bent (a deform's fitted handles,
+       * CurvePoint::wire_fit_in) isn't what is stored, so writing it all back would change what Smooth left alone
+       * (Radius only moved every handle). */
       for (size_t i = 0; n > 0 && i < d.points.size(); i++) {
         if (d.points[i].selected) {
-          d.points[i].pos = shown.skins[i].inverted().apply(work.points[i].pos);
+          if (work.points[i].pos != shown.storage.points[i].pos) {
+            d.points[i].pos = shown.skins[i].inverted().apply(work.points[i].pos);
+          }
           d.points[i].radius = work.points[i].radius;
         }
       }
@@ -13801,10 +13820,11 @@ static OpStatus smooth_points_exec(Context &C)
         for (size_t i = 0; i < d.curves[c].points.size(); i++) {
           CurvePoint &cp = d.curves[c].points[i];
           const CurvePoint &w = work.curves[c].points[i];
+          const CurvePoint &was = shown.storage.curves[c].points[i];
           if (d.points[cp.point].selected) {
             const Transform2D un = shown.skins[cp.point].inverted();
-            cp.handle_in = un.apply_vector(w.handle_in);
-            cp.handle_out = un.apply_vector(w.handle_out);
+            cp.handle_in = cp.handle_in + un.apply_vector(w.handle_in - was.handle_in);
+            cp.handle_out = cp.handle_out + un.apply_vector(w.handle_out - was.handle_out);
             cp.handles_set = true;
             cp.aligned = w.aligned;
           }

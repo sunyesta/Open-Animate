@@ -564,6 +564,8 @@ add_test(NAME key_together_retimed
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_retimed.py)
 add_test(NAME key_together_sweep
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_sweep.py)
+add_test(NAME key_together_shown
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_shown.py)
 add_test(NAME key_together_path_pick
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_path_pick.py)
 add_test(NAME timeline_switch_row
@@ -748,6 +750,8 @@ add_test(NAME point_over_handle
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_point_over_handle.py)
 add_test(NAME handles_shown_bent
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_handles_shown_bent.py)
+add_test(NAME sweep_handles_collections
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_sweep_handles_collections.py)
 add_test(NAME mirror_points
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_mirror_points.py)
 add_test(NAME keyed_here

@@ -39,9 +39,11 @@ doc.frame_current = 30
 rig().bone_set("Bone", knob=(24.0, 24.0)); rig().bone_set("arm", angle=bone("arm")["setup_angle"] + 0.8)
 rig().bone_set("Lid", angle=bone("Lid")["angle"] + 0.5); settle()
 mainline()
-name = rig().bone_fixes[0]["name"]
 rig().select_bone("Bone")
 assert ops.armature.bone_convert(type="REGULAR") == {'FINISHED'}
+# Named after what plays where it ends, the fix takes a new name once the knob plays no sides.
+name = rig().bone_fixes[0]["name"]
+
 doc.frame_current = 10
 rig().bone_set("arm", angle=bone("arm")["setup_angle"] + 0.8); settle()   # arm where the line ends: the fix plays
 b = bone("Bone")

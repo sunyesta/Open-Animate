@@ -115,4 +115,28 @@ assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
 assert ops.wm.open_mainfile(filepath=path, confirmed="1") == {'FINISHED'}
 assert fix_names(rid) == ["Look"], fix_names(rid)
 
+# --- An action a side plays deleted, or the knob: named again at once, so saving and opening changes nothing ----------
+def saved_and_opened(rid, name):
+    path = os.path.join(tempfile.mkdtemp(), name)
+    assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
+    assert ops.wm.open_mainfile(filepath=path, confirmed="1") == {'FINISHED'}
+    return fix_names(rid)
+
+
+rid = build()
+layers.active = rig_of(rid)
+assert ops.anim.action_delete(name="Bone Right") == {'FINISHED'}
+now = fix_names(rid)
+assert now != ["Bone Up and Right"], ("named again when the action it names goes", now)
+assert saved_and_opened(rid, "deleted_action.oanim") == now
+
+rid = build()
+layers.active = rig_of(rid)
+ops.armature.select_none()
+rig_of(rid).select_bone("Bone")
+assert ops.armature.bone_delete() == {'FINISHED'}
+now = fix_names(rid)
+assert now != ["Bone Up and Right"], ("named again when its bone goes", now)
+assert saved_and_opened(rid, "deleted_bone.oanim") == now
+
 print("Fix names tests passed")

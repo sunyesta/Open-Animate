@@ -303,9 +303,7 @@ static void bone_collections_panel(Context &C, Layer &armature)
         /* Assign / Unassign Selected: what they would change on the right ("2 bones, 1 drawing"), greyed when
          * nothing. */
         for (const bool assign : {true, false}) {
-          int bones = 0, drawn = 0;
-          collection_selected_change(doc, armature, c.id, assign, &bones, &drawn);
-          const std::string count = collection_change_text(bones, drawn);
+          const std::string count = collection_row_change_text(doc, armature, c.id, assign);
           if (ImGui::MenuItem(assign ? "Assign Selected" : "Unassign Selected", count.c_str(), false, !count.empty())) {
             row_op = assign ? "armature.collection_assign" : "armature.collection_unassign";
             row_op_collection = name;
@@ -591,6 +589,15 @@ static void controller_side_row(Context &C, Layer &armature, const Bone &knob, i
     }
   }
   ImGui::PopID();
+}
+
+std::string collection_row_change_text(Document &doc, Layer &armature, uint64_t id, bool assign)
+{
+  /* The operators work on the rig worked on (active_armature): a sub bone group whose bone is picked. */
+  Layer *worked = armature_worked_on(doc, armature.id);
+  int bones = 0, drawings = 0;
+  collection_selected_change(doc, worked ? *worked : armature, id, assign, &bones, &drawings);
+  return collection_change_text(bones, drawings);
 }
 
 /* What a chip's Assign Selected (`assign`) or Unassign Selected would change, as its menu shows it: in the Bone tab

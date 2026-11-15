@@ -1625,8 +1625,11 @@ void animation_record(Document &doc)
       layer.key_whole_settled = true;
     }
   });
+  /* Keys given another timing change the frame shown between them: it is worked out again at the end too. */
+  bool retimed = false;
   for (size_t i = 0; i < flat.size(); i++) {
     if (settled[i] > 0) {
+      retimed = true;
       report(ReportType::Info, flat[i]->name + ": Key Whole Drawing gave " + std::to_string(settled[i]) +
                                    " keys the timing most of its points have on their frame");
     }
@@ -1705,6 +1708,7 @@ void animation_record(Document &doc)
     together_went = together_went || went;
     group->key_together_settled = true;
     if (changed > 0) {
+      retimed = true;
       report(ReportType::Info, group->name + ": Key Together gave " + std::to_string(changed) +
                                    " keys the timing most of its layers have on their frame");
     }
@@ -1734,7 +1738,7 @@ void animation_record(Document &doc)
       });
     }
   }
-  if (together_went || keys_gone || starts) {
+  if (together_went || keys_gone || starts || retimed) {
     animation_evaluate(doc, frame);
   }
 }
@@ -3158,6 +3162,10 @@ void bone_fixes_tidy(Document &doc)
       }
     }
   }
+  /* Fixes named after their bones' actions take their names as they are now: an action or bone deleted (or any edit
+   * that changes what the name says) renames them at once, as opening the file would, so saving and opening changes
+   * nothing. */
+  bone_fix_names_follow(doc);
 }
 
 bool document_action_rename(Document &doc, uint64_t owner_id, const std::string &from, const std::string &to)

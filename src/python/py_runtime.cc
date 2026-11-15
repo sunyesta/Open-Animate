@@ -4291,7 +4291,10 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         std::vector<Transform2D> skins = layer_point_skins(doc, layer);
         skins.resize(drawing.points.size());
         const float2 in_layer = layer_world_transform(doc, layer.id).inverted().apply({at.first, at.second});
-        const float2 from = curve_handle(shown, shown.curves[size_t(curve_index)], index, side == "IN");
+        /* Where it shows: as bent at its point, less the edit wire's fit (CurvePoint::wire_fit_in). */
+        const CurvePoint &shown_cp = shown.curves[size_t(curve_index)].points[size_t(index)];
+        const float2 from = curve_handle(shown, shown.curves[size_t(curve_index)], index, side == "IN") -
+                            (side == "IN" ? shown_cp.wire_fit_in : shown_cp.wire_fit_out);
         stored = curve_handle(drawing, curve, index, side == "IN") +
                  skins[size_t(curve.points[size_t(index)].point)].inverted().apply_vector(in_layer - from);
       }
@@ -5293,9 +5296,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     if (!c) {
       throw py::value_error("no collection " + name);
     }
-    int bones = 0, drawings = 0;
-    collection_selected_change(doc, armature, c->id, assign, &bones, &drawings);
-    return collection_change_text(bones, drawings);
+    return collection_row_change_text(doc, armature, c->id, assign);
   });
   /* The same for a Layer tab chip: the layer and the picked layers. */
   m.def("collection_layers_change", [](uint64_t id, const std::string &name, bool assign) {

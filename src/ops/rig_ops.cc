@@ -4338,10 +4338,14 @@ void rig_operators_register()
           }
         }
       }
+      /* No layer to put in it: nothing made (a CANCELLED step changes nothing). */
+      if (layers.empty()) {
+        return OpStatus::Cancelled;
+      }
       const bool on = op_arg(C, "on", "1") == "1";
       const std::string name = op_arg(C, "collection");
       const Collection *c = on ? collection_ensure(doc, name) : collection_find_by_name(doc, name);
-      if (!c || layers.empty()) {
+      if (!c) {
         return OpStatus::Cancelled;
       }
       int changed = 0;

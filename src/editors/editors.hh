@@ -170,6 +170,9 @@ void sculpt_brush_icon(ImDrawList *dl, SculptBrush brush, ImVec2 center, float s
 bool viewport_drag_active();
 /* How the viewport draws (and picks) a bone: "PIN", "CUSTOM" (its Custom shape, a pin's too), "CONTROLLER" or "BONE". */
 const char *viewport_bone_drawn_as(const Document &doc, const Bone &bone);
+/* What a Collections row's Assign Selected (`assign`) or Unassign Selected would change ("2 bones, 1 drawing", "" for
+ * nothing), on the rig its operators work on: `armature`, or the sub bone group being worked in. */
+std::string collection_row_change_text(Document &doc, Layer &armature, uint64_t id, bool assign);
 /* Whether the edit going on (a point move: G, R, S, Extrude, a handle tweak) says which layers it changes,
  * each update (see Revision); any other edit with the mouse down may change anything. */
 bool viewport_precise_edit();
