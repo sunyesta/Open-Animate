@@ -616,6 +616,19 @@ def select_press_grab(x, y, zoom=100.0, shift=False, ctrl=False, drag=False):
             _oanim.select_press_grab(float(x), float(y), float(zoom), bool(shift or ctrl), bool(drag))]
 
 
+def select_press_takes(x, y, zoom=100.0):
+    """Test hook: what pressing the Select tool at document point (x, y) takes: "HANDLE" (a shown handle, dragged at
+    once), "POINT" or "" (nothing: a box); zoom is pixels per unit. A handle wins only when clearly nearer than any
+    point."""
+    return _oanim.select_press_takes(float(x), float(y), float(zoom))
+
+
+def select_click(x, y, zoom=100.0):
+    """Test hook: the Select tool's click at document point (x, y) (zoom pixels per unit): the nearest point within
+    reach is picked, or a shown handle clearly nearer than any point."""
+    _oanim.select_click(float(x), float(y), float(zoom))
+
+
 def canvas_hash(rgba, width, height, background=0.0):
     """Test hook: the fingerprint the viewport takes of a canvas read back (bytes, RGBA); the same picture, the same
     one, so a click that only picks something doesn't make the overlays work their colours out again."""

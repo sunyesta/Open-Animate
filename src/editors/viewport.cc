@@ -3050,6 +3050,14 @@ static HandleHit pick_handle(Context &C, const ViewMapping &view, ImVec2 mouse, 
   return hit;
 }
 
+/* A handle takes a press or click only when it is clearly nearer than any point (points are what's picked most, and
+ * where they crowd, as along a mouth's lips, their handles' ends sit among them): within a few points of each, the
+ * point wins. */
+static bool handle_beats_point(float handle_distance, float point_distance)
+{
+  return handle_distance + click_reach_pixels(8.0f) < point_distance;
+}
+
 static void push_undo(Context &C, const char *name)
 {
   C.undo->push(name, *C.document);
@@ -7824,7 +7832,7 @@ static void select_click(Context &C, const ViewMapping &view, float2 mouse_docum
   }
   /* A handle nearer than any point takes the click: just that handle is selected (not while clicking
    * again goes through the points there). */
-  if (handle.layer && handle.distance <= best) {
+  if (handle.layer && handle_beats_point(handle.distance, best)) {
     if (!shift && !ctrl) {
       for (Layer *layer : layers) {
         deselect_all(layer->drawing);
@@ -7956,6 +7964,13 @@ static PressGrab select_press_grab(Context &C, const ViewMapping &view, ImVec2 m
   return grab;
 }
 
+/* The shown handle a press takes (dragged at once, as Blender's tweak), or none when `grab`'s point wins. */
+static HandleHit press_handle(Context &C, const ViewMapping &view, ImVec2 mouse, const PressGrab &grab)
+{
+  const HandleHit handle = pick_handle(C, view, mouse, handles_shown(C.document->overlays, C.wm->tool_settings));
+  return handle.layer && handle_beats_point(handle.distance, grab.distance) ? handle : HandleHit();
+}
+
 /* A grab being dragged: what it holds becomes the selection unless it is all picked already (then the whole selection
  * moves with it). Its layer, or null when it has gone. */
 static Layer *select_press_grab_pick(Context &C, const PressGrab &grab)
@@ -8011,6 +8026,21 @@ bool motion_path_pick_test(Context &C, float2 at, float zoom, bool extend, bool 
   reach_update(C);
   const ViewMapping view{{0.0f, 0.0f}, {1000.0f, 1000.0f}, {0.0f, 0.0f}, zoom};
   return motion_path_pick_click(C, view, view.to_screen(at), extend, apply);
+}
+
+const char *select_press_takes_test(Context &C, float2 at, float zoom)
+{
+  reach_update(C);
+  const ViewMapping view{{0.0f, 0.0f}, {1000.0f, 1000.0f}, {0.0f, 0.0f}, zoom};
+  const PressGrab grab = select_press_grab(C, view, view.to_screen(at), false);
+  return press_handle(C, view, view.to_screen(at), grab).layer ? "HANDLE" : grab.layer ? "POINT" : "";
+}
+
+void select_click_test(Context &C, float2 at, float zoom)
+{
+  reach_update(C);
+  const ViewMapping view{{0.0f, 0.0f}, {1000.0f, 1000.0f}, {0.0f, 0.0f}, zoom};
+  select_click(C, view, at, handles_shown(C.document->overlays, C.wm->tool_settings));
 }
 
 std::vector<std::pair<uint64_t, std::vector<int>>> select_press_grab_test(Context &C, float2 at, float zoom,
@@ -15233,9 +15263,9 @@ static bool motion_path_vector_press(Context &C, Area &area, const ViewMapping &
     return false;
   }
   const bool modifier = io.KeyShift || io.KeyCtrl;
-  const HandleHit handle = pick_handle(C, view, at, handles_shown(C.document->overlays, C.wm->tool_settings));
   const PressGrab grab = select_press_grab(C, view, at, modifier);
-  if (handle.layer && !modifier && grab.distance >= handle.distance) {
+  const HandleHit handle = press_handle(C, view, at, grab);
+  if (handle.layer && !modifier) {
     CurvePoint &cp = handle.layer->drawing.curves[handle.curve].points[handle.index];
     if (!(handle.pre ? cp.select_in : cp.select_out)) {
       for (Layer *editing : editable_layers(C)) {
@@ -15426,7 +15456,7 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
      * layer itself (Blender's tweak). */
     const HandleHit handle = io.KeyShift || io.KeyCtrl
                                  ? HandleHit()
-                                 : pick_handle(C, view, io.MousePos, handles_shown(C.document->overlays, C.wm->tool_settings));
+                                 : press_handle(C, view, io.MousePos, select_press_grab(C, view, io.MousePos, false));
     if (handle.layer) {
       const CurvePoint &cp = handle.layer->drawing.curves[handle.curve].points[handle.index];
       if (!(handle.pre ? cp.select_in : cp.select_out)) {
@@ -17837,11 +17867,11 @@ static void viewport_draw_contents(Area &area, Context &C)
         }
         case Tool::Select: {
           /* Pressing on a shown handle drags it at once, as Blender's tweak does. */
-          const HandleHit handle = pick_handle(C, view, io.MousePos, handles_shown(C.document->overlays, ts));
           /* On a point (an edge in Edges mode): dragging it moves it, a click still just picks. A handle takes the
-           * press only if no point is nearer (as a click picks: the nearest within reach). */
+           * press only if clearly nearer than any point (as a click picks, handle_beats_point). */
           const PressGrab grab = select_press_grab(C, view, io.MousePos, io.KeyShift || io.KeyCtrl);
-          if (!handle.layer || io.KeyShift || io.KeyCtrl || grab.distance < handle.distance) {
+          const HandleHit handle = press_handle(C, view, io.MousePos, grab);
+          if (!handle.layer || io.KeyShift || io.KeyCtrl) {
             g_drag.grab = grab;
             break;
           }

@@ -1452,6 +1452,10 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   m.def("motion_path_pick", [](float x, float y, float zoom, bool extend, bool apply) {
     return motion_path_pick_test(current_context(), {x, y}, zoom, extend, apply);
   });
+  m.def("select_press_takes", [](float x, float y, float zoom) {
+    return std::string(select_press_takes_test(current_context(), {x, y}, zoom));
+  });
+  m.def("select_click", [](float x, float y, float zoom) { select_click_test(current_context(), {x, y}, zoom); });
   /* Test hook: what pressing the Select tool at a document point grabs to drag; with drag, the selection after. */
   m.def("select_press_grab", [](float x, float y, float zoom, bool modifier, bool drag) {
     py::list out;

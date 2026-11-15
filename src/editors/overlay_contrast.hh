@@ -100,6 +100,9 @@ bool motion_path_vector_under_test(Context &C, float2 at, float zoom);
  * dot's frame waits (path_hover_quiet) until the mouse leaves where it ended. */
 bool path_hover_quiet_update(bool moving, float2 mouse);
 bool path_hover_quiet();
+/* Test hooks: what a Select tool press at a document point takes ("HANDLE", "POINT" or ""), and its click there. */
+const char *select_press_takes_test(Context &C, float2 at, float zoom);
+void select_click_test(Context &C, float2 at, float zoom);
 std::vector<std::pair<uint64_t, std::vector<int>>> select_press_grab_test(Context &C, float2 at, float zoom,
                                                                           bool shift_or_ctrl, bool drag);
 

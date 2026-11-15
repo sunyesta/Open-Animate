@@ -99,6 +99,10 @@ PENDING = [
      "Assign Selected works with a drawing inside the rig active", 'tests/test_collection_row_menu.py'),
     ('src/editors/viewport.cc', '  return bone_is_pin(bone) && !custom_shape_shows(doc, bone);', '  return bone_is_pin(bone);',
      "a pin with a Custom shape is drawn as its drawing", 'tests/test_bone_shapes.py'),
+    ('src/editors/viewport.cc', '  return handle_distance + click_reach_pixels(8.0f) < point_distance;', '  return handle_distance <= point_distance;',
+     "a point wins over a handle ending beside it", 'tests/test_point_over_handle.py'),
+    ('src/editors/viewport.cc', '  if (handle.layer && handle_beats_point(handle.distance, best)) {', '  if (handle.layer && handle.distance <= best) {',
+     "a click takes the point over a handle ending beside it", 'tests/test_point_over_handle.py'),
 ]
 
 def build(root):
