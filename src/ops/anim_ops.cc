@@ -1061,7 +1061,8 @@ void anim_operators_register()
       "anim.timeline_stretch_pick", "Pick Stretch in Row",
       "Alt click in a timeline row (Shift adds, extend=1): with the Motion Path tool, picks what the row's paths have "
       "on frame= (the dot there between keys, or the key on it; a bone's row its tip's and head's, a layer's or the "
-      "Summary every path shown), so that stretch is the one edited; without it, selects the key ending the stretch "
+      "Summary every path shown), so that stretch is the one edited; a row whose path is traced but hidden (another shown) "
+      "shows it first; without it, selects the key ending the stretch "
       "there. The frame goes there either way. layers, kinds, selected_only, path, pinned and picked_bones: the row's "
       "channels, as anim.keys_select takes them. Not an undo step",
       OPTYPE_REGISTER, [](Context &C) {
@@ -1079,11 +1080,51 @@ void anim_operators_register()
         if (C.wm && C.wm->tool_settings.tool == Tool::MotionPath) {
           /* The paths whose dots this row's channels move. */
           const std::set<const void *> row = layers_filtered_channel_set(layers, filter);
-          std::vector<MotionPathTarget> targets;
-          for (const MotionPathTarget &t : motion_path_timing_targets(C)) {
+          const auto in_row = [&](const MotionPathTarget &t) {
             const std::set<const void *> moving = motion_path_dot_channels(doc, t);
-            if (std::any_of(moving.begin(), moving.end(), [&](const void *ch) { return row.count(ch) > 0; })) {
-              targets.push_back(t);
+            return std::any_of(moving.begin(), moving.end(), [&](const void *ch) { return row.count(ch) > 0; });
+          };
+          const auto row_targets = [&] {
+            std::vector<MotionPathTarget> out;
+            for (const MotionPathTarget &t : motion_path_timing_targets(C)) {
+              if (in_row(t)) {
+                out.push_back(t);
+              }
+            }
+            return out;
+          };
+          std::vector<MotionPathTarget> targets = row_targets();
+          if (targets.empty() && !doc.path_show_all) {
+            /* The row's path traced but another shown (one at a time): show it, the one its name shows first (a
+             * bone's Transform row its head), and pick there. Left as it was when none of the row's is traced. */
+            std::vector<MotionPathTarget> want;
+            MotionPathTarget named;
+            for (const Layer *layer : layers) {
+              if (!filter.path.empty() && motion_path_of_channel(C, *layer, filter.path, named)) {
+                want.push_back(named);
+              }
+            }
+            for (const MotionPathTarget &t : motion_path_targets_all(C)) {
+              want.push_back(t);
+            }
+            WindowManager &wm = *C.wm;
+            const bool was_set = wm.path_active_set;
+            const MotionPathTarget was = wm.path_active;
+            const uint64_t was_layer = wm.path_active_layer, was_bone = wm.path_active_bone;
+            for (const MotionPathTarget &t : want) {
+              if (in_row(t)) {
+                motion_path_active_choose(C, t);
+                targets = row_targets();
+                if (!targets.empty()) {
+                  break;
+                }
+              }
+            }
+            if (targets.empty()) {
+              wm.path_active_set = was_set;
+              wm.path_active = was;
+              wm.path_active_layer = was_layer;
+              wm.path_active_bone = was_bone;
             }
           }
           if (targets.empty()) {

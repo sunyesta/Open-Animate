@@ -682,6 +682,8 @@ add_test(NAME timing_interpolation_clipboard
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_timing_interpolation_clipboard.py)
 add_test(NAME stretch_sync
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_stretch_sync.py)
+add_test(NAME stretch_pick_hidden_path
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_stretch_pick_hidden_path.py)
 add_test(NAME key_whole_drawing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_whole_drawing.py)
 add_test(NAME key_whole_drawing_actions
