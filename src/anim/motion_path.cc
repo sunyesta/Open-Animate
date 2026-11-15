@@ -978,6 +978,17 @@ static float value_distance(const float2 a, const float2 b)
   return distance(a, b);
 }
 
+/* Whether an action's keys on channel `ch` (a bone's, `value` its plain one) move it: a head turn's actions key every
+ * bone they hold still, and a still one is no part of its path (its knob's keys no keys of it, no On Path). Keys hold
+ * the change from the setup (Bone::transform, turn, scale), so the setup is the channel's own on frame 0, as
+ * apply_action_bone_actions takes it; an action's frame 0 plays the setup whatever its key there says. */
+template<typename C, typename K, typename V> static bool action_keys_move(const C &ch, const K &action_keys, const V value)
+{
+  const auto setup = ch.animated() ? ch.evaluate(0) : (ch.has_last ? ch.last : value) - ch.from_action_bones;
+  return std::any_of(action_keys.begin(), action_keys.end(),
+                     [&](const auto &k) { return k.frame > 0 && value_distance(k.value, setup) > 1e-5f; });
+}
+
 std::vector<int> motion_path_keys(const Document &doc, const MotionPathTarget &target)
 {
   if (target.drawing) {
@@ -1020,22 +1031,19 @@ std::vector<int> motion_path_keys(const Document &doc, const MotionPathTarget &t
     add(b.position_keys);
     add(b.angle_keys);
     add(b.scale_keys);
-    /* Only the actions that move it: a head turn's actions key every bone they hold still (a pupil at its setup on
-     * every key), and their knob's keys would split the pupil's own move where the head turns. */
+    /* Only the actions that move it (action_keys_move): a head turn's knob keyed mid-stretch would split a pupil's
+     * own move there. */
     std::set<std::string> actions;
-    const auto moving = [&](const auto &ch, const auto setup) {
+    const auto moving = [&](const auto &ch, const auto value) {
       for (const auto &[name, action_keys] : ch.actions) {
-        const bool moves = std::any_of(action_keys.begin(), action_keys.end(), [&](const auto &k) {
-          return value_distance(k.value, setup) > 1e-5f;
-        });
-        if (moves) {
+        if (action_keys_move(ch, action_keys, value)) {
           actions.insert(name);
         }
       }
     };
-    moving(b.position_keys, b.setup_position);
-    moving(b.angle_keys, b.setup_angle);
-    moving(b.scale_keys, float2{1.0f, 1.0f});
+    moving(b.position_keys, b.transform);
+    moving(b.angle_keys, b.turn);
+    moving(b.scale_keys, b.scale);
     for (const std::string &name : actions) {
       if (const Bone *knob = controller_of_action(*layer, name)) {
         add(knob->position_keys);
@@ -5892,7 +5900,8 @@ static Bone *on_path_bone(Document &doc, const MotionPathTarget &t, Layer **r_ow
     return nullptr;
   }
   const bool moved = std::any_of(b.position_keys.actions.begin(), b.position_keys.actions.end(), [&](const auto &a) {
-    return !a.first.empty() && !bone_fix_line_of(*owner, a.first, b, &b.position_keys);
+    return !a.first.empty() && !bone_fix_line_of(*owner, a.first, b, &b.position_keys) &&
+           action_keys_move(b.position_keys, a.second, b.transform);
   });
   if (!moved && !b.position_keys.on_path) {
     return nullptr;
@@ -5928,7 +5937,9 @@ std::vector<int> motion_path_driver_frames(const Document &doc, const MotionPath
     }
   };
   for (const auto &[name, keys] : b->position_keys.actions) {
-    if (name.empty() || bone_fix_line_of(*owner, name, *b, &b->position_keys)) {
+    if (name.empty() || bone_fix_line_of(*owner, name, *b, &b->position_keys) ||
+        !action_keys_move(b->position_keys, keys, b->transform))
+    {
       continue;
     }
     if (const Bone *by = action_bone_of(*owner, name)) {

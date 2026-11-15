@@ -236,4 +236,9 @@ not a bug, check the times against the shutdown before shrinking.
   file as `OA_SWEEP_FILE` and shrink only those (seed 14's 210 ops came down to two this way in minutes).
 - **A rename on every change finds tests that read a name too early.** Fix names now follow at each undo push: a test
   that reads a fix's name, then converts or deletes what it names, must read it again after.
+- **Bone keys hold the change from the setup, not where the bone is.** Position and angle keys (in actions too) hold
+  `Bone::transform` and `turn`, so a bone held still is keyed (0,0) and 0 whatever its setup. A check against
+  `setup_position` or `setup_angle` passes only for bones at the origin pointing right: build test bones off the
+  origin and turned (the practice file's Head_X points up), and compare with the channel's own frame 0
+  (`channel_setup` in animation.cc).
 - **A field "missing before" can be a hair off its default.** The file leaves a point's width out at exactly 1.0; a fix playing a width can leave the stored 1.0 two rounding steps under it (0.9999999, settled, never growing) after some frames are visited, so the field appears. `SAVED_DEFAULTS` in harness.py and fuzz_timing.py compares a missing one as its default; add a key there when another such field shows up.

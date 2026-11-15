@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
+#include <stdexcept>
+#include <sstream>
 #include <cstdio>
 #include <cstdlib>
 
@@ -596,17 +599,24 @@ const rna::StructRNA &Layer::rna()
               return out;
             },
             [](Layer &l, const std::string &v) {
+              /* Three "#rrggbb", nothing else: anything else is refused (Python's ValueError), the layer as it was. */
+              std::istringstream words(v);
+              std::vector<std::string> hexes;
+              for (std::string w; words >> w;) {
+                hexes.push_back(w);
+              }
+              const auto is_hex = [](const std::string &w) {
+                return w.size() == 7 && w[0] == '#' &&
+                       std::all_of(w.begin() + 1, w.end(), [](unsigned char ch) { return std::isxdigit(ch) != 0; });
+              };
+              if (hexes.size() != 3 || !std::all_of(hexes.begin(), hexes.end(), is_hex)) {
+                throw std::invalid_argument("custom_colors is three colours, \"#rrggbb #rrggbb #rrggbb\"");
+              }
               std::array<Color, 3> shades = l.custom_colors;
-              size_t at = 0;
-              for (Color &c : shades) {
-                at = v.find('#', at);
-                if (at == std::string::npos || at + 7 > v.size()) {
-                  return;
-                }
-                const unsigned rgb = unsigned(std::strtoul(v.substr(at + 1, 6).c_str(), nullptr, 16));
-                c = {float((rgb >> 16) & 0xff) / 255.0f, float((rgb >> 8) & 0xff) / 255.0f, float(rgb & 0xff) / 255.0f,
-                     1.0f};
-                at += 7;
+              for (size_t k = 0; k < 3; k++) {
+                const unsigned rgb = unsigned(std::strtoul(hexes[k].c_str() + 1, nullptr, 16));
+                shades[k] = {float((rgb >> 16) & 0xff) / 255.0f, float((rgb >> 8) & 0xff) / 255.0f,
+                             float(rgb & 0xff) / 255.0f, 1.0f};
               }
               layer_set_color_set(l, BONE_COLOR_CUSTOM);
               l.custom_colors = shades;

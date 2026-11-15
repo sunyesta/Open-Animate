@@ -1609,23 +1609,31 @@ void rig_operators_register()
                [](Context &C) {
                  Layer &armature = *active_armature(C);
                  const Bone from = *bone_find(armature, armature.active_bone);
-                 int changed = 0;
+                 int changed = 0, already = 0;
+                 /* One that has it already counts as nothing done: pressed twice, the second press is Cancelled. */
+                 const auto give = [&](int &set, std::array<Color, 3> &colors) {
+                   if (set == from.color_set && colors == from.custom_colors) {
+                     already++;
+                     return;
+                   }
+                   set = from.color_set;
+                   colors = from.custom_colors;
+                   changed++;
+                 };
                  for (Bone &b : armature.bones) {
                    const bool picked = b.selected || b.select_head || b.select_tail;
                    if (!picked || b.id == from.id) {
                      continue;
                    }
-                   b.color_set = from.color_set;
-                   b.custom_colors = from.custom_colors;
-                   changed++;
+                   give(b.color_set, b.custom_colors);
                  }
                  for (Layer *l : drawings_points_picked(*C.document)) {
-                   l->color_set = from.color_set;
-                   l->custom_colors = from.custom_colors;
-                   changed++;
+                   give(l->color_set, l->custom_colors);
                  }
                  if (changed == 0) {
-                   report(ReportType::Warning, "Select other bones, or points of drawings, to copy this bone's colour to");
+                   if (already == 0) {
+                     report(ReportType::Warning, "Select other bones, or points of drawings, to copy this bone's colour to");
+                   }
                    return OpStatus::Cancelled;
                  }
                  return OpStatus::Finished;
@@ -1650,23 +1658,31 @@ void rig_operators_register()
                  }
                  const int set = source->color_set;
                  const std::array<Color, 3> shades = source->custom_colors;
-                 int changed = 0;
+                 int changed = 0, already = 0;
+                 /* One that has it already counts as nothing done: pressed twice, the second press is Cancelled. */
+                 const auto give = [&](int &to_set, std::array<Color, 3> &colors) {
+                   if (to_set == set && colors == shades) {
+                     already++;
+                     return;
+                   }
+                   to_set = set;
+                   colors = shades;
+                   changed++;
+                 };
                  for (Bone &b : active_armature(C)->bones) {
                    if (b.selected || b.select_head || b.select_tail) {
-                     b.color_set = set;
-                     b.custom_colors = shades;
-                     changed++;
+                     give(b.color_set, b.custom_colors);
                    }
                  }
                  for (Layer *l : drawings_points_picked(doc)) {
                    if (l->id != source->id) {
-                     l->color_set = set;
-                     l->custom_colors = shades;
-                     changed++;
+                     give(l->color_set, l->custom_colors);
                    }
                  }
                  if (changed == 0) {
-                   report(ReportType::Warning, "Select bones, or points of other drawings, to copy this colour to");
+                   if (already == 0) {
+                     report(ReportType::Warning, "Select bones, or points of other drawings, to copy this colour to");
+                   }
                    return OpStatus::Cancelled;
                  }
                  return OpStatus::Finished;

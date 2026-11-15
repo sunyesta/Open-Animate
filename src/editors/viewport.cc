@@ -10779,6 +10779,15 @@ static void family_and_points_deselect(Context &C, Document &doc, const Layer &a
   }
 }
 
+/* A click on a bone of the bone layer around the one worked in makes that one worked in: the points edited with its
+ * bones, not let go above (they weren't being edited yet), let go now. */
+static void worked_in_points_deselect(Context &C)
+{
+  for (Layer *l : editable_layers(C)) {
+    deselect_all(l->drawing);
+  }
+}
+
 /* The Transform tool's click on bones: the best under it, one of its family's (the bone layer around it, a shown sub
  * bone group) worked in instead, so a character's bones all answer clicks; Shift adds. */
 static void transform_bone_click_pick(Context &C, Layer &armature, const ViewMapping &view, ImVec2 mouse, bool shift)
@@ -10803,6 +10812,7 @@ static void transform_bone_click_pick(Context &C, Layer &armature, const ViewMap
     /* Inside the bone layer worked in, it stays the one worked in. */
     if (!shift && !layer_inside(doc, other->id, armature.id)) {
       doc.active_layer = other->id;
+      worked_in_points_deselect(C);
     }
   }
   else if (Bone *b = bone_find(armature, picked)) {
@@ -15327,8 +15337,10 @@ static bool motion_path_pick_click(Context &C, const ViewMapping &view, ImVec2 a
       }
     }
     bone_click_select(other ? *other : *armature, under.hit, extend);
+    doc.picked_drawing = 0;
     if (other && !extend && !layer_inside(doc, other->id, armature->id)) {
       doc.active_layer = other->id;
+      worked_in_points_deselect(C);
     }
   }
   push_undo(C, on_point ? "Select" : "Select Bone");
@@ -15652,6 +15664,7 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
             /* Inside the bone layer worked in, it stays the one worked in. */
             if (!io.KeyShift && !layer_inside(doc, other->id, armature.id)) {
               doc.active_layer = other->id;
+              worked_in_points_deselect(C);
             }
           }
           else {

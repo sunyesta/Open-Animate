@@ -426,7 +426,7 @@ ops.armature.select_none()
 rig.select_bone("lid_L")
 assert side("RIGHT", "lid_L Right") == {'FINISHED'} and side("LEFT", "lid_L Left") == {'FINISHED'}
 lid_sides = dict(bone("lid_L")["controller_actions"])
-assert ops.armature.symmetrize() == {'FINISHED'}
+assert ops.armature.symmetrize(action_bone_actions="0") == {'FINISHED'}  # on by default now
 # With Mirror Action Bone Actions off, sides with nothing on the other side are still made: a knob with empty sides does
 # nothing (the practice file's Eye_Blink_R.001 took no Down).
 assert bone("lid_R")["controller_actions"]["RIGHT"] == "lid_R Right", ("made anyway", bone("lid_R")["controller_actions"])

@@ -140,3 +140,40 @@ assert ops.armature.copy_bone_color_to_selected() == {'FINISHED'}
 assert mouth.color_set == "THEME09" and nose.color_set == "THEME01", (mouth.color_set, nose.color_set)
 
 print("bone tab drawing, copying: ok")
+
+# --- The Motion Path tool's Shift click on a bone brings the Bone tab back, as the Transform tool's does --------------
+ops.armature.select_none()
+for l in (mouth, nose):
+    l.select_points(range(len(l.points)), False)
+wm.select_click(1.0, -2.0, 100.0)
+assert "Drawing" in wm.properties_tabs()
+assert wm.motion_path_pick(-2.0, 0.0, 100.0, extend=True)
+assert [b["name"] for b in rig.bones if b["selected"]] == ["jaw"]
+tabs = wm.properties_tabs()
+assert "Bone" in tabs and "Bone Constraints" in tabs, ("the bone clicked last", tabs)
+
+# --- Copying a colour pressed twice: the second press changes nothing, Cancelled ---------------------------------------
+wm.bone_press(-2.0, 0.0, 100.0, transform_tool=True)
+mouth.select_points([0])
+rig.bone_set("jaw", color_set="THEME05")
+assert ops.armature.copy_bone_color_to_selected() == {'FINISHED'}
+assert ops.armature.copy_bone_color_to_selected() == {'CANCELLED'}, "it has it already"
+nose.select_points([0])
+assert ops.layer.copy_color_to_selected(layer=str(mouth.id)) == {'FINISHED'}
+assert ops.layer.copy_color_to_selected(layer=str(mouth.id)) == {'CANCELLED'}, "they have it already"
+
+# --- Custom colours: three "#rrggbb" or a ValueError, the layer as it was -----------------------------------------------
+nose.color_set = "THEME02"
+was = nose.custom_colors
+for bad in ("#zzzzzz #00ff00 #0000ff", "#ff000 #00ff00 #0000ff", "#ff0000", "", "#ff0000 #00ff00",
+            "#ff0000 #00ff00 #0000ff #ffffff", "ff0000 00ff00 0000ff"):
+    try:
+        nose.custom_colors = bad
+        raise AssertionError(("taken", bad, nose.custom_colors))
+    except ValueError:
+        pass
+    assert (nose.color_set, nose.custom_colors) == ("THEME02", was), (bad, nose.color_set, nose.custom_colors)
+nose.custom_colors = "#FF0000 #00ff00 #0000ff"
+assert (nose.color_set, nose.custom_colors) == ("CUSTOM", "#ff0000 #00ff00 #0000ff")
+
+print("bone tab drawing, sweep: ok")
