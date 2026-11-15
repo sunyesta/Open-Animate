@@ -416,10 +416,6 @@ static int key_frame_beside(Context &C, int dir)
   return it == frames.begin() ? -1 : *std::prev(it);
 }
 
-/* Copy and Paste Interpolation: one key's settings. */
-static KeySettings g_interp_clipboard;
-static bool g_interp_copied = false;
-
 /* The settings an operator's arguments name, over `s`: only those given change. False (and a
  * report) for an unknown mode or strength. */
 void keys_moved_report(int followed)
@@ -603,27 +599,32 @@ void anim_operators_register()
                         report(ReportType::Warning, "Select a key to copy its interpolation");
                         return OpStatus::Cancelled;
                       }
-                      g_interp_clipboard = sel.first;
-                      g_interp_copied = true;
-                      report(ReportType::Info, std::string("Copied ") + interp_name(sel.first.interp));
+                      InterpClipboard &clip = interp_clipboard();
+                      clip.settings = sel.first;
+                      clip.timing = sel.first_timing;
+                      clip.copied = true;
+                      report(ReportType::Info, "Copied " + interp_clipboard_text());
                       return OpStatus::Finished;
                     });
   anim_operator_add("anim.interpolation_paste", "Paste Interpolation",
                     "Give the selected keys the copied interpolation and settings (their values stay)",
                     OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_TIMING, [](Context &C) {
-                      if (!g_interp_copied) {
+                      const InterpClipboard &clip = interp_clipboard();
+                      if (!clip.copied) {
                         report(ReportType::Warning, "Copy a key's interpolation first");
                         return OpStatus::Cancelled;
                       }
                       Document &doc = *C.document;
                       animation_record(doc);
-                      const int count = layers_change_selected_keys(timeline_layers(C),
-                                                                    [](KeySettings &s) {
-                                                                      /* Interpolation only: each keeps its key type. */
-                                                                      const KeyType type = s.type;
-                                                                      s = g_interp_clipboard;
-                                                                      s.type = type;
-                                                                    });
+                      /* Interpolation only: each keeps its key type. A Custom curve fits any stretch. */
+                      const int count = layers_change_selected_keys(
+                          timeline_layers(C),
+                          [&clip](KeySettings &s) {
+                            const KeyType type = s.type;
+                            s = clip.settings;
+                            s.type = type;
+                          },
+                          &clip.timing);
                       if (count == 0) {
                         report(ReportType::Warning, "Select keys to paste the interpolation onto");
                         return OpStatus::Cancelled;

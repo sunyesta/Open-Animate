@@ -4530,6 +4530,64 @@ bool motion_path_timing_curve_set(Document &doc, const MotionPathTarget &target,
   return done;
 }
 
+bool motion_path_stretch_interp(const Document &doc, const MotionPathTarget &target, int frame, KeySettings &r_settings,
+                                TimingCurve &r_curve)
+{
+  bool found = false;
+  with_path_channel(const_cast<Document &>(doc), target, [&](auto &ch) {
+    size_t i = 0;
+    int start = 0, n = 0;
+    if (found || !stretch_of(ch, frame, i, start, n)) {
+      return;
+    }
+    const auto &b = ch.keys[i];
+    r_settings = key_settings(b);
+    r_curve = b.interp == Interp::Custom ? b.timing : TimingCurve{};
+    found = true;
+  });
+  return found;
+}
+
+int motion_path_stretch_interp_set(Document &doc, const MotionPathTarget &target, int frame, int end,
+                                   const KeySettings &settings, const TimingCurve &curve)
+{
+  if (settings.interp == Interp::Custom && !curve.points.empty() && !timing_valid(curve)) {
+    return 0;
+  }
+  int most = 0;
+  with_timing_channels(doc, target, [&](auto &ch) {
+    size_t first = 0;
+    int start = 0, n = 0;
+    if (!stretch_of(ch, frame, first, start, n)) {
+      return;
+    }
+    int changed = 0;
+    for (size_t i = first; i < ch.keys.size() && (i == first || ch.keys[i].frame <= end); i++) {
+      auto &b = ch.keys[i];
+      KeySettings s = settings;
+      s.type = b.type;
+      s.hold = b.hold;
+      s.interval = b.interval;
+      if constexpr (std::is_same_v<std::decay_t<decltype(b.value)>, float2>) {
+        /* Made Custom from a straight stretch: its line kept, as the graph's own edits keep it. */
+        if (s.interp == Interp::Custom && !interp_path_smooth(b.interp)) {
+          key_path_handles_freeze(ch.keys, i - 1);
+          key_path_handles_freeze(ch.keys, i);
+        }
+      }
+      key_settings_apply(b, s);
+      b.timing = s.interp == Interp::Custom ? curve : TimingCurve{};
+      changed++;
+    }
+    most = std::max(most, changed);
+  });
+  if (most > 0) {
+    channel_keys_changed();
+  }
+  animation_evaluate(doc, doc.frame_current);
+  return most;
+}
+
 bool motion_path_dot_speed_set(Document &doc, const MotionPathTarget &target, int frame, float speed)
 {
   bool done = false;

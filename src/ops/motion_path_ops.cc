@@ -2125,6 +2125,71 @@ void motion_path_operators_register()
     };
     operators().add(std::move(ot));
   }
+  {
+    OperatorType ot;
+    ot.idname = "anim.timing_interpolation_copy";
+    ot.name = "Copy Interpolation";
+    ot.description = "Copy the interpolation of the stretch frame=N is strictly inside (its key's settings, and a "
+                     "Custom stretch's curve), shared with the timeline's Copy Interpolation; of what a path traces "
+                     "(layer=, bone=, point=, drawing=1, or the first traced)";
+    ot.flag = OPTYPE_REGISTER;
+    ot.poll = [](Context &C) { return C.document != nullptr; };
+    ot.exec = [](Context &C) {
+      Document &doc = *C.document;
+      std::vector<MotionPathTarget> targets;
+      if (!op_targets(C, targets)) {
+        return OpStatus::Cancelled;
+      }
+      animation_sync(doc);
+      KeySettings settings;
+      TimingCurve curve;
+      if (!motion_path_stretch_interp(doc, targets.front(), op_arg_int(C, "frame", doc.frame_current), settings,
+                                      curve))
+      {
+        report(ReportType::Warning, "Only between keys");
+        return OpStatus::Cancelled;
+      }
+      InterpClipboard &clip = interp_clipboard();
+      clip.settings = settings;
+      clip.timing = std::move(curve);
+      clip.copied = true;
+      report(ReportType::Info, "Copied " + interp_clipboard_text());
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
+  {
+    OperatorType ot;
+    ot.idname = "anim.timing_interpolation_paste";
+    ot.name = "Paste Interpolation";
+    ot.description = "Give the stretch frame=N is strictly inside the copied interpolation (a Custom curve fitted to "
+                     "its length), and each stretch after it up to end=, as a span across breakdowns; its keys stay "
+                     "where they are. Of what a path traces (layer=, bone=, point=, drawing=1, or the first traced)";
+    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_TIMING;
+    ot.poll = [](Context &C) { return C.document != nullptr && interp_clipboard().copied; };
+    ot.exec = [](Context &C) {
+      Document &doc = *C.document;
+      const InterpClipboard &clip = interp_clipboard();
+      if (!clip.copied) {
+        report(ReportType::Warning, "Copy an interpolation first");
+        return OpStatus::Cancelled;
+      }
+      std::vector<MotionPathTarget> targets;
+      if (!op_targets(C, targets)) {
+        return OpStatus::Cancelled;
+      }
+      animation_sync(doc);
+      const int frame = op_arg_int(C, "frame", doc.frame_current);
+      if (motion_path_stretch_interp_set(doc, targets.front(), frame, op_arg_int(C, "end", frame), clip.settings,
+                                         clip.timing) == 0)
+      {
+        report(ReportType::Warning, "Only between keys");
+        return OpStatus::Cancelled;
+      }
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
   /* The Path Timing graph's Edit and Sculpt modes: the curve of the stretch frame=N is strictly inside (of its first
    * traced thing, or layer=, bone=, point=, drawing=1), straight while even. */
   const auto timing_curve_of = [](Context &C, MotionPathTarget &r_target, int &r_frame, TimingCurve &r_curve,

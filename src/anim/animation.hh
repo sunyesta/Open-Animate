@@ -517,11 +517,24 @@ struct SelectedKeys {
   int first_span = 0;
   /* Up to six other curves among them (differing from the first's and each other's). */
   std::vector<KeySettings> others;
+  /* The first one's timing curve, when it is Custom. */
+  TimingCurve first_timing;
 };
 SelectedKeys layers_selected_keys(const std::vector<Layer *> &layers);
 /* Changes the selected keys' interpolation settings with `change`; yes/no channels' keys stay
- * Step. Returns how many keys there were. */
-int layers_change_selected_keys(const std::vector<Layer *> &layers, const std::function<void(KeySettings &)> &change);
+ * Step. A key left Custom takes the curve `custom` when given. Returns how many keys there were. */
+int layers_change_selected_keys(const std::vector<Layer *> &layers, const std::function<void(KeySettings &)> &change,
+                                const TimingCurve *custom = nullptr);
+/* Copy and Paste Interpolation's clipboard, one for the timeline and the Path Timing graph: a key's settings and,
+ * when Custom, its timing curve (by share of the stretch's time, so it fits a stretch of any length). */
+struct InterpClipboard {
+  bool copied = false;
+  KeySettings settings;
+  TimingCurve timing;
+};
+InterpClipboard &interp_clipboard();
+/* What it holds, for Paste's tooltip ("Ease In/Out (Quad)", "Custom curve, 6 points"); empty while nothing is. */
+std::string interp_clipboard_text();
 /* Moves the selected keys to `to(frame)` (never below 1; frame-0 keys, the setup, stay put).
  * A moved key landing on an unselected one replaces it, as in Blender. */
 /* Ripple: the unselected keys after each channel's last selected key move by as much as it does. */

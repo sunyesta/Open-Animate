@@ -5839,6 +5839,7 @@ SelectedKeys layers_selected_keys(const std::vector<Layer *> &layers)
         const KeySettings s = key_settings(key);
         if (r.count == 0) {
           r.first = s;
+          r.first_timing = key.interp == Interp::Custom ? key.timing : TimingCurve{};
           /* The stretch arriving at it, after the key before's hold. */
           const size_t i = size_t(&key - ch.keys.data());
           if (i > 0) {
@@ -5871,7 +5872,8 @@ SelectedKeys layers_selected_keys(const std::vector<Layer *> &layers)
   return r;
 }
 
-int layers_change_selected_keys(const std::vector<Layer *> &layers, const std::function<void(KeySettings &)> &change)
+int layers_change_selected_keys(const std::vector<Layer *> &layers, const std::function<void(KeySettings &)> &change,
+                                const TimingCurve *custom)
 {
   int count = 0;
   for (Layer *layer : layers) {
@@ -5890,6 +5892,9 @@ int layers_change_selected_keys(const std::vector<Layer *> &layers, const std::f
           s.interp = Interp::Step;
         }
         key_settings_apply(key, s);
+        if (custom && key.interp == Interp::Custom) {
+          key.timing = *custom;
+        }
         count++;
       }
     });
@@ -5905,6 +5910,30 @@ int layers_change_selected_keys(const std::vector<Layer *> &layers, const std::f
     }
   }
   return count;
+}
+
+InterpClipboard &interp_clipboard()
+{
+  static InterpClipboard clipboard;
+  return clipboard;
+}
+
+std::string interp_clipboard_text()
+{
+  const InterpClipboard &c = interp_clipboard();
+  if (!c.copied) {
+    return {};
+  }
+  const Interp interp = c.settings.interp;
+  if (interp == Interp::Custom) {
+    return c.timing.points.empty() ? "Custom, even"
+                                   : "Custom curve, " + std::to_string(c.timing.points.size()) + " points";
+  }
+  std::string text = interp_name(interp);
+  if (interp == Interp::EaseInOut || interp == Interp::EaseIn || interp == Interp::EaseOut) {
+    text += std::string(" (") + ease_name(c.settings.ease) + ")";
+  }
+  return text;
 }
 
 std::vector<bool *> layers_key_selected_flags(const std::vector<Layer *> &layers, int frame, const KeyFilter &filter)

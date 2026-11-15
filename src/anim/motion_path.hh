@@ -410,6 +410,16 @@ bool motion_path_timing_curve(const Document &doc, const MotionPathTarget &targe
 /* That stretch made Custom with `curve` as it is (none: even), the drawing's other channels alike, the keys staying on
  * their frames. */
 bool motion_path_timing_curve_set(Document &doc, const MotionPathTarget &target, int frame, const TimingCurve &curve);
+/* The interpolation of the stretch `frame` is strictly inside: its arriving key's settings and, when Custom, its curve
+ * (the Path Timing graph's Copy Interpolation). False off a stretch that moves. */
+bool motion_path_stretch_interp(const Document &doc, const MotionPathTarget &target, int frame, KeySettings &r_settings,
+                                TimingCurve &r_curve);
+/* Paste Interpolation: the stretch `frame` is strictly inside, and each after it whose key is on or before `end` (a
+ * span across breakdowns: each of its stretches), given the interpolation of `settings`, Custom with `curve`; the
+ * drawing's other channels alike. Each key keeps its type, hold and interval (they time the stretch after it). Returns
+ * how many stretches changed. */
+int motion_path_stretch_interp_set(Document &doc, const MotionPathTarget &target, int frame, int end,
+                                   const KeySettings &settings, const TimingCurve &curve);
 /* The dot on `frame` made to go `speed` (as motion_path_dot_speed gives it: 1 even, under 0 going back), the rest of
  * its stretch taking up the time it gains or loses, each frame by its share; false off a stretch, or when the rest
  * can't (the most it can go is less than the stretch's frames). */

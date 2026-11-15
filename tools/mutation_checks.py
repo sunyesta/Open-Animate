@@ -59,6 +59,17 @@ PENDING = [
      'A controller side not keyed yet is as long as the opposite side is keyed', 'tests/test_controller_box_from_keys.py'),
     ('src/anim/animation.cc', '        if (most <= 1e-6f) {', '        if (false) {',
      'A controller side keyed only at rest counts as not keyed', 'tests/test_controller_box_from_keys.py'),
+    ('src/anim/animation.cc', '        if (custom && key.interp == Interp::Custom) {', '        if (false) {',
+     "The timeline's Paste Interpolation carries a Custom curve", 'tests/test_timing_interpolation_clipboard.py'),
+    ('src/anim/motion_path.cc', '      b.timing = s.interp == Interp::Custom ? curve : TimingCurve{};',
+     '      b.timing = TimingCurve{};',
+     "The Path Timing graph's Paste Interpolation gives the copied curve", 'tests/test_timing_interpolation_clipboard.py'),
+    ('src/anim/motion_path.cc',
+     '    for (size_t i = first; i < ch.keys.size() && (i == first || ch.keys[i].frame <= end); i++) {',
+     '    for (size_t i = first; i < ch.keys.size() && i == first; i++) {',
+     "The graph's Paste Interpolation pastes a span across breakdowns whole", 'tests/test_timing_interpolation_clipboard.py'),
+    ('src/anim/motion_path.cc', '      s.interval = b.interval;', '      s.interval = settings.interval;',
+     "The graph's Paste Interpolation keeps each key's hold and interval", 'tests/test_timing_interpolation_clipboard.py'),
 ]
 
 def build(root):

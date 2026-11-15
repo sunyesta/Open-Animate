@@ -1261,6 +1261,20 @@ static void path_timing_graph(Context &C, const MotionPathTarget &t, const Motio
         operator_call(C, "anim.motion_path_stretch_shape", args);
       }
     }
+    /* The stretch's interpolation, one clipboard with the timeline's; a span across breakdowns pasted whole. */
+    ImGui::Separator();
+    if (ui_menu_item("Copy Interpolation")) {
+      operator_call(C, "anim.timing_interpolation_copy", target_args(doc, t, s.start + 1));
+    }
+    const std::string copied = interp_clipboard_text();
+    if (ui_menu_item("Paste Interpolation", nullptr, false, !copied.empty())) {
+      OpArgs paste = target_args(doc, t, s.start + 1);
+      paste["end"] = std::to_string(s.end);
+      operator_call(C, "anim.timing_interpolation_paste", paste);
+    }
+    if (!copied.empty()) {
+      ImGui::SetItemTooltip("%s", copied.c_str());
+    }
     if (!wm.path_dots.empty()) {
       ImGui::Separator();
       if (ui_menu_item("Even Spacing (Selected Dots)")) {
