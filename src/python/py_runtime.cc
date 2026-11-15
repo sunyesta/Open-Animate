@@ -1456,6 +1456,19 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return std::string(select_press_takes_test(current_context(), {x, y}, zoom));
   });
   m.def("select_click", [](float x, float y, float zoom) { select_click_test(current_context(), {x, y}, zoom); });
+  m.def("handle_ends_shown", [](uint64_t id, int curve) {
+    Context &C = current_context();
+    animation_sync(*C.document);
+    const Layer *layer = layer_find(*C.document, id);
+    if (!layer) {
+      throw py::value_error("no such layer");
+    }
+    py::list out;
+    for (const auto &[in, out_end] : handle_ends_shown_test(C, *layer, curve)) {
+      out.append(py::make_tuple(py::make_tuple(in.x, in.y), py::make_tuple(out_end.x, out_end.y)));
+    }
+    return out;
+  });
   /* Test hook: what pressing the Select tool at a document point grabs to drag; with drag, the selection after. */
   m.def("select_press_grab", [](float x, float y, float zoom, bool modifier, bool drag) {
     py::list out;

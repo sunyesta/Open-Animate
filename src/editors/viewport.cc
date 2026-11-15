@@ -473,6 +473,8 @@ static Posed posed(const Document &doc, const Layer &layer)
       for (size_t k = 0; deformed && !fitted && k < curve.points.size(); k++) {
         curve.points[k].handle_in = shown.curves[c].points[k].handle_in;
         curve.points[k].handle_out = shown.curves[c].points[k].handle_out;
+        curve.points[k].wire_fit_in = shown.curves[c].points[k].wire_fit_in;
+        curve.points[k].wire_fit_out = shown.curves[c].points[k].wire_fit_out;
         curve.points[k].handles_set = true;
       }
     }
@@ -2942,20 +2944,15 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
 }
 
 /* For the Shape handle display: the points of every shape any of whose points (or handles, picked
- * on their own) is selected. */
-static const std::vector<bool> &shape_handle_points(const VectorDrawing &drawing)
+ * on their own) is selected; nothing for the other displays. Worked out by each caller once per drawing, never kept
+ * between calls: the drawing shown is often a copy made for the moment (posed), and another layer's copy can come at
+ * the same address in the same frame, which showed one layer's handles on another while dragging (they flickered). */
+static std::vector<bool> shape_handle_points(const VectorDrawing &drawing, HandleDisplay display)
 {
-  /* Worked out once per drawing per frame, not for every handle. */
-  static const VectorDrawing *cached = nullptr;
-  static int cached_frame = -1;
-  static std::vector<bool> mask;
-  /* (A background run has no ImGui and no frames: worked out every time.) */
-  const int frame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : -2;
-  if (cached == &drawing && cached_frame == frame && frame != -2 && mask.size() == drawing.points.size()) {
+  std::vector<bool> mask;
+  if (display != HandleDisplay::Shape) {
     return mask;
   }
-  cached = &drawing;
-  cached_frame = frame;
   mask.assign(drawing.points.size(), false);
   for (const Shape &shape : drawing.shapes) {
     bool touched = false;
@@ -2978,7 +2975,9 @@ static const std::vector<bool> &shape_handle_points(const VectorDrawing &drawing
   return mask;
 }
 
-static bool handle_visible(const VectorDrawing &drawing, const CurvePoint &cp, HandleDisplay display)
+/* `shape_points`: shape_handle_points of the drawing for this display. */
+static bool handle_visible(const VectorDrawing &drawing, const CurvePoint &cp, HandleDisplay display,
+                           const std::vector<bool> &shape_points)
 {
   /* Detail above its curve's edit level shows nothing to edit. */
   if (drawing.points[cp.point].detail.hidden) {
@@ -2992,7 +2991,8 @@ static bool handle_visible(const VectorDrawing &drawing, const CurvePoint &cp, H
     case HandleDisplay::Selected:
       return curve_point_selected(drawing, cp);
     case HandleDisplay::Shape:
-      return curve_point_selected(drawing, cp) || shape_handle_points(drawing)[cp.point];
+      return curve_point_selected(drawing, cp) ||
+             (size_t(cp.point) < shape_points.size() && shape_points[size_t(cp.point)]);
   }
   return false;
 }
@@ -3006,12 +3006,16 @@ struct HandleHit {
   float distance = FLT_MAX;
 };
 
-/* Where a handle shows: where its line really bends, short of where it is stored when it faces detail. */
+/* Where a handle shows: where its line really bends, short of where it is stored when it faces detail; through a
+ * deform, as bent at its own point, without the length the edit wire fitted it to (which changes as its neighbour
+ * moves, CurvePoint::wire_fit_in). */
 static float2 handle_end(const VectorDrawing &drawing, const ShownHandleFactors &factors, int c, int i, bool pre)
 {
   const Curve &curve = drawing.curves[c];
-  const float2 here = drawing.points[curve.points[i].point].pos;
-  return here + (curve_handle(drawing, curve, i, pre) - here) * factors.of(c, i, pre);
+  const CurvePoint &cp = curve.points[i];
+  const float2 here = drawing.points[cp.point].pos;
+  const float2 fit = pre ? cp.wire_fit_in : cp.wire_fit_out;
+  return here + (curve_handle(drawing, curve, i, pre) - fit - here) * factors.of(c, i, pre);
 }
 
 /* The shown handle nearest the mouse, within picking distance, on any edited layer. */
@@ -3026,10 +3030,11 @@ static HandleHit pick_handle(Context &C, const ViewMapping &view, ImVec2 mouse, 
     const Posed shown = posed(*C.document, *layer);
     const VectorDrawing &drawing = *shown.drawing;
     const ShownHandleFactors factors = drawing_detail_shown_factors(drawing);
+    const std::vector<bool> shape_points = shape_handle_points(drawing, display);
     for (int c = 0; c < int(drawing.curves.size()); c++) {
       const Curve &curve = drawing.curves[c];
       for (int i = 0; i < int(curve.points.size()); i++) {
-        if (!handle_visible(drawing, curve.points[i], display)) {
+        if (!handle_visible(drawing, curve.points[i], display, shape_points)) {
           continue;
         }
         const float2 here = drawing.points[curve.points[i].point].pos;
@@ -8028,6 +8033,21 @@ bool motion_path_pick_test(Context &C, float2 at, float zoom, bool extend, bool 
   return motion_path_pick_click(C, view, view.to_screen(at), extend, apply);
 }
 
+std::vector<std::pair<float2, float2>> handle_ends_shown_test(Context &C, const Layer &layer, int curve)
+{
+  const Posed shown = posed(*C.document, layer);
+  const VectorDrawing &drawing = *shown.drawing;
+  std::vector<std::pair<float2, float2>> out;
+  if (curve < 0 || curve >= int(drawing.curves.size())) {
+    return out;
+  }
+  const ShownHandleFactors factors = drawing_detail_shown_factors(drawing);
+  for (int i = 0; i < int(drawing.curves[size_t(curve)].points.size()); i++) {
+    out.push_back({handle_end(drawing, factors, curve, i, true), handle_end(drawing, factors, curve, i, false)});
+  }
+  return out;
+}
+
 const char *select_press_takes_test(Context &C, float2 at, float zoom)
 {
   reach_update(C);
@@ -8092,11 +8112,12 @@ static void select_box(Context &C, const ViewMapping &view, ImVec2 a, ImVec2 b, 
     /* Handles shown before the box (whose points were selected then) can be boxed too. */
     const ShownHandleFactors factors = drawing_detail_shown_factors(*shown.drawing);
     std::vector<std::pair<CurvePoint *, int>> boxed;
+    const std::vector<bool> shape_points = shape_handle_points(drawing, handles);
     for (size_t c = 0; c < drawing.curves.size(); c++) {
       Curve &curve = drawing.curves[c];
       for (int i = 0; i < int(curve.points.size()); i++) {
         CurvePoint &cp = curve.points[i];
-        if (handle_visible(drawing, cp, handles)) {
+        if (handle_visible(drawing, cp, handles, shape_points)) {
           const float2 here = shown.drawing->points[cp.point].pos;
           for (const bool pre : {true, false}) {
             const float2 h = handle_end(*shown.drawing, factors, int(c), i, pre);
@@ -8511,11 +8532,12 @@ static OverlayGeometry overlay_geometry(const VectorDrawing &drawing, const Vect
   const ContrastColors handle_picked = contrast_colors_of(color_from_rgb(preferences().handle_selected));
   const ContrastColors handle_tip_picked = contrast_colors_of(Color{1.0f, float(0x8c) / 255.0f, 0.0f, 1.0f});
   const ShownHandleFactors factors = drawing_detail_shown_factors(drawing);
+  const std::vector<bool> shape_points = shape_handle_points(drawing, handles);
   for (int c = 0; c < int(drawing.curves.size()); c++) {
     const Curve &curve = drawing.curves[c];
     for (int i = 0; i < int(curve.points.size()); i++) {
       const CurvePoint &cp = curve.points[i];
-      if (!handle_visible(drawing, cp, handles)) {
+      if (!handle_visible(drawing, cp, handles, shape_points)) {
         continue;
       }
       const float2 here = drawing.points[cp.point].pos;

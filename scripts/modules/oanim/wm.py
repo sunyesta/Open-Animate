@@ -623,6 +623,12 @@ def select_press_takes(x, y, zoom=100.0):
     return _oanim.select_press_takes(float(x), float(y), float(zoom))
 
 
+def handle_ends_shown(layer, curve=0):
+    """Test hook: where the viewport draws (and picks) each handle's end of curve `curve`, [((in_x, in_y), (out_x,
+    out_y)), ...] in layer space as posed: through a deform, as bent at its own point."""
+    return [(tuple(a), tuple(b)) for a, b in _oanim.handle_ends_shown(layer.id, int(curve))]
+
+
 def select_click(x, y, zoom=100.0):
     """Test hook: the Select tool's click at document point (x, y) (zoom pixels per unit): the nearest point within
     reach is picked, or a shown handle clearly nearer than any point."""

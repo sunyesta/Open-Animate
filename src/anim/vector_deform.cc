@@ -6703,8 +6703,12 @@ static void bend_drawing(const DeformShape &d, const PointGroup *group, float st
         const double fit4 = std::pow(double(fit_stray), 4.0), bent4 = std::pow(double(bent_stray), 4.0),
                    both = fit4 + bent4;
         const float fitted = (both > 1e-300 ? float(bent4 / both) : 0.5f) * w;
+        const float2 out_bent = from.handle_out, in_bent = to.handle_in;
         from.handle_out = from.handle_out + (f1 - from.handle_out) * fitted;
         to.handle_in = to.handle_in + (f2 - to.handle_in) * fitted;
+        /* What the fit added, which the overlays take off (CurvePoint::wire_fit_in). */
+        from.wire_fit_out += from.handle_out - out_bent;
+        to.wire_fit_in += to.handle_in - in_bent;
       }
     });
   }

@@ -1229,7 +1229,11 @@ void layer_handles_settle(const Document &doc, Layer &layer, const std::vector<H
       }
       Curve &curve = drawing.curves[size_t(t.curve)];
       const float2 stored = curve_handle(drawing, curve, t.index, t.in);
-      const float2 now = fitted ? placed[i] : curve_handle(shown, shown.curves[size_t(t.curve)], t.index, t.in);
+      /* Not fitted: the end as bent at its point, where the viewport shows and drags it (less the wire's fit). */
+      const CurvePoint &shown_cp = fitted ? curve.points[size_t(t.index)] : shown.curves[size_t(t.curve)].points[size_t(t.index)];
+      const float2 now = fitted ? placed[i] :
+                                  curve_handle(shown, shown.curves[size_t(t.curve)], t.index, t.in) -
+                                      (t.in ? shown_cp.wire_fit_in : shown_cp.wire_fit_out);
       /* Fitted, by the stretch where the end now is: it can change sharply on the way, at a squeezed cell's side. */
       const Transform2D back = fitted ? layer_place_unskin(doc, layer, ends[i]) : t.unskin;
       const float2 off = back.apply_vector(t.at - now);

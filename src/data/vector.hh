@@ -116,6 +116,12 @@ struct CurvePoint {
    * curve around the point, as handles worked out from where the points went would, rather than
    * rigidly with the point. */
   bool handles_follow_curve = false;
+  /* Evaluated drawings only, never saved: how far the edit wire's fit (a deform's segments each fitted as one Bezier,
+   * VectorDeformWireScope) moved each handle from where the deform bent it. The line follows the fitted handles; the
+   * overlays draw and pick each handle less this, as bent at its own point, so it doesn't change length when a
+   * neighbour moves. */
+  float2 wire_fit_in;
+  float2 wire_fit_out;
   /* Handles picked on their own (clicking one). A selected point's handles move with it. */
   bool select_in = false;
   bool select_out = false;

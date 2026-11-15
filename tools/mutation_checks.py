@@ -103,6 +103,10 @@ PENDING = [
      "a point wins over a handle ending beside it", 'tests/test_point_over_handle.py'),
     ('src/editors/viewport.cc', '  if (handle.layer && handle_beats_point(handle.distance, best)) {', '  if (handle.layer && handle.distance <= best) {',
      "a click takes the point over a handle ending beside it", 'tests/test_point_over_handle.py'),
+    ('src/editors/viewport.cc', '  return here + (curve_handle(drawing, curve, i, pre) - fit - here) * factors.of(c, i, pre);', '  return here + (curve_handle(drawing, curve, i, pre) - here) * factors.of(c, i, pre) + fit * 0.0f;',
+     "a handle through a deform shows as bent at its own point, not as the wire fitted it", 'tests/test_handles_shown_bent.py'),
+    ('src/anim/deform.cc', '                                      (t.in ? shown_cp.wire_fit_in : shown_cp.wire_fit_out);', '                                      (t.in ? shown_cp.wire_fit_in : shown_cp.wire_fit_out) * 0.0f;',
+     "a handle dragged through a deform follows the mouse where it shows", 'tests/test_deform_point_edit.py'),
 ]
 
 def build(root):

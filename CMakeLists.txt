@@ -746,6 +746,8 @@ add_test(NAME bone_shapes
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_shapes.py)
 add_test(NAME point_over_handle
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_point_over_handle.py)
+add_test(NAME handles_shown_bent
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_handles_shown_bent.py)
 add_test(NAME mirror_points
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_mirror_points.py)
 add_test(NAME keyed_here

@@ -261,12 +261,13 @@ for name, make in rigs:
                 ends = a.evaluated_handles(c, True)
                 if len(ends) != count:
                     continue  # Bent with points of the modifiers', it shows as stored.
-                end = ends[i][1 if side == "IN" else 2]
+                # Where the viewport shows the handle (as bent at its point) follows the move.
+                end = oanim.wm.handle_ends_shown(a, c)[i][0 if side == "IN" else 1]
                 ops.mesh.select_none()
                 a.select_handle(c, i, side)
                 assert ops.mesh.translate(move_x="0.04", move_y="0.03") == {'FINISHED'}
                 at(10)
-                now_end = a.evaluated_handles(c, True)[i][1 if side == "IN" else 2]
+                now_end = oanim.wm.handle_ends_shown(a, c)[i][0 if side == "IN" else 1]
                 assert math.dist(now_end, (end[0] + 0.04, end[1] + 0.03)) < 0.025, (name, "handle", c, i, side, now_end, end)
                 ops.ed.undo()
                 at(10)
