@@ -638,6 +638,8 @@ add_test(NAME motion_path_own_keys
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_own_keys.py)
 add_test(NAME motion_path_own_motion
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_own_motion.py)
+add_test(NAME auto_freeze_knob
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_auto_freeze_knob.py)
 add_test(NAME motion_path_still_action
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_still_action.py)
 add_test(NAME motion_path_places

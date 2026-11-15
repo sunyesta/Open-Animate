@@ -7,6 +7,7 @@
 #include <bit>
 #include <chrono>
 #include <functional>
+#include <list>
 #include <string_view>
 #include <cstdlib>
 #include <cmath>
@@ -598,6 +599,82 @@ static std::vector<int> layer_pose_frames(Layer &layer)
     }
   });
   return {frames.begin(), frames.end()};
+}
+
+static bool action_moves_bone(const Bone &bone, const std::string &action);
+
+/* Auto-Freeze Keys' poses for each bone of a layer: the layer's poses, less the frames only a 2 Axis Controller's knob
+ * is keyed on whose actions don't move the bone (a head turn's knob keyed on 28 held a pupil the turn holds still
+ * there, putting a key in the middle of its own move). Every other bone's keys still hold it, pose to pose. */
+struct BonePoses {
+  std::vector<int> all;
+  std::set<int> base;
+  std::vector<std::pair<const Bone *, std::vector<int>>> knobs;
+  /* A list: what bone_poses_of hands out stays where it is as more are added. */
+  std::list<std::pair<const Bone *, std::vector<int>>> per_bone;
+};
+
+static void bone_poses_make(Layer &layer, BonePoses &out)
+{
+  out.all = layer_pose_frames(layer);
+  std::set<const void *> knob_channels;
+  for (const Bone &k : layer.bones) {
+    if (bone_is_controller(k) && !k.position_keys.keys.empty()) {
+      knob_channels.insert(&k.position_keys);
+      std::vector<int> frames;
+      for (const auto &key : k.position_keys.keys) {
+        frames.push_back(key.frame);
+      }
+      out.knobs.push_back({&k, std::move(frames)});
+    }
+  }
+  if (out.knobs.empty()) {
+    return;
+  }
+  layer_for_each_channel<false>(layer, [&](auto &ch, auto & /*value*/) {
+    if (knob_channels.count(&ch)) {
+      return;
+    }
+    for (const auto &k : ch.keys) {
+      out.base.insert(k.frame);
+    }
+  });
+}
+
+static const std::vector<int> &bone_poses_of(BonePoses &poses, const Bone &bone)
+{
+  if (poses.knobs.empty()) {
+    return poses.all;
+  }
+  for (const auto &[b, frames] : poses.per_bone) {
+    if (b == &bone) {
+      return frames;
+    }
+  }
+  std::set<int> frames = poses.base;
+  for (const auto &[knob, knob_frames] : poses.knobs) {
+    const bool moves = knob == &bone || std::any_of(knob->controller_actions.begin(), knob->controller_actions.end(),
+                                                    [&](const std::string &a) {
+                                                      return !a.empty() && action_moves_bone(bone, a);
+                                                    });
+    if (moves) {
+      frames.insert(knob_frames.begin(), knob_frames.end());
+    }
+  }
+  poses.per_bone.push_back({&bone, std::vector<int>(frames.begin(), frames.end())});
+  return poses.per_bone.back().second;
+}
+
+/* The bone a channel of `layer` belongs to (its keys are a member of it), or null. */
+static const Bone *channel_bone(const Layer &layer, const void *ch)
+{
+  const char *at = static_cast<const char *>(ch);
+  for (const Bone &b : layer.bones) {
+    if (at >= reinterpret_cast<const char *>(&b) && at < reinterpret_cast<const char *>(&b + 1)) {
+      return &b;
+    }
+  }
+  return nullptr;
 }
 
 
@@ -1582,7 +1659,7 @@ void animation_record(Document &doc)
                         !(layer.is_text() && layer.text.no_auto_key);
       /* The layer's poses, worked out once something on it is keyed (most layers have no edit). Keys put on the
        * frame meanwhile don't change which poses lie either side of it. */
-      std::vector<int> poses;
+      BonePoses poses;
       bool poses_known = false;
       layer_for_each_channel(layer, [&](auto &ch, auto &value) {
         const bool keyed = record_with(ch, value, frame, keys, replace, [&]() -> const std::vector<int> * {
@@ -1590,10 +1667,11 @@ void animation_record(Document &doc)
             return nullptr;
           }
           if (!poses_known) {
-            poses = layer_pose_frames(layer);
+            bone_poses_make(layer, poses);
             poses_known = true;
           }
-          return &poses;
+          const Bone *bone = layer.bones.empty() ? nullptr : channel_bone(layer, &ch);
+          return bone ? &bone_poses_of(poses, *bone) : &poses.all;
         });
         keyed_here[i] = keyed_here[i] || keyed;
       });
@@ -3177,6 +3255,25 @@ bool action_adds(const Layer &owner, const std::string &name)
 template<typename C, typename V> static auto channel_setup(const C &ch, const V &value)
 {
   return ch.animated() ? ch.evaluate(0) : (ch.has_last ? ch.last : value) - ch.from_action_bones;
+}
+
+/* Whether action `action`'s keys on `bone` move it (keys hold the change from the setup, its channel's own on frame 0):
+ * a head turn's actions key every bone they hold still. */
+static bool action_moves_bone(const Bone &bone, const std::string &action)
+{
+  const auto moves = [&](const auto &ch, const auto value, auto distance) {
+    const auto it = ch.actions.find(action);
+    if (it == ch.actions.end()) {
+      return false;
+    }
+    const auto setup = channel_setup(ch, value);
+    return std::any_of(it->second.begin(), it->second.end(),
+                       [&](const auto &k) { return k.frame > 0 && distance(k.value, setup) > 1e-5f; });
+  };
+  const auto apart2 = [](const float2 a, const float2 b) { return length(a - b); };
+  const auto apart1 = [](const float a, const float b) { return std::abs(a - b); };
+  return moves(bone.position_keys, bone.transform, apart2) || moves(bone.angle_keys, bone.turn, apart1) ||
+         moves(bone.scale_keys, bone.scale, apart2);
 }
 
 void bone_fixes_tidy(Document &doc)

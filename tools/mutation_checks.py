@@ -35,6 +35,15 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    ('src/anim/animation.cc', '          return bone ? &bone_poses_of(poses, *bone) : &poses.all;',
+     '          return &poses.all;',
+     'Auto-Freeze doesn\'t hold a bone at a knob\'s key whose actions hold it still', 'tests/test_auto_freeze_knob.py'),
+    ('src/anim/animation.cc', '    const bool moves = knob == &bone ||',
+     '    const bool moves = false ||',
+     'Auto-Freeze holds a knob at its own keys', 'tests/test_auto_freeze_knob.py'),
+    ('src/anim/animation.cc', '                       [&](const auto &k) { return k.frame > 0 && distance(k.value, setup) > 1e-5f; });',
+     '                       [&](const auto &k) { return k.frame > 0 && distance(k.value, setup) >= 0.0f; });',
+     'A bone an action holds still isn\'t moved by it for Auto-Freeze', 'tests/test_auto_freeze_knob.py'),
 ]
 
 def build(root):

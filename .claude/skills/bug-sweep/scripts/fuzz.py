@@ -756,6 +756,17 @@ def apply_new(op):
     if op["kind"] == "point" and op["i"] >= layer.point_count:
         return "skip"
     held = [x for x in (a, b) if x is not None]
+    if op["kind"] == "bone":
+        # A frame a 2 Axis Controller's knob is keyed on holds a bone only where the knob's actions move it
+        # (bone_poses_of in animation.cc): such frames aren't checked for bone edits.
+        knob_frames = set()
+        for kb in layer.bones:
+            if kb["type"] == "CONTROLLER_2D" and kb["name"] != op["bone"]:
+                try:
+                    knob_frames |= {k["frame"] for k in layer.keyframes(f'bones["{kb["name"]}"].position')}
+                except Exception:
+                    pass
+        held = [x for x in held if x not in knob_frames]
     seen = {}
     for fr in held:
         doc.frame_current = fr
