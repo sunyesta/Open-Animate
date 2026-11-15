@@ -17,6 +17,7 @@
  * edits always land on the frame they were made at. */
 
 #include <functional>
+#include <optional>
 #include <map>
 #include <memory>
 #include <set>
@@ -265,6 +266,9 @@ void animation_strip_action_bones(Document &doc);
  * its setup value (frame 0), or with `from_now` the value it has now, its drawings then taking that as
  * their setup pose. With `keep_actions` its actions' keys (action bone actions) stay. */
 void layer_strip_keys(Layer &layer, bool from_now, bool keep_actions);
+/* Every channel of `layer` (not its children): the keys of each action it isn't editing (and frame 0's path handles)
+ * under the name `rename` gives theirs, left out where it gives none. Every name is renamed at once, so two swap. */
+void layer_actions_rename(Layer &layer, const std::function<std::optional<std::string>(const std::string &)> &rename);
 /* `doc` as only what evaluating a frame works from: its keys, its plain values, its settings, no values a frame worked
  * out (a keyed channel's value, what action bone actions added, a bone's or a point's place, constraints' shapes).
  * Two documents alike this way show every frame alike. False where an edit isn't taken into its changes from the setup

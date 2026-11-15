@@ -2026,6 +2026,29 @@ bool animation_inputs_only(Document &doc)
   return taken_in;
 }
 
+void layer_actions_rename(Layer &layer, const std::function<std::optional<std::string>(const std::string &)> &rename)
+{
+  layer_for_each_channel<false>(layer, [&](auto &ch, auto & /*value*/) {
+    if (ch.actions.empty() && ch.action_setup.empty()) {
+      return;
+    }
+    std::remove_reference_t<decltype(ch.actions)> actions;
+    for (auto &[name, keys] : ch.actions) {
+      if (const std::optional<std::string> to = rename(name)) {
+        actions[*to] = std::move(keys);
+      }
+    }
+    ch.actions = std::move(actions);
+    std::remove_reference_t<decltype(ch.action_setup)> setup;
+    for (auto &[name, key] : ch.action_setup) {
+      if (const std::optional<std::string> to = rename(name)) {
+        setup[*to] = std::move(key);
+      }
+    }
+    ch.action_setup = std::move(setup);
+  });
+}
+
 void layer_strip_keys(Layer &layer, bool from_now, bool keep_actions)
 {
   layer_for_each_channel(layer, [&](auto &ch, auto &value) {

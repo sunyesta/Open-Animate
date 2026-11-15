@@ -9,6 +9,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 
@@ -17,7 +18,9 @@
 #include "anim/layer_pick.hh"
 #include "anim/reference.hh"
 #include "anim/switch.hh"
+#include "anim/symmetrize_keys.hh"
 #include "anim/bone_family.hh"
+#include "anim/controller.hh"
 #include "anim/animation.hh"
 #include "core/log.hh"
 #include "data/layer_mirror.hh"
@@ -187,7 +190,8 @@ static std::map<uint64_t, uint64_t> symmetrize_bone_flip(const Document &doc, ui
  * from the setup pose (their keys go, as the drawings' do). Each takes its other side's name (arm_L and arm_R
  * swap) but keeps its id, so the weights, Parent Bone, custom shapes and constraints of what is inside still find
  * it, now on the mirrored bone. */
-static void symmetrize_bones(Layer &armature)
+/* `keep`: their keys go across with them (Symmetrize's Animation: Mirror). */
+static void symmetrize_bones(Layer &armature, bool keep)
 {
   const std::vector<BonePose> was = armature_pose(armature, true);
   const auto reflect = [](float2 p) { return float2(-p.x, p.y); };
@@ -203,9 +207,23 @@ static void symmetrize_bones(Layer &armature)
     const float2 h = to_parent.apply(reflect(bp.setup_head)), t = to_parent.apply(reflect(bp.setup_tail));
     b.position = b.setup_position = h;
     b.angle = b.setup_angle = std::atan2(t.y - h.y, t.x - h.x);
-    b.position_keys = {};
-    b.angle_keys = {};
-    b.scale_keys = {};
+    if (keep) {
+      /* Keys are changes along the bone's rest axes: along it stays, across it changes side, and a turn goes the
+       * other way. A knob's place is in its box, which mirrors Left for Right. */
+      if (bone_is_controller(b)) {
+        channel_values_map(b.position_keys, [](float2 v) { return float2(-v.x, v.y); });
+      }
+      else {
+        channel_values_map(b.position_keys, [](float2 v) { return float2(v.x, -v.y); });
+      }
+      channel_values_map(b.angle_keys, [](float v) { return -v; });
+      channel_values_map(b.scale_keys, [](float2 v) { return v; });
+    }
+    else {
+      b.position_keys = {};
+      b.angle_keys = {};
+      b.scale_keys = {};
+    }
     /* Mirrored, a turn one way is a turn the other. */
     for (BoneConstraint &c : b.constraints) {
       const float lo = c.min_angle;
@@ -232,14 +250,19 @@ static void symmetrize_bones(Layer &armature)
  * Parent Bone moved to the other side's bones, the layers inside flipped about their parent's
  * axis. A bone layer inside has its bones mirrored in place (symmetrize_bones), so what is inside it keeps
  * its bones by id. */
-static void symmetrize_contents(Layer &l, const std::map<uint64_t, uint64_t> &bone_flip, bool top)
+static void symmetrize_contents(Layer &l, const std::map<uint64_t, uint64_t> &bone_flip, bool top, bool keep)
 {
   const auto flip_bone = [&](uint64_t id) {
     const auto it = bone_flip.find(id);
     return it != bone_flip.end() ? it->second : id;
   };
   if (l.has_drawing()) {
-    drawing_mirror_setup_x(l.drawing);
+    if (keep) {
+      drawing_mirror_setup_x_keeping_keys(l.drawing);
+    }
+    else {
+      drawing_mirror_setup_x(l.drawing);
+    }
     for (MeshPoint &p : l.drawing.points) {
       for (BoneWeight &w : p.weights) {
         w.bone = flip_bone(w.bone);
@@ -250,9 +273,14 @@ static void symmetrize_contents(Layer &l, const std::map<uint64_t, uint64_t> &bo
   /* A reference kept (its original mirrored with it): what it moved, mirrored too; as the drawings, from the
    * setup frame. Its own weights take the other side's bones. */
   if (l.is_reference()) {
-    const auto mirrored = [](ReferencePoint &rp) {
+    const auto mirrored = [keep](ReferencePoint &rp) {
       rp.offset.x = -rp.offset.x;
-      rp.offset_keys = {};
+      if (keep) {
+        channel_values_map(rp.offset_keys, [](float2 v) { return float2(-v.x, v.y); });
+      }
+      else {
+        rp.offset_keys = {};
+      }
     };
     for (auto &[id, rp] : l.reference.points) {
       mirrored(rp);
@@ -284,15 +312,22 @@ static void symmetrize_contents(Layer &l, const std::map<uint64_t, uint64_t> &bo
     l.rotation = -l.rotation;
     /* Mirrored, each axis tilts the other way. */
     l.shear = -l.shear;
-    clear_transform_keys(l);
+    if (keep) {
+      channel_values_map(l.position_keys, [](float2 v) { return float2(-v.x, v.y); });
+      channel_values_map(l.rotation_keys, [](float v) { return -v; });
+      channel_values_map(l.shear_keys, [](float2 v) { return -v; });
+    }
+    else {
+      clear_transform_keys(l);
+    }
   }
   l.selected = false;
   if (l.is_bone_layer()) {
-    symmetrize_bones(l);
+    symmetrize_bones(l, keep);
   }
   const std::map<uint64_t, uint64_t> same;
   for (Layer &child : l.children) {
-    symmetrize_contents(child, l.is_bone_layer() ? same : bone_flip, false);
+    symmetrize_contents(child, l.is_bone_layer() ? same : bone_flip, false, keep);
   }
 }
 
@@ -332,7 +367,7 @@ static const Layer *layer_named(const Document &doc, const std::string &name)
 /* What Symmetrize did, for the report, and the copies it made (`copies` their top layers,
  * `copy_ids` every layer in them). */
 struct SymmetrizeLog {
-  std::vector<std::string> made, replaced, centred, skipped;
+  std::vector<std::string> made, replaced, centred, skipped, notes;
   std::vector<uint64_t> copies;
   std::set<uint64_t> copy_ids;
 };
@@ -347,7 +382,8 @@ static void layer_tree_walk(Layer &l, const std::function<void(Layer &)> &fn)
 
 /* Makes (or remakes) the other side of the sided layer `id`, from whichever of the pair sits on the
  * `from` side (1 +, -1 -). */
-static void symmetrize_pair(Document &doc, uint64_t id, int from, std::set<uint64_t> &done, SymmetrizeLog &log)
+static void symmetrize_pair(Document &doc, uint64_t id, int from, SymmetrizeAnimation animation, std::set<uint64_t> &done,
+                            SymmetrizeLog &log)
 {
   const Layer *layer = layer_find(doc, id);
   const std::string other_name = bone_mirror_name(layer->name);
@@ -399,15 +435,42 @@ static void symmetrize_pair(Document &doc, uint64_t id, int from, std::set<uint6
   std::set<uint64_t> inside;
   layer_tree_walk(plain, [&](Layer &l) { inside.insert(l.id); });
   symmetrize_unreference(doc, plain, inside);
+  const bool keep = animation != SymmetrizeAnimation::None;
+  /* Where its actions' keys go across, from the source's rig and the bone layers around it. */
+  const SymmetrizeNames names = keep ? symmetrize_action_names(doc, *source) : SymmetrizeNames();
   std::map<uint64_t, uint64_t> remap;
   Layer copy = layer_copy_with_new_ids(doc, plain, &remap);
-  symmetrize_contents(copy, symmetrize_bone_flip(doc, source_id), true);
+  symmetrize_contents(copy, symmetrize_bone_flip(doc, source_id), true, keep);
   layer_set_local_transform(copy, local, source->scale.x < 0.0f);
-  clear_transform_keys(copy);
+  if (keep) {
+    /* Its keys as changes from the setup, through the same reflection as its place. */
+    const Transform2D across = target_parent.inverted() * axis * flip_x * axis.inverted() * parent_setup_space(doc, source_id);
+    const float2 was_at = source->position, was_shear = source->shear, was_scale = source->scale;
+    const float was_turn = source->rotation;
+    channel_values_map(copy.position_keys,
+                       [&](float2 v) { return copy.position + across.apply_vector(v - was_at); });
+    channel_values_map(copy.rotation_keys, [&](float v) { return copy.rotation - (v - was_turn); });
+    channel_values_map(copy.shear_keys, [&](float2 v) { return copy.shear - (v - was_shear); });
+    const float2 scale = copy.scale;
+    channel_values_map(copy.scale_keys, [&](float2 v) {
+      const auto by = [](float v1, float now, float was) { return std::fabs(was) > 1e-9f ? v1 * now / was : v1 + now - was; };
+      return float2(by(v.x, scale.x, was_scale.x), by(v.y, scale.y, was_scale.y));
+    });
+    for (const std::string &name : symmetrize_actions_apply(copy, names)) {
+      log.notes.push_back((target ? target->name : other_name) + "'s keys in " + name + " (no other side's action to go to)");
+    }
+  }
+  else {
+    clear_transform_keys(copy);
+  }
 
   /* Remaking: the old contents go, and the new layers take the ids of the old ones of the same name,
    * so masks naming those still find them. */
   std::map<std::string, uint64_t> old_ids;
+  std::optional<Layer> old_target;
+  if (target_id && animation == SymmetrizeAnimation::KeepPartner) {
+    old_target = *layer_find(doc, target_id);
+  }
   if (target_id) {
     Layer *t = layer_find(doc, target_id);
     for (Layer &child : t->children) {
@@ -440,7 +503,11 @@ static void symmetrize_pair(Document &doc, uint64_t id, int from, std::set<uint6
       const auto it = reassign.find(i);
       return it != reassign.end() ? it->second : i;
     };
-    layer_tree_walk(copy, [&](Layer &l) { layer_links_map(l, reassigned); });
+    layer_tree_walk(copy, [&](Layer &l) {
+      layer_links_map(l, reassigned);
+      /* A switch's keys name its children, which took the old ones' ids. */
+      switch_remap(l, reassign);
+    });
   }
 
   uint64_t placed = 0;
@@ -451,6 +518,9 @@ static void symmetrize_pair(Document &doc, uint64_t id, int from, std::set<uint6
     copy.expanded = t.expanded;
     remap[source_id] = t.id;
     t = std::move(copy);
+    if (old_target) {
+      symmetrize_keep_partner(t, *old_target);
+    }
     placed = target_id;
     log.replaced.push_back(t.name);
   }
@@ -1174,8 +1244,10 @@ void layer_operators_register()
         "across the document's vertical axis (a bone layer's, inside one). A layer named for a side (_L, .L, L_, "
         "Left...) gets its partner made, or remade, from whichever of the two sits on the side direction= copies "
         "from (POSITIVE_TO_NEGATIVE: + to -, or NEGATIVE_TO_POSITIVE); a layer named for neither is symmetrized "
-        "in place, as point Symmetrize does. On the setup frame; the copies rest in the setup pose (no point or "
-        "transform keys)";
+        "in place, as point Symmetrize does. On the setup frame. animation=MIRROR (default): the copies play the "
+        "source's animation mirrored, an action's keys going to its other side's (Blink_L's to Blink_R, Head's to Head "
+        "2), left out where there is none; KEEP_PARTNER: a partner remade keeps its own animation, moved onto its new "
+        "points; NONE: the copies rest in the setup pose (no point, handle, transform or bone keys)";
     ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
     ot.poll = active_layer_poll;
     OpProperty direction;
@@ -1184,7 +1256,13 @@ void layer_operators_register()
     direction.description = "Which side is copied onto the other";
     direction.items = {{"POSITIVE_TO_NEGATIVE", "+ to -"}, {"NEGATIVE_TO_POSITIVE", "- to +"}};
     direction.fallback = "POSITIVE_TO_NEGATIVE";
-    ot.props = {direction};
+    OpProperty animation;
+    animation.name = "animation";
+    animation.label = "Animation";
+    animation.description = "What the other side keeps of the keys";
+    animation.items = {{"MIRROR", "Mirror Source's"}, {"KEEP_PARTNER", "Keep Partner's"}, {"NONE", "None"}};
+    animation.fallback = "MIRROR";
+    ot.props = {direction, animation};
     ot.exec = [](Context &C) {
       Document &doc = *C.document;
       const std::string direction = op_arg(C, "direction", "POSITIVE_TO_NEGATIVE");
@@ -1192,11 +1270,26 @@ void layer_operators_register()
         report(ReportType::Error, "direction is POSITIVE_TO_NEGATIVE or NEGATIVE_TO_POSITIVE");
         return OpStatus::Cancelled;
       }
+      const std::string kind = op_arg(C, "animation", "MIRROR");
+      if (kind != "MIRROR" && kind != "KEEP_PARTNER" && kind != "NONE") {
+        report(ReportType::Error, "animation is MIRROR, KEEP_PARTNER or NONE");
+        return OpStatus::Cancelled;
+      }
+      const SymmetrizeAnimation animation = kind == "MIRROR"         ? SymmetrizeAnimation::Mirror :
+                                            kind == "KEEP_PARTNER" ? SymmetrizeAnimation::KeepPartner :
+                                                                     SymmetrizeAnimation::None;
       if (doc.frame_current != 0) {
         report_banner(ReportType::Warning, "Switch to Setup (frame 0) to symmetrize layers");
         return OpStatus::Cancelled;
       }
       const int from = direction == "POSITIVE_TO_NEGATIVE" ? 1 : -1;
+      /* Edits not yet recorded are the setup's (it works out the frame again at the end). */
+      animation_record(doc);
+      /* On the mainline while it works: every action's keys then wait in their channels, all moved across alike. */
+      const EditedAction edited = edited_action_save(doc);
+      if (!edited.name.empty()) {
+        document_set_action(doc, edited.owner, "");
+      }
       /* The picked layers, leaving out any inside a picked group (they go with it). */
       std::vector<uint64_t> picked;
       for (const Layer *l : document_layers_flat(doc)) {
@@ -1233,7 +1326,7 @@ void layer_operators_register()
       std::set<uint64_t> done;
       for (const uint64_t id : sided) {
         if (layer_find(doc, id)) {
-          symmetrize_pair(doc, id, from, done, log);
+          symmetrize_pair(doc, id, from, animation, done, log);
         }
       }
       symmetrize_flip_links(doc, log);
@@ -1270,6 +1363,11 @@ void layer_operators_register()
       add("remade", log.replaced);
       add("symmetrized", log.centred);
       add("skipped", log.skipped);
+      add("left out", log.notes);
+      if (!edited.name.empty()) {
+        edited_action_restore(doc, edited);
+      }
+      animation_evaluate(doc, doc.frame_current);
       const bool changed = !log.made.empty() || !log.replaced.empty() || !log.centred.empty();
       if (message.empty()) {
         message = "nothing to do: name layers with _L or _R (or .L, L_, Left...) to make their other side";

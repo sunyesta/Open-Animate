@@ -57,6 +57,7 @@ set(OANIM_SOURCES
   src/data/annotations.cc
   src/data/layer_mirror.cc
   src/anim/action_mirror.cc
+  src/anim/symmetrize_keys.cc
   src/data/media_layer.cc
   src/data/fill_area.cc
   src/data/fill_paint.cc
@@ -568,6 +569,8 @@ add_test(NAME key_together_shown
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_shown.py)
 add_test(NAME frame_last_noop
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_frame_last_noop.py)
+add_test(NAME layer_symmetrize_keys
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_layer_symmetrize_keys.py)
 add_test(NAME key_together_path_pick
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_path_pick.py)
 add_test(NAME timeline_switch_row
