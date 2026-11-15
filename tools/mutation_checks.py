@@ -75,6 +75,15 @@ PENDING = [
      '    const bool edits = edited->contains(flat->id) || flat->id == doc.active_layer;',
      "Only Selected shows a bone picked in a sub bone group of the bone layer worked in",
      'tests/test_timeline_sub_group_bones.py'),
+    ('src/ops/operator.cc', '      stretch_sync.finish(C);', '      (void)stretch_sync;',
+     "A timing edit to the active picked stretch goes to the other picked stretches", 'tests/test_stretch_sync.py'),
+    ('src/ops/motion_path_ops.cc', '        !(now == o.settings && now_curve == o.curve))', '        false)',
+     "A picked stretch a timing edit changed itself keeps what it did", 'tests/test_stretch_sync.py'),
+    ('src/ops/motion_path_ops.cc', '      if (on_active) {', '      if (on_active && false) {',
+     "Shift Alt click on the active picked stretch unpicks it", 'tests/test_stretch_sync.py'),
+    ('src/editors/timeline.cc', '        f.teals.push_back({{p.target}, p.start, p.end, p == shown});',
+     '        f.teals.push_back({{p.target}, p.start, p.end, false});',
+     "Each picked stretch is teal, the active one lighter", 'tests/test_stretch_sync.py'),
 ]
 
 def build(root):

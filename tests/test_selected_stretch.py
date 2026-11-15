@@ -1,8 +1,8 @@
 """The selected stretch, one for the key header, the timeline's rows, the timing chart and the Path Timing panel: with the
 Motion Path tool, the stretch the picks are in (a dot's; a key's on the side of the playhead, arriving with the playhead
 on it), teal on the row of the channel moving the picked dot (the row it is folded into when that is folded away);
-picks in different stretches make no teal (the header grey, "N stretches", editing them all; the panel shows one of
-them, its arrows stepping through them); with one stretch picked the panel's arrows pick the stretch beside. Alt click
+picks in different stretches each teal, the active one (shown in Path Timing, the last picked on) lighter (the header
+teal, "N stretches", editing them all; the panel's arrows stepping through them); with one stretch picked the panel's arrows pick the stretch beside. Alt click
 between keys in a timeline row picks that row's dots on the frame (on a key, the key) and goes there; without the tool
 it selects the stretch's end key.
 
@@ -121,15 +121,17 @@ ops.ed.redo()
 assert selected() == [20], ("the undo step holds the user's pick alone", selected())
 doc.frame_current = 15
 
-# --- Picks in different stretches: no teal; grey, "2 stretches", editing both; the panel steps through them -----------
+# --- Picks in different stretches: each teal, the active one lighter; "2 stretches", editing both; the panel steps ------
 none()
 assert ops.anim.motion_path_select(frame="15", **HEAD) == {'FINISHED'}
 assert ops.anim.motion_path_select(frame="25", extend="1", **HEAD) == {'FINISHED'}
 h = wm.timeline_key_header()
 assert h["mode"] == "STRETCHES" and h["editing"] and h["label"] == "2 stretches", h
 r, g, b = h["color"]
-assert abs(r - g) < 8 and abs(g - b) < 8, ("grey", h["color"])
-assert teal() == {}, ("no teal anywhere", teal())
+assert g > r + 40 and b > r + 40, ("teal", h["color"])
+assert teal() == {"Transform": (20, 30)}, ("the active one, the last picked on", teal())
+spans = {r["label"]: r["teal_spans"] for r in rows() if r["teal_spans"]}
+assert spans == {"Transform": [(10, 20, False), (20, 30, True)]}, ("both, the active one marked", spans)
 p = wm.motion_path_timing_panel()
 assert (p["start"], p["of"]) == (20, (2, 2)), ("the last picked, 2 of 2", p)
 assert ops.anim.motion_path_timing_step(step="1") == {'FINISHED'}

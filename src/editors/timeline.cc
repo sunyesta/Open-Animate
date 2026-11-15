@@ -1081,6 +1081,14 @@ struct KeyFocus {
   int start = 0, end = 0;
   /* Teal from picks, not from the playhead. */
   bool picked = false;
+  /* Each stretch shaded teal (with picks in different stretches, every one), the active one (`target`'s, shown in Path
+   * Timing, whose timing edits the others follow) lighter. */
+  struct Teal {
+    std::vector<MotionPathTarget> targets;
+    int start = 0, end = 0;
+    bool active = false;
+  };
+  std::vector<Teal> teals;
   std::string label;
   std::string signature() const
   {
@@ -1191,9 +1199,14 @@ static KeyFocus key_focus(Context &C)
     f.end = shown.end;
     f.picked = true;
     if (picks.spans > 1) {
-      /* Picks in different stretches: no one stretch, so nothing teal; a change still goes to them all. */
+      /* Picks in different stretches: each teal, the active one (shown in Path Timing) lighter; a change goes to them
+       * all, and a timing edit to the active one is copied to the others. */
       f.mode = 3;
       f.label = std::to_string(picks.spans) + " stretches";
+      f.targets = {shown.target};
+      for (const MotionPathPickedStretch &p : picks.stretches) {
+        f.teals.push_back({{p.target}, p.start, p.end, p == shown});
+      }
       return f;
     }
     f.mode = 2;
@@ -1202,6 +1215,7 @@ static KeyFocus key_focus(Context &C)
         f.targets.push_back(p.target);
       }
     }
+    f.teals.push_back({f.targets, f.start, f.end, true});
     f.label = (f.targets.size() == 1 ? motion_path_label(doc, f.target) : std::to_string(f.targets.size()) + " paths") +
               "  " + std::to_string(f.start) + "-" + std::to_string(f.end);
     return f;
@@ -1226,6 +1240,7 @@ static KeyFocus key_focus(Context &C)
   f.mode = 2;
   f.target = target;
   f.targets = {target};
+  f.teals.push_back({f.targets, f.start, f.end, true});
   f.keys.push_back({target, f.end});
   f.label = motion_path_label(doc, target) + "  " + std::to_string(f.start) + "-" + std::to_string(f.end);
   return f;
@@ -1325,16 +1340,15 @@ bool timeline_key_header_call(Context &C, const std::string &idname, const OpArg
   return operator_call(C, idname, args) == OpStatus::Finished;
 }
 
-bool timeline_key_focus_span(const MotionPathTarget &target, int &r_start, int &r_end)
+std::vector<KeyFocusSpan> timeline_key_focus_spans(const MotionPathTarget &target)
 {
-  if (g_key_focus.mode != 2 ||
-      std::none_of(g_key_focus.targets.begin(), g_key_focus.targets.end(), [&](const auto &t) { return t.same(target); }))
-  {
-    return false;
+  std::vector<KeyFocusSpan> out;
+  for (const KeyFocus::Teal &t : g_key_focus.teals) {
+    if (std::any_of(t.targets.begin(), t.targets.end(), [&](const auto &o) { return o.same(target); })) {
+      out.push_back({t.start, t.end, t.active});
+    }
   }
-  r_start = g_key_focus.start;
-  r_end = g_key_focus.end;
-  return true;
+  return out;
 }
 
 bool timeline_picked_stretch(Context &C, MotionPathTarget &r_target)
@@ -1345,7 +1359,7 @@ bool timeline_picked_stretch(Context &C, MotionPathTarget &r_target)
   /* Worked out afresh (not the header's from this frame), so it holds before the header is drawn and in a background
    * run. */
   const KeyFocus f = key_focus(C);
-  if (f.mode != 2 || !f.picked) {
+  if ((f.mode != 2 && f.mode != 3) || !f.picked) {
     return false;
   }
   r_target = f.target;
@@ -1818,7 +1832,7 @@ ImU32 key_header_color(int mode, bool hovered)
   if (mode == 1) {
     return hovered ? IM_COL32(0x96, 0x40, 0x40, 255) : IM_COL32(0x7d, 0x34, 0x34, 255);
   }
-  if (mode == 2) {
+  if (mode == 2 || mode == 3) {
     return hovered ? IM_COL32(0x2c, 0x86, 0x82, 255) : IM_COL32(0x22, 0x6e, 0x6b, 255);
   }
   return ImGui::GetCurrentContext() ? ImGui::GetColorU32(hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg)
@@ -1967,15 +1981,11 @@ static void key_header(Context &C)
   if (mode == 2 || mode == 3) {
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x);
     ImGui::AlignTextToFramePadding();
-    if (mode == 2) {
-      ImGui::TextColored(ImVec4(0.55f, 0.92f, 0.88f, 1.0f), "%s", focus.label.c_str());
-    }
-    else {
-      ImGui::TextUnformatted(focus.label.c_str());
-    }
+    ImGui::TextColored(ImVec4(0.55f, 0.92f, 0.88f, 1.0f), "%s", focus.label.c_str());
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       if (mode == 3) {
-        ImGui::SetTooltip("The picks are in different stretches: a change goes to them all, none is shaded teal");
+        ImGui::SetTooltip("Stretches picked (teal): a change here goes to them all. The active one, lighter, shows in "
+                          "Path Timing; a timing edit to it is copied to the others, each fitted to its own length");
       }
       else if (focus.picked) {
         ImGui::SetTooltip("The stretch the picks are in (its key on frame %d): a change goes to it, shaded teal in the "
@@ -2910,14 +2920,25 @@ static std::vector<bool> focus_rows(const std::vector<ChannelRow> &rows, const s
   return out;
 }
 
-/* The channels the teal stretch is shaded on: those moving its targets' dots. */
-static std::set<const void *> focus_channels(const Document &doc, const KeyFocus &f)
+/* The teal stretches shaded on each row: on the rows of the channels moving their targets' dots. */
+static std::vector<std::vector<KeyFocusSpan>> focus_teal_rows(const Document &doc, const std::vector<ChannelRow> &rows,
+                                                              const KeyFocus &f)
 {
-  std::set<const void *> out;
-  if (f.mode == 2) {
-    for (const MotionPathTarget &t : f.targets) {
-      const std::set<const void *> moving = motion_path_dot_channels(doc, t);
-      out.insert(moving.begin(), moving.end());
+  std::vector<std::vector<KeyFocusSpan>> out(rows.size());
+  if (f.mode != 2 && f.mode != 3) {
+    return out;
+  }
+  for (const KeyFocus::Teal &t : f.teals) {
+    std::set<const void *> channels;
+    for (const MotionPathTarget &target : t.targets) {
+      const std::set<const void *> moving = motion_path_dot_channels(doc, target);
+      channels.insert(moving.begin(), moving.end());
+    }
+    const std::vector<bool> on = focus_rows(rows, channels);
+    for (size_t r = 0; r < rows.size(); r++) {
+      if (on[r]) {
+        out[r].push_back({t.start, t.end, t.active});
+      }
     }
   }
   return out;
@@ -3718,12 +3739,16 @@ std::vector<TimelineRowInfo> timeline_rows_list(Context &C, bool as_shown)
   const std::vector<ChannelRow> rows =
       channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C), !as_shown);
   const KeyFocus focus = key_focus(C);
-  const std::vector<bool> teal = focus_rows(rows, focus_channels(*C.document, focus));
+  const std::vector<std::vector<KeyFocusSpan>> teal = focus_teal_rows(*C.document, rows, focus);
   for (size_t r = 0; r < rows.size(); r++) {
     const ChannelRow &row = rows[r];
     TimelineRowInfo info{row.depth, row.name, row.selected, !row.pin_path.empty(), row.changed};
-    if (teal[r]) {
-      info.teal = {focus.start, focus.end};
+    for (const KeyFocusSpan &t : teal[r]) {
+      /* The active one where the row has it, else its first. */
+      if (t.active || info.teal.second <= info.teal.first) {
+        info.teal = {t.start, t.end};
+      }
+      info.teal_spans.push_back({t.start, t.end, t.active});
     }
     info.layer = row.layer;
     info.fold = row.fold;
@@ -4547,8 +4572,8 @@ static void timeline_body(Area &area, Context &C)
     dl->PopClipRect();
   }
 
-  /* The selected stretch (teal): on the rows of the channels moving its dots. */
-  const std::vector<bool> teal_rows = focus_rows(rows, focus_channels(doc, g_key_focus));
+  /* The selected stretches (teal, the active one lighter): on the rows of the channels moving their dots. */
+  const std::vector<std::vector<KeyFocusSpan>> teal_rows = focus_teal_rows(doc, rows, g_key_focus);
   /* The rows: hold bars between neighbouring keys where nothing changes, and a diamond per keyed
    * frame, orange when selected. */
   dl->PushClipRect(ImVec2(p0.x, rows_top), p1, true);
@@ -4589,10 +4614,10 @@ static void timeline_body(Area &area, Context &C)
       continue;
     }
     dl->PushClipRect(ImVec2(k0.x, rows_top), p1, true);
-    if (teal_rows[r]) {
-      /* The selected stretch. */
-      dl->AddRectFilled(ImVec2(frame_x(float(g_key_focus.start)), top + 1.0f),
-                        ImVec2(frame_x(float(g_key_focus.end)), top + row_h - 1.0f), KEY_FOCUS_FILL);
+    for (const KeyFocusSpan &t : teal_rows[r]) {
+      /* A selected stretch. */
+      dl->AddRectFilled(ImVec2(frame_x(float(t.start)), top + 1.0f), ImVec2(frame_x(float(t.end)), top + row_h - 1.0f),
+                        t.active ? KEY_FOCUS_FILL : KEY_FOCUS_FILL_OTHER);
     }
     const bool order_row = rows[r].filter.path == "draw_order" && rows[r].layers.size() == 1;
     if (order_row) {

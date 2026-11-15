@@ -64,6 +64,7 @@
 #include "gpu/scene_renderer.hh"
 #include "gpu/tessellate.hh"
 #include "ops/edit_ops.hh"
+#include "ops/stretch_sync.hh"
 #include "ops/media_ops.hh"
 #include "ops/operator.hh"
 #include "ops/undo.hh"
@@ -1778,6 +1779,8 @@ static struct {
   /* A timing brush's stroke with Time Together on: the linked channels take its timing as it ends, as
    * anim.motion_path_stroke's do. */
   TimeTogetherEdit together;
+  /* With several stretches picked: the active one's new timing copied to the others as it ends. */
+  PickedStretchSync sync;
 } g_path_brush;
 /* Shift F: this many pixels from the anchor is full strength. */
 static constexpr float PATH_STRENGTH_PX = 200.0f;
@@ -1920,6 +1923,7 @@ static void motion_path_brush_input(Context &C, Area &area, const ViewMapping &v
     g.unsculpted.clear();
     g.snapshot = Document();
     g.together = TimeTogetherEdit();
+    g.sync = PickedStretchSync();
   };
   if (!g.active) {
     if (!hovered || !ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
@@ -1937,6 +1941,7 @@ static void motion_path_brush_input(Context &C, Area &area, const ViewMapping &v
     g.pick = pick;
     if (path_brush_is_timing(brush)) {
       g.together.start(doc);
+      g.sync.start(C);
     }
     /* The paths keep the range they had while the stroke goes on. */
     g_path_drag.active = true;
@@ -1999,6 +2004,7 @@ static void motion_path_brush_input(Context &C, Area &area, const ViewMapping &v
   }
   if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
     if (g.changed) {
+      g.sync.finish(C);
       keys_moved_report(g.together.finish(doc));
       push_undo(C, path_brush_name(brush));
     }

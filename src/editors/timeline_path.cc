@@ -20,6 +20,7 @@
 #include "editors/ui.hh"
 #include "ops/edit_ops.hh"
 #include "ops/operator.hh"
+#include "ops/stretch_sync.hh"
 #include "ops/undo.hh"
 #include "wm/context.hh"
 
@@ -30,6 +31,11 @@ static constexpr ImU32 REACH_FILL = IM_COL32(255, 255, 255, 16);
 static constexpr ImU32 REACH_EDGE = IM_COL32(255, 255, 255, 90);
 static constexpr ImU32 BLEND_FILL = IM_COL32(80, 150, 255, 30);
 static constexpr ImU32 BLEND_EDGE = IM_COL32(90, 160, 255, 200);
+
+/* Several stretches picked: a drag on the graph or a dot slid in the chart shows the others following as it goes (the
+ * operator a graph drag ends with does it again for the undo step). */
+static PickedStretchSync g_graph_sync;
+static PickedStretchSync g_tick_sync;
 
 /* One row, shown only while a stretch is picked (teal): the path last picked on, all its ticks. */
 std::vector<MotionPathTarget> timeline_path_strip_targets(Context &C)
@@ -401,10 +407,9 @@ void timeline_path_strip(Context &C, ImVec2 min, ImVec2 max, float keys_x, float
         dots.push_back(df);
       }
     }
-    int focus_start = 0, focus_end = 0;
-    if (timeline_key_focus_span(t, focus_start, focus_end)) {
-      dl->AddRectFilled(ImVec2(x_of(float(focus_start)), top + 1.0f), ImVec2(x_of(float(focus_end)), top + lane_h - 1.0f),
-                        KEY_FOCUS_FILL);
+    for (const KeyFocusSpan &f : timeline_key_focus_spans(t)) {
+      dl->AddRectFilled(ImVec2(x_of(float(f.start)), top + 1.0f), ImVec2(x_of(float(f.end)), top + lane_h - 1.0f),
+                        f.active ? KEY_FOCUS_FILL : KEY_FOCUS_FILL_OTHER);
     }
     const bool all = doc.path_dot_colors == PathDotColors::TimingAll;
     const bool pulling = g_tick.active && g_tick.dragging && g_tick.target.same(t);
@@ -667,6 +672,7 @@ void timeline_path_strip(Context &C, ImVec2 min, ImVec2 max, float keys_x, float
     g.end = hover->end;
     g.press_x = io.MousePos.x;
     g.snapshot = doc;
+    g_tick_sync.start(C);
     return;
   }
   if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
@@ -696,6 +702,7 @@ void timeline_path_strip(Context &C, ImVec2 min, ImVec2 max, float keys_x, float
     doc = g.snapshot;
     const float progress = (frame_of(io.MousePos.x) - float(g.start)) / float(std::max(g.end - g.start, 1));
     g.changed = motion_path_slide_progress(doc, g.target, g.frame, progress, reach_slide(ts, ts.path_chart_size));
+    g_tick_sync.finish(C);
     C.undo->mark_changed();
   }
   wm.path_hover_target = g.target;
@@ -1350,6 +1357,7 @@ static void path_timing_graph(Context &C, const MotionPathTarget &t, const Motio
                                    timing_sculpt(st.curve, st.n, st.brush, st.path, ts.path_timing_radius[int(st.brush)],
                                                  ts.path_timing_strength[int(st.brush)], st.aspect,
                                                  ts.path_timing_lock_x, ts.path_timing_dyntopo));
+      g_graph_sync.finish(C);
       C.undo->mark_changed();
     }
     return;
@@ -1451,6 +1459,7 @@ static void path_timing_graph(Context &C, const MotionPathTarget &t, const Motio
                      {gx.axis == 'Y' ? 1.0f : gx.factor, gx.axis == 'X' ? 1.0f : gx.factor}, gx.n, gx.aspect);
     doc = gx.snapshot;
     motion_path_timing_curve_set(doc, gx.target, gx.frame, moved);
+    g_graph_sync.finish(C);
     C.undo->mark_changed();
     const char *only = gx.axis == 'X' ? "  (in time only)" : gx.axis == 'Y' ? "  (the way along only)" : "";
     if (gx.kind == 'G') {
@@ -1519,6 +1528,7 @@ static void path_timing_graph(Context &C, const MotionPathTarget &t, const Motio
     gx.precise.reset(float2{io.MousePos.x, io.MousePos.y});
     gx.curve = curve;
     gx.snapshot = doc;
+    g_graph_sync.start(C);
     wm.modal_running = true;
     wm.modal_keys.clear();
     return true;
@@ -1645,6 +1655,7 @@ static void path_timing_graph(Context &C, const MotionPathTarget &t, const Motio
     }
     doc = g.snapshot;
     motion_path_timing_curve_set(doc, g.target, g.frame, moved);
+    g_graph_sync.finish(C);
     C.undo->mark_changed();
     return;
   }
@@ -1676,6 +1687,7 @@ static void path_timing_graph(Context &C, const MotionPathTarget &t, const Motio
     st.aspect = aspect;
     st.curve = curve;
     st.snapshot = doc;
+    g_graph_sync.start(C);
     st.last = io.MousePos;
     st.path = {{frame_at(io.MousePos.x) - float(s.start), u_at(io.MousePos.y)}};
     return;
@@ -1707,7 +1719,9 @@ static void path_timing_graph(Context &C, const MotionPathTarget &t, const Motio
         g.curve = added;
         g.was = g.now = added.points[size_t(i)].co;
         g.snapshot = doc;
+        g_graph_sync.start(C);
         motion_path_timing_curve_set(doc, t, g.frame, added);
+        g_graph_sync.finish(C);
         C.undo->mark_changed();
         return;
       }
@@ -1763,6 +1777,7 @@ static void path_timing_graph(Context &C, const MotionPathTarget &t, const Motio
   }
   g.now = g.was;
   g.snapshot = doc;
+  g_graph_sync.start(C);
 }
 
 static void path_timing_body(Area &area, Context &C);

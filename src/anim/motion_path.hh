@@ -420,6 +420,14 @@ bool motion_path_stretch_interp(const Document &doc, const MotionPathTarget &tar
  * how many stretches changed. */
 int motion_path_stretch_interp_set(Document &doc, const MotionPathTarget &target, int frame, int end,
                                    const KeySettings &settings, const TimingCurve &curve);
+/* The same on every stretch whose key is after `start` and on or before `end` (a picked stretch; across breakdowns,
+ * each of its stretches). */
+int motion_path_span_interp_set(Document &doc, const MotionPathTarget &target, int start, int end,
+                                const KeySettings &settings, const TimingCurve &curve);
+/* The interpolation of the first stretch from `start` to `end` (its arriving key's settings, a Custom one's curve).
+ * False with no key between. */
+bool motion_path_span_interp(const Document &doc, const MotionPathTarget &target, int start, int end,
+                             KeySettings &r_settings, TimingCurve &r_curve);
 /* The dot on `frame` made to go `speed` (as motion_path_dot_speed gives it: 1 even, under 0 going back), the rest of
  * its stretch taking up the time it gains or loses, each frame by its share; false off a stretch, or when the rest
  * can't (the most it can go is less than the stretch's frames). */

@@ -14,6 +14,7 @@
 #include "core/log.hh"
 #include "data/document.hh"
 #include "ops/edit_ops.hh"
+#include "ops/stretch_sync.hh"
 #include "ops/operator.hh"
 #include "ops/undo.hh"
 #include "wm/context.hh"
@@ -280,6 +281,65 @@ MotionPathPickedOwners motion_path_picked_owners(Context &C)
   return r;
 }
 
+void PickedStretchSync::start(Context &C)
+{
+  snaps.clear();
+  active = -1;
+  if (!C.document) {
+    return;
+  }
+  const MotionPathPicks picks = motion_path_picks(C);
+  if (picks.spans < 2) {
+    return;
+  }
+  for (size_t i = 0; i < picks.stretches.size(); i++) {
+    const MotionPathPickedStretch &p = picks.stretches[i];
+    Snap snap{p, {}, {}};
+    if (!motion_path_span_interp(*C.document, p.target, p.start, p.end, snap.settings, snap.curve)) {
+      continue;
+    }
+    if (int(i) == picks.shown) {
+      active = int(snaps.size());
+    }
+    snaps.push_back(std::move(snap));
+  }
+}
+
+int PickedStretchSync::finish(Context &C) const
+{
+  if (active < 0 || !C.document) {
+    return 0;
+  }
+  Document &doc = *C.document;
+  const Snap &a = snaps[size_t(active)];
+  /* Still the same stretch (its keys where they were), its timing changed. */
+  int start = 0, end = 0;
+  KeySettings settings;
+  TimingCurve curve;
+  if (!motion_path_stretch_at(doc, a.pick.target, a.pick.end, start, end) || start != a.pick.start ||
+      end != a.pick.end || !motion_path_span_interp(doc, a.pick.target, start, end, settings, curve) ||
+      (settings == a.settings && curve == a.curve))
+  {
+    return 0;
+  }
+  int followed = 0;
+  for (size_t i = 0; i < snaps.size(); i++) {
+    const Snap &o = snaps[i];
+    KeySettings now;
+    TimingCurve now_curve;
+    /* One the edit changed itself (picked dots slid, a header change going to them all) keeps what it did. */
+    if (int(i) == active || !motion_path_span_interp(doc, o.pick.target, o.pick.start, o.pick.end, now, now_curve) ||
+        !(now == o.settings && now_curve == o.curve))
+    {
+      continue;
+    }
+    if (motion_path_span_interp_set(doc, o.pick.target, o.pick.start, o.pick.end, settings, curve) > 0) {
+      followed++;
+    }
+  }
+  return followed;
+}
+
 /* The stretch of `t` holding the picked one (a span across breakdowns is one). */
 static bool stretch_holding(const Document &doc, const MotionPathPickedStretch &p, MotionPathStretch &r_stretch)
 {
@@ -319,6 +379,35 @@ bool motion_path_pick_at(Context &C, const std::vector<MotionPathTarget> &target
   /* Edits not yet recorded belong to the frame they were made at. */
   animation_record(doc);
   PathToolSync sync{C};
+  /* Shift on the active one of several picked stretches, between its keys: it is unpicked, as Blender's Shift click
+   * on the active item; the one picked before it is active then. */
+  if (extend) {
+    const MotionPathPicks picks = motion_path_picks(C);
+    if (picks.spans > 1 && picks.shown >= 0) {
+      const MotionPathPickedStretch active = picks.stretches[size_t(picks.shown)];
+      int start = 0, end = 0;
+      const bool on_active = std::any_of(targets.begin(), targets.end(), [&](const MotionPathTarget &t) {
+        return t.same(active.target) && !motion_path_is_key(doc, t, frame) &&
+               motion_path_stretch_at(doc, t, frame, start, end) && start == active.start && end == active.end;
+      });
+      if (on_active) {
+        std::erase_if(wm.path_dots, [&](const auto &d) {
+          return d.first.same(active.target) && d.second > active.start && d.second < active.end;
+        });
+        wm.path_handle_picks.clear();
+        if (motion_path_key_selected(doc, active.target, active.end)) {
+          motion_path_key_select(doc, active.target, active.end, false);
+        }
+        const MotionPathPicks left = motion_path_picks(C);
+        if (!left.stretches.empty()) {
+          wm.path_timing_target = left.stretches.back().target;
+          wm.path_timing_end = left.stretches.back().end;
+        }
+        C.undo->mark_changed();
+        return true;
+      }
+    }
+  }
   if (!extend) {
     std::vector<Layer *> all;
     for (const Layer *l : document_layers_flat(doc)) {

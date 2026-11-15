@@ -1,6 +1,6 @@
 """The timeline's timing chart is one row, shown only while a stretch is picked (teal): the path last picked on, with all
-its ticks. Nothing picked (the playhead's stretch teal is not a pick), picks in different stretches or the tool put
-away: hidden.
+its ticks (with picks in different stretches, the active one's). Nothing picked (the playhead's stretch teal is not a
+pick) or the tool put away: hidden.
 
 Run with:  OpenAnimate --background --python tests/test_timing_chart_rows.py
 """
@@ -46,7 +46,7 @@ assert wm.timing_chart_rows() == ["Ball"], ("a dot picked: its path's row alone"
 assert ops.anim.motion_path_select(frame="16", layer=str(ball.id), extend="1") == {'FINISHED'}
 assert wm.timing_chart_rows() == ["Ball"], "more of the same stretch"
 assert ops.anim.motion_path_select(frame="25", layer=str(ball.id), extend="1") == {'FINISHED'}
-assert wm.timing_chart_rows() == [], ("picks in two stretches: no teal, hidden", wm.timing_chart_rows())
+assert wm.timing_chart_rows() == ["Ball"], ("picks in two stretches: the active one's path", wm.timing_chart_rows())
 assert ops.anim.motion_path_select(frame="25", layer=str(other.id)) == {'FINISHED'}
 assert wm.timing_chart_rows() == ["Other"], ("the path last picked on", wm.timing_chart_rows())
 assert ops.anim.motion_path_select(none="1") == {'FINISHED'}

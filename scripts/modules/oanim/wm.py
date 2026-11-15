@@ -908,7 +908,8 @@ def timeline_row_details(as_shown=False):
     shown: "Summary / <name>" when a lone layer's row is the Summary too),
     holds_pick (a folding row holding the picked points or bones: open while the pick lasts, unless
     folded since), frames (where it shows keys) and filler_frames (those whose keys are all fillers, drawn small and grey),
-    teal ((start, end) of the selected stretch where it is shaded on this row, else None), chain ("TOGETHER" on a
+    teal ((start, end) of the selected stretch where it is shaded on this row, the active one where several are, else
+    None), teal_spans (every picked stretch shaded on it: (start, end, active)), chain ("TOGETHER" on a
     row keying together, "DRAWING" on a Drawing row keying the whole drawing, else ""; a chained row never opens),
     hollow_frames (frames drawn hollow: other channels have keys there but the picked bones and points don't) and
     stretch_pickable (Alt click picks a stretch: a chained row or a single channel's). as_shown=True lists them

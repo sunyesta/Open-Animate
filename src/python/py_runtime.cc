@@ -532,6 +532,11 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["dim"] = row.dim;
       d["holds_pick"] = row.holds_pick;
       d["teal"] = row.teal.second > row.teal.first ? py::object(py::make_tuple(row.teal.first, row.teal.second)) : py::none();
+      py::list teal_spans;
+      for (const auto &[start, end, active] : row.teal_spans) {
+        teal_spans.append(py::make_tuple(start, end, active));
+      }
+      d["teal_spans"] = teal_spans;
       d["frames"] = row.frames;
       d["filler_frames"] = row.filler_frames;
       d["chain"] = row.chain;

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "data/document.hh"
+#include "editors/editors.hh"
 #include "imgui.h"
 #include "ops/operator.hh"
 
@@ -40,13 +41,14 @@ void timeline_path_strip(Context &C, ImVec2 min, ImVec2 max, float keys_x, float
                          float row_h);
 /* Whether the strip's ticks are picked and slid with the Motion Path tool's brush in `ts` (every brush). */
 bool timeline_path_strip_ticks_editable(const ToolSettings &ts);
-/* The selected stretch (teal) this frame, when `target` is one of those it is of; false otherwise. */
-bool timeline_key_focus_span(const MotionPathTarget &target, int &r_start, int &r_end);
-/* The stretch picked (teal from picks, not the playhead's): the path last picked on in `r_target`. False with nothing
- * picked, picks in different stretches or other keys selected as well. */
+/* The selected stretches (teal) this frame of `target`: first and last frame, and whether it is the active one. */
+std::vector<KeyFocusSpan> timeline_key_focus_spans(const MotionPathTarget &target);
+/* The stretch picked (teal from picks, not the playhead's; with several, the active one): the path last picked on in
+ * `r_target`. False with nothing picked or other keys selected as well. */
 bool timeline_picked_stretch(Context &C, MotionPathTarget &r_target);
-/* Its shade, behind the keys. */
-constexpr ImU32 KEY_FOCUS_FILL = IM_COL32(0x2a, 0xb0, 0xa8, 60);
+/* Their shade, behind the keys: the active stretch a lighter teal than the other picked ones. */
+constexpr ImU32 KEY_FOCUS_FILL = IM_COL32(0x56, 0xdc, 0xd2, 80);
+constexpr ImU32 KEY_FOCUS_FILL_OTHER = IM_COL32(0x2a, 0xb0, 0xa8, 48);
 /* A tick or a blend is being dragged in the strip, or Shift is held: the wheel is the strip's, not the timeline's
  * zoom. */
 bool timeline_path_strip_busy();

@@ -12,6 +12,7 @@
 #include "core/log.hh"
 #include "data/document.hh"
 #include "ops/edit_ops.hh"
+#include "ops/stretch_sync.hh"
 #include "ops/undo.hh"
 #include "wm/context.hh"
 #include "core/profile.hh"
@@ -298,7 +299,16 @@ OpStatus operator_call(Context &C, std::string_view idname, const OpArgs &args)
     if (together) {
       timing_edit.start(*C.document);
     }
+    /* Several stretches picked: a timing edit to the active one goes to the others too (an outer run's does it). */
+    PickedStretchSync stretch_sync;
+    const bool syncs = (ot.flag & OPTYPE_TIMING) && !outer_args && C.document;
+    if (syncs) {
+      stretch_sync.start(C);
+    }
     status = ot.exec(C);
+    if (syncs && status == OpStatus::Finished) {
+      stretch_sync.finish(C);
+    }
     if (together && status == OpStatus::Finished) {
       keys_moved_report(timing_edit.finish(*C.document));
     }

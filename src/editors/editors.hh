@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -255,6 +256,8 @@ struct TimelineRowInfo {
   /* Shaded teal (the selected stretch, first and last frame) on this row: the most specific row shown of a channel
    * moving its dots. (0, 0) when not. */
   std::pair<int, int> teal{0, 0};
+  /* Every picked stretch shaded on it: first and last frame, and whether it is the active one (lighter). */
+  std::vector<std::tuple<int, int, bool>> teal_spans;
   /* The frames it shows keys on, and those whose keys are all fillers (drawn grey and hollow). */
   std::vector<int> frames;
   std::vector<int> filler_frames;
@@ -276,6 +279,11 @@ std::vector<std::string> timeline_key_header_parts();
 uint32_t key_header_color(int mode, bool hovered);
 /* What the header's key group edits now: mode as key_header_color's; in the teal mode the stretch (its target's label,
  * first and last frame). */
+/* A picked stretch shaded teal: its first and last frame, and whether it is the active one (shown lighter). */
+struct KeyFocusSpan {
+  int start = 0, end = 0;
+  bool active = false;
+};
 struct KeyHeaderFocus {
   int mode = 0;
   std::string label;
