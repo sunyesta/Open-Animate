@@ -393,6 +393,19 @@ def motion_path_places_clear():
     _oanim.motion_path_places_clear()
 
 
+def motion_paths_hold():
+    """Holds the motion paths as they are worked out now, for motion_paths_held_slid(); returns how many."""
+    return _oanim.motion_paths_hold()
+
+
+def motion_paths_held_slid():
+    """The held paths slid along their lines to the timing now, as the viewport slides them while a timing drag goes
+    on (each slide from the last, held for the next): dicts with label, first, points and shape (each frame's line
+    from the dot before, as drawn). None where they can't be slid (something besides their timing changed), and the
+    viewport works them out again."""
+    return _oanim.motion_paths_held_slid()
+
+
 def motion_path_own_from_keys(on=True):
     """Whether motion paths take their shortcuts (on unless a test compares them with working everything out on
     copies): Own Motion takes a point's or a layer's own values on each frame from its keys where nothing else moves

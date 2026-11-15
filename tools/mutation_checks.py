@@ -99,6 +99,15 @@ PENDING = [
      "A knob moved by actions apart from the bone counts as moved by its keys", 'tests/test_motion_path_pupil_offsets.py'),
     ('src/anim/motion_path.cc', '    if (o.id != kept.bone && apart_from(o)) {', '    if (o.id != kept.bone && apart_from(o) && false) {',
      "Kept action offsets stay good while other bones' keys they don't follow change", 'tests/test_motion_path_pupil_offsets.py'),
+    ('src/anim/motion_path.cc', '      p.points[i] += p.own_dx * d.x + p.own_dy * d.y;', '      p.points[i] += d;',
+     "A slid dot moves through the path's own slopes (a turned, scaled path)", 'tests/test_motion_path_timing_slide.py'),
+    ('src/anim/motion_path.cc', '  if (!(inputs == now)) {', '  if (false) {',
+     "Something besides the paths' position keys changing isn't slid", 'tests/test_motion_path_timing_slide.py'),
+    ('src/anim/motion_path.cc', '    for (size_t k = 0; k < frames && !(bone_is_controller(kb) && kb.controller_contain_knob); k++) {',
+     '    for (size_t k = 0; k < frames; k++) {',
+     "A knob kept in its box is never slid", 'tests/test_motion_path_timing_slide.py'),
+    ('src/anim/motion_path.cc', '    path_shape_fill(doc, p);\n    path_speed_fill(p);\n  }\n  return true;', '    path_speed_fill(p);\n  }\n  return true;',
+     "A slide draws the line between the dots again", 'tests/test_motion_path_timing_slide.py'),
 ]
 
 def build(root):

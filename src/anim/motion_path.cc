@@ -1190,6 +1190,23 @@ bool motion_path_own_motion(const Document &doc, const MotionPathTarget &target)
 
 static void path_shape_fill(const Document &doc, MotionPath &p);
 
+/* How fast it goes into each frame, against its fastest. */
+static void path_speed_fill(MotionPath &p)
+{
+  float fastest = 0.0f;
+  p.speed.assign(p.points.size(), 0.0f);
+  for (size_t k = 1; k < p.points.size(); k++) {
+    p.speed[k] = length(p.points[k] - p.points[k - 1]);
+    fastest = std::max(fastest, p.speed[k]);
+  }
+  if (p.speed.size() > 1) {
+    p.speed[0] = p.speed[1];
+  }
+  for (float &s : p.speed) {
+    s = fastest > 1e-6f ? s / fastest : 0.0f;
+  }
+}
+
 /* With Own Motion, a bone's own constraints (a pupil's Look At keeping it in the eye) are part of where it really goes,
  * not of its own motion: turned off on the copy its path is worked out on, so the dots, the line, the handles and the
  * control points all lie on the curve its keys shape. */
@@ -1610,18 +1627,33 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
     for (BoneConstraint &c : bones[size_t(b)].constraints) {
       c.enabled = false;
     }
+    const auto place = [&](const Place &q, float2 position) {
+      Bone &bone = bones[size_t(b)];
+      bone.position = position;
+      bone.scale = q.own_scale;
+      bone.angle = q.own_angle;
+      const std::vector<BonePose> poses = armature_pose_of(*rig, bones, false);
+      return to_doc.apply(t.head ? poses[size_t(b)].knob.apply({0, 0}) : poses[size_t(b)].tail);
+    };
     for (size_t k = 0; k < frames; k++) {
       const Place &q = found[k][i];
       if (!q.got) {
         continue;
       }
-      Bone &bone = bones[size_t(b)];
-      bone.position = q.own_position;
-      bone.scale = q.own_scale;
-      bone.angle = q.own_angle;
-      const std::vector<BonePose> poses = armature_pose_of(*rig, bones, false);
-      own_at[i][k] = to_doc.apply(t.head ? poses[size_t(b)].knob.apply({0, 0}) : poses[size_t(b)].tail);
+      own_at[i][k] = place(q, q.own_position);
       own_found[i][k] = 1;
+    }
+    /* Its slopes (motion_paths_slide): the head goes with the position through what its parents are as shown, the
+     * same on every frame; a knob kept in its box doesn't. */
+    const Bone &kb = rig->bones[size_t(b)];
+    for (size_t k = 0; k < frames && !(bone_is_controller(kb) && kb.controller_contain_knob); k++) {
+      if (own_found[i][k]) {
+        const Place &q = found[k][i];
+        paths[i].own_dx = place(q, q.own_position + float2{1.0f, 0.0f}) - own_at[i][k];
+        paths[i].own_dy = place(q, q.own_position + float2{0.0f, 1.0f}) - own_at[i][k];
+        paths[i].own_linear = true;
+        break;
+      }
     }
   }
   /* A layer's origin placed with no copy (layer_placed); a point on copies. */
@@ -1643,6 +1675,22 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
                             1 :
                             0;
       own_at[i][k] = at;
+    }
+    for (size_t k = 0; k < frames; k++) {
+      const Place &q = found[k][i];
+      float2 ax, ay;
+      if (own_found[i][k]) {
+        if (layer_placed(shown, t, q.own_position + float2{1.0f, 0.0f}, q.own_scale, q.own_angle,
+                         shown.frame_current == 0, ax) &&
+            layer_placed(shown, t, q.own_position + float2{0.0f, 1.0f}, q.own_scale, q.own_angle,
+                         shown.frame_current == 0, ay))
+        {
+          paths[i].own_dx = ax - own_at[i][k];
+          paths[i].own_dy = ay - own_at[i][k];
+          paths[i].own_linear = true;
+        }
+        break;
+      }
     }
     it = on_copies.erase(it);
   }
@@ -1696,6 +1744,8 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
         p.spaces.push_back(back * into);
       }
       if (p.own_motion) {
+        /* (Slid only where every dot is placed from its own values.) */
+        p.own_linear = p.own_linear && q.got && own_found[i][k];
         /* Everything else held as shown, so drawn relative to anything it stays where it is. */
         p.points.push_back(!q.got            ? at
                            : own_found[i][k] ? own_at[i][k]
@@ -1708,18 +1758,7 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
     path_shape_fill(doc, p);
   }
   for (MotionPath &p : paths) {
-    float fastest = 0.0f;
-    p.speed.assign(p.points.size(), 0.0f);
-    for (size_t k = 1; k < p.points.size(); k++) {
-      p.speed[k] = length(p.points[k] - p.points[k - 1]);
-      fastest = std::max(fastest, p.speed[k]);
-    }
-    if (p.speed.size() > 1) {
-      p.speed[0] = p.speed[1];
-    }
-    for (float &s : p.speed) {
-      s = fastest > 1e-6f ? s / fastest : 0.0f;
-    }
+    path_speed_fill(p);
   }
   return paths;
 }
@@ -3324,6 +3363,7 @@ static void path_shape_fill(const Document &doc, MotionPath &p)
       break;
     }
   }
+  p.values = values;
   const auto conj = [](float2 z) { return float2{z.x, -z.y}; };
   const auto mul = [](float2 a, float2 b) { return float2{a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x}; };
   size_t stretch = 0;
@@ -3389,6 +3429,67 @@ static void path_shape_fill(const Document &doc, MotionPath &p)
     }
     p.shape_known[i] = true;
   }
+}
+
+std::shared_ptr<Document> motion_paths_slide_inputs(const Document &doc)
+{
+  auto inputs = std::make_shared<Document>(doc);
+  g_doc_copies++;
+  return offsets_inputs_make(*inputs) ? inputs : nullptr;
+}
+
+bool motion_paths_slide(const Document &doc, Document &inputs, std::vector<MotionPath> &paths)
+{
+  OANIM_PROFILE("motion_paths_slide");
+  for (const MotionPath &p : paths) {
+    if (!p.own_linear || p.values.size() != p.points.size()) {
+      return false;
+    }
+  }
+  /* Nothing changed but the paths' position keys: what holds the rest as shown, and what actions add on each frame,
+   * are as they were, so each dot moves as its value does, by the path's own slopes. (Their angle or scale keys
+   * changing too would turn a tip: worked out again then.) */
+  Document now = doc;
+  g_doc_copies++;
+  if (!offsets_inputs_make(now)) {
+    return false;
+  }
+  struct Swapped {
+    std::vector<Key<float2>> *keys;
+    std::vector<Key<float2>> was;
+  };
+  std::vector<Swapped> swapped;
+  for (const MotionPath &p : paths) {
+    Channel<float2> *in = handle_channel(inputs, p.target);
+    const Channel<float2> *is = handle_channel(now, p.target);
+    if (!in || !is) {
+      for (Swapped &s : swapped) {
+        *s.keys = std::move(s.was);
+      }
+      return false;
+    }
+    if (std::none_of(swapped.begin(), swapped.end(), [&](const Swapped &s) { return s.keys == &in->keys; })) {
+      swapped.push_back({&in->keys, std::move(in->keys)});
+      in->keys = is->keys;
+    }
+  }
+  if (!(inputs == now)) {
+    for (Swapped &s : swapped) {
+      *s.keys = std::move(s.was);
+    }
+    return false;
+  }
+  /* (`inputs` keeps the keys now: the next step slides from this one.) */
+  for (MotionPath &p : paths) {
+    const Channel<float2> *ch = handle_channel(const_cast<Document &>(doc), p.target);
+    for (size_t i = 0; i < p.points.size(); i++) {
+      const float2 v = ch->evaluate(p.first + int(i)), d = v - p.values[i];
+      p.points[i] += p.own_dx * d.x + p.own_dy * d.y;
+    }
+    path_shape_fill(doc, p);
+    path_speed_fill(p);
+  }
+  return true;
 }
 
 const char *path_brush_id(PathBrush brush)

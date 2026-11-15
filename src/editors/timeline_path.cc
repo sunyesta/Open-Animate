@@ -836,6 +836,13 @@ static bool modal_key_take(Context &C, const char *type)
   return false;
 }
 
+bool timeline_path_timing_live()
+{
+  /* A press that hasn't moved yet changes nothing, so it still leaves the paths to be worked out as they are. */
+  return (g_tick.active && g_tick.dragging) || g_blend.active || g_chart_scale.active ||
+         (g_edit.active && g_edit.dragging) || g_stroke.active || (g_xform.active && (!g_xform.drag || g_xform.moved));
+}
+
 static struct {
   bool active = false;
   ImGuiID owner = 0;

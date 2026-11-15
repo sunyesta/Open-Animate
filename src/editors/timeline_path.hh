@@ -52,6 +52,9 @@ constexpr ImU32 KEY_FOCUS_FILL_OTHER = IM_COL32(0x2a, 0xb0, 0xa8, 48);
 /* A tick or a blend is being dragged in the strip, or Shift is held: the wheel is the strip's, not the timeline's
  * zoom. */
 bool timeline_path_strip_busy();
+/* A timing drag going on in the chart or the Path Timing graph: only the paths' timing changes as it goes, so the
+ * viewport slides their dots along the lines they had (motion_paths_slide) and works them out again once it ends. */
+bool timeline_path_timing_live();
 
 /* The Path Timing editor (path_timing_draw in editors.hh; panel B of the spec's speed editing) shows one stretch at a
  * time of the last thing picked on, as a graph of its timing curve (how far along its path, 0-1, against its frames,

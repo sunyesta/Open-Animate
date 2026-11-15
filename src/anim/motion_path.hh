@@ -68,6 +68,13 @@ struct MotionPath {
    * corners (a crease at a control point) stay sharp. */
   std::vector<std::vector<float2>> shape;
   std::vector<bool> shape_known;
+  /* Its position channel's value on each frame (empty where it has none): what motion_paths_slide tells the dots
+   * that moved by. */
+  std::vector<float2> values;
+  /* Own Motion with every dot placed from its own values (the rest held as shown): how far a dot moves for a step of 1
+   * in its position's x and y, the same on every frame (a bone's or a layer's, not a knob kept in its box). */
+  float2 own_dx{}, own_dy{};
+  bool own_linear = false;
   /* Drawn relative to something (not Own Motion): each frame's map from document space on that frame to where it is
    * drawn, which turns and scales as what it is relative to does. Empty when drawn as it is. */
   std::vector<Transform2D> spaces;
@@ -172,6 +179,15 @@ struct MotionPathKept {
 /* The paths of `targets` over frames first..last; with `kept`, frames worked out for the same document reused. */
 std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector<MotionPathTarget> &targets,
                                           int first, int last, MotionPathFrames *kept = nullptr);
+/* What motion_paths_slide compares against: `doc`'s inputs as the paths were made from them (null where it can't be
+ * told). */
+std::shared_ptr<Document> motion_paths_slide_inputs(const Document &doc);
+/* `paths` (Own Motion, as made from `inputs`) moved to the timing of `doc` with no frame worked out (a timing drag,
+ * the paths worked out again once it ends): each dot by its value's change through the path's own slopes, the line
+ * between the dots drawn again from its keys. False where they can't be: something besides their position keys changed
+ * (`inputs` then as it was), a dot not placed from its own values, a knob kept in its box; the caller makes them anew
+ * then. `inputs` takes the keys now, for the next step. */
+bool motion_paths_slide(const Document &doc, Document &inputs, std::vector<MotionPath> &paths);
 /* A path's colour: its own, or one of a few told apart by the order it comes in. */
 Color motion_path_color(const Document &doc, const MotionPathTarget &target, size_t index);
 /* A label for a target: "arm_L tip", "Face point 12", "Face". */

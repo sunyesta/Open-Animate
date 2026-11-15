@@ -41,6 +41,7 @@
 #include "data/driver.hh"
 #include "anim/keep_poses.hh"
 #include "anim/motion_path.hh"
+#include "editors/timeline_path.hh"
 #include "anim/onion.hh"
 #include "anim/sculpt.hh"
 #include "assets/asset_library.hh"
@@ -2349,6 +2350,9 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
     PathRelative relative = PathRelative::World;
     uint64_t relative_layer = 0, relative_bone = 0;
     std::vector<MotionPath> paths;
+    /* Slid during a timing drag (motion_paths_slide), from what they were made from: worked out again once it ends. */
+    bool slid = false;
+    std::shared_ptr<Document> inputs;
   } cache;
   /* Picking keys on the paths changes nothing they are worked out from. */
   const uint64_t content = C.undo ? C.undo->content_change_count() : 0;
@@ -2363,11 +2367,23 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
    * is now too. */
   const bool any_own = std::find(own.begin(), own.end(), true) != own.end();
   const int frame = doc.path_relative == PathRelative::World && !any_own ? 0 : doc.frame_current;
-  if (cache.doc != &doc || cache.changes != changes || cache.serial != g_path_drag.serial || cache.first != first ||
-      cache.last != last || cache.frame != frame || cache.targets != targets || cache.own != own ||
-      cache.relative != doc.path_relative ||
-      cache.relative_layer != doc.path_relative_layer || cache.relative_bone != doc.path_relative_bone)
-  {
+  const bool same_paths = cache.doc == &doc && cache.first == first && cache.last == last && cache.frame == frame &&
+                          cache.targets == targets && cache.own == own && cache.relative == doc.path_relative &&
+                          cache.relative_layer == doc.path_relative_layer &&
+                          cache.relative_bone == doc.path_relative_bone;
+  const bool live = timeline_path_timing_live();
+  /* A timing drag's step: the dots slid to their new times, no frame worked out. */
+  if (live && same_paths && cache.inputs && (cache.changes != changes || cache.serial != g_path_drag.serial)) {
+    std::vector<MotionPath> slid = cache.paths;
+    if (motion_paths_slide(doc, *cache.inputs, slid)) {
+      cache.paths = std::move(slid);
+      cache.changes = changes;
+      cache.serial = g_path_drag.serial;
+      cache.slid = true;
+    }
+  }
+  if (!same_paths || cache.changes != changes || cache.serial != g_path_drag.serial || (cache.slid && !live)) {
+    cache.slid = false;
     cache.doc = &doc;
     cache.changes = changes;
     cache.serial = g_path_drag.serial;
@@ -2380,6 +2396,9 @@ static void draw_motion_paths(Context &C, Area &area, const ViewMapping &view, I
     cache.relative_layer = doc.path_relative_layer;
     cache.relative_bone = doc.path_relative_bone;
     cache.paths = motion_paths_make(doc, targets, first, last, &kept.frames);
+    const bool slidable = !cache.paths.empty() && std::all_of(cache.paths.begin(), cache.paths.end(),
+                                                              [](const MotionPath &p) { return p.own_linear; });
+    cache.inputs = slidable ? motion_paths_slide_inputs(doc) : nullptr;
   }
   const auto u32 = [](const Color &c, float alpha) {
     return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, c.a * alpha));

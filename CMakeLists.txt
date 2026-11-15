@@ -686,6 +686,8 @@ add_test(NAME stretch_pick_hidden_path
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_stretch_pick_hidden_path.py)
 add_test(NAME motion_path_pupil_offsets
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_pupil_offsets.py)
+add_test(NAME motion_path_timing_slide
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_timing_slide.py)
 add_test(NAME key_whole_drawing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_whole_drawing.py)
 add_test(NAME key_whole_drawing_actions

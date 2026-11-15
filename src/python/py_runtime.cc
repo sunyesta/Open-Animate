@@ -1629,6 +1629,50 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return py::str(motion_path_label(*C.document, t));
   });
+  /* Paths held as drawn, then slid along their lines as a timing drag slides them in the viewport (motion_paths_slide),
+   * each slide from the last as there. */
+  static std::vector<MotionPath> g_held_paths;
+  static std::shared_ptr<Document> g_held_inputs;
+  m.def("motion_paths_hold", []() {
+    Context &C = current_context();
+    const Document &doc = *C.document;
+    const std::vector<MotionPathTarget> targets = motion_path_targets(C);
+    g_held_paths.clear();
+    int first = 0, last = 0;
+    if (doc.motion_paths && motion_path_range(doc, targets, first, last)) {
+      motion_path_tool_sync(C);
+      g_held_paths = motion_paths_make(doc, targets, first, last);
+    }
+    g_held_inputs = motion_paths_slide_inputs(doc);
+    return g_held_paths.size();
+  });
+  m.def("motion_paths_held_slid", []() -> py::object {
+    const Document &doc = *current_context().document;
+    if (!g_held_inputs || !motion_paths_slide(doc, *g_held_inputs, g_held_paths)) {
+      return py::none();
+    }
+    py::list out;
+    for (const MotionPath &p : g_held_paths) {
+      py::dict d;
+      d["label"] = motion_path_label(doc, p.target);
+      d["first"] = p.first;
+      py::list pts, shape;
+      for (size_t i = 0; i < p.points.size(); i++) {
+        pts.append(py::make_tuple(p.points[i].x, p.points[i].y));
+        py::list line;
+        if (i < p.shape.size()) {
+          for (const float2 &q : p.shape[i]) {
+            line.append(py::make_tuple(q.x, q.y));
+          }
+        }
+        shape.append(line);
+      }
+      d["points"] = pts;
+      d["shape"] = shape;
+      out.append(d);
+    }
+    return out;
+  });
   m.def("motion_paths", [](bool kept) {
     Context &C = current_context();
     const Document &doc = *C.document;
@@ -1664,6 +1708,18 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["points"] = pts;
       d["speed"] = speed;
       d["keys"] = p.keys;
+      /* Each frame's line from the dot before, as drawn (empty where it is straight or not known). */
+      py::list shape;
+      for (size_t i = 0; i < p.points.size(); i++) {
+        py::list line;
+        if (i < p.shape.size()) {
+          for (const float2 &q : p.shape[i]) {
+            line.append(py::make_tuple(q.x, q.y));
+          }
+        }
+        shape.append(line);
+      }
+      d["shape"] = shape;
       /* The dots as drawn: frames held still make one, which a press takes as its key's frame where it holds one. */
       py::list runs;
       for (const PathRun &r : motion_path_runs(doc, p)) {
