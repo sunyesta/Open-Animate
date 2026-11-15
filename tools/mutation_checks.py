@@ -84,6 +84,8 @@ PENDING = [
     ('src/editors/timeline.cc', '        f.teals.push_back({{p.target}, p.start, p.end, p == shown});',
      '        f.teals.push_back({{p.target}, p.start, p.end, false});',
      "Each picked stretch is teal, the active one lighter", 'tests/test_stretch_sync.py'),
+    ('src/ops/anim_ops.cc', '          if (targets.empty() && !doc.path_show_all) {', '          if (false) {',
+     "Alt click in a row whose path is hidden shows it and picks there", 'tests/test_stretch_pick_hidden_path.py'),
 ]
 
 def build(root):
