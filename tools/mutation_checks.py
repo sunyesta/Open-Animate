@@ -90,6 +90,8 @@ PENDING = [
      "Shift Alt click on another path's row keeps the paths shown and their picks", 'tests/test_stretch_pick_hidden_path.py'),
     ('src/ops/motion_path_ops.cc', '  if (picks.stretches.size() < 2) {', '  if (picks.spans < 2) {',
      "One span picked on several paths: a timing edit reaches them all", 'tests/test_stretch_pick_hidden_path.py'),
+    ('src/editors/timeline.cc', '      f.teals.push_back({others, f.start, f.end, false});', '      f.teals.push_back({others, f.start, f.end, true});',
+     "One span picked on several paths: the path picked last the lighter teal", 'tests/test_stretch_pick_hidden_path.py'),
 ]
 
 def build(root):

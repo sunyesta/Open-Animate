@@ -76,7 +76,10 @@ panel = wm.motion_path_timing_panel()
 assert (panel["start"], panel["end"]) == (10, 20), panel
 assert sorted(t["label"] for t in wm.motion_path_timing()) == ["arm head", "leg head"], wm.motion_path_timing()
 teal = [s for r in wm.timeline_row_details(as_shown=False) if r["name"] == "Transform" for s in r["teal_spans"]]
-assert teal == [(10, 20, True), (10, 20, True)], ("both bones' rows teal", teal)
+assert sorted(teal) == [(10, 20, False), (10, 20, True)], ("both bones' rows teal, the one picked last lighter", teal)
+rows = wm.timeline_row_details(as_shown=False)
+at = [r["name"] for r in rows].index("arm")
+assert rows[at + 1]["name"] == "Transform" and rows[at + 1]["teal_spans"] == [(10, 20, True)], rows[at + 1]
 
 # Shift again back on the first one's row: still both, the first active again.
 assert ops.anim.timeline_stretch_pick(frame="12", extend="1", **row("leg")) == {'FINISHED'}

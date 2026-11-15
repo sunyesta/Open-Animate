@@ -1215,7 +1215,17 @@ static KeyFocus key_focus(Context &C)
         f.targets.push_back(p.target);
       }
     }
-    f.teals.push_back({f.targets, f.start, f.end, true});
+    /* One span on several paths: the active path's (picked last, shown in Path Timing) the lighter teal. */
+    std::vector<MotionPathTarget> others;
+    for (const MotionPathTarget &tg : f.targets) {
+      if (!tg.same(shown.target)) {
+        others.push_back(tg);
+      }
+    }
+    f.teals.push_back({{shown.target}, f.start, f.end, true});
+    if (!others.empty()) {
+      f.teals.push_back({others, f.start, f.end, false});
+    }
     f.label = (f.targets.size() == 1 ? motion_path_label(doc, f.target) : std::to_string(f.targets.size()) + " paths") +
               "  " + std::to_string(f.start) + "-" + std::to_string(f.end);
     return f;
@@ -2936,7 +2946,16 @@ static std::vector<std::vector<KeyFocusSpan>> focus_teal_rows(const Document &do
     }
     const std::vector<bool> on = focus_rows(rows, channels);
     for (size_t r = 0; r < rows.size(); r++) {
-      if (on[r]) {
+      if (!on[r]) {
+        continue;
+      }
+      /* A row both paths move (the Summary, a bone's tip and head) shades the frames once, lighter if either is. */
+      auto same = std::find_if(out[r].begin(), out[r].end(),
+                               [&](const KeyFocusSpan &s) { return s.start == t.start && s.end == t.end; });
+      if (same != out[r].end()) {
+        same->active = same->active || t.active;
+      }
+      else {
         out[r].push_back({t.start, t.end, t.active});
       }
     }
