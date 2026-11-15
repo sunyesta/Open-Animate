@@ -97,6 +97,8 @@ PENDING = [
      "a Layer tab chip's Assign Selected counts the picked layers", 'tests/test_collection_row_menu.py'),
     ('src/ops/rig_ops.cc', '        armature_poll, [assign](Context &C) {', '        bone_layer_active, [assign](Context &C) {',
      "Assign Selected works with a drawing inside the rig active", 'tests/test_collection_row_menu.py'),
+    ('src/editors/viewport.cc', '  return bone_is_pin(bone) && !custom_shape_shows(doc, bone);', '  return bone_is_pin(bone);',
+     "a pin with a Custom shape is drawn as its drawing", 'tests/test_bone_shapes.py'),
 ]
 
 def build(root):

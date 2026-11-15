@@ -168,6 +168,8 @@ void sculpt_brush_icon(ImDrawList *dl, SculptBrush brush, ImVec2 center, float s
                        unsigned int before);
 /* Whether something is being moved in a viewport (G, R, S, W, a Transform tool's box). */
 bool viewport_drag_active();
+/* How the viewport draws (and picks) a bone: "PIN", "CUSTOM" (its Custom shape, a pin's too), "CONTROLLER" or "BONE". */
+const char *viewport_bone_drawn_as(const Document &doc, const Bone &bone);
 /* Whether the edit going on (a point move: G, R, S, Extrude, a handle tweak) says which layers it changes,
  * each update (see Revision); any other edit with the mouse down may change anything. */
 bool viewport_precise_edit();

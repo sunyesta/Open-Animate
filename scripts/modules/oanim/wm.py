@@ -538,6 +538,12 @@ def collection_layers_change(layer, collection, assign=True):
     return _oanim.collection_layers_change(getattr(layer, "id", layer), collection, bool(assign))
 
 
+def bone_drawn_as(rig, bone):
+    """Test hook: how the viewport draws (and picks) bone `bone` (a name) of bone layer `rig`: "PIN", "CUSTOM" (its
+    Custom shape's drawing, a pin's too), "CONTROLLER" or "BONE"."""
+    return _oanim.bone_drawn_as(getattr(rig, "id", rig), bone)
+
+
 def field_affected_go(layer, path, index, component=-1):
     """Test hook: clicks row `index` of the field's Affected By."""
     _oanim.field_affected_go(getattr(layer, "id", layer), path, int(component), int(index))

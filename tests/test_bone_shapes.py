@@ -46,6 +46,17 @@ try:
 except ValueError:
     pass
 
+# How the viewport draws them: a pin as a pin until its Shape is Custom with a drawing, then as that drawing.
+wm = oanim.wm
+assert wm.bone_drawn_as(rig, "arm") == "CUSTOM"
+assert wm.bone_drawn_as(rig, "pin") == "PIN"
+rig.bone_set("pin", shape="CUSTOM")
+assert wm.bone_drawn_as(rig, "pin") == "PIN", "Custom with no layer yet: still a pin"
+rig.bone_set("pin", shape_layer="top teeth")
+assert wm.bone_drawn_as(rig, "pin") == "CUSTOM", "a pin takes a Custom shape"
+rig.bone_set("pin", shape="BONE")
+assert wm.bone_drawn_as(rig, "pin") == "PIN"
+
 # It is how the bone is drawn, nothing more: the bone poses as before.
 doc.frame_current = 5
 rig.bone_set("pin", angle=1.0)

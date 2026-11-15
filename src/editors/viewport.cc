@@ -9910,10 +9910,30 @@ static constexpr float PIN_RADIUS = 6.0f;
  * viewport draws. */
 static uint64_t g_plain_armature = 0;
 
-/* A Pin bone is drawn (and picked) as a pin, always: it has no tip to show. */
-static bool shows_pin(const Bone &bone)
+/* Whether a bone's Custom shape shows: custom shapes on, and its layer a drawing with a shape to show. */
+static bool custom_shape_shows(const Document &doc, const Bone &bone)
 {
-  return bone_is_pin(bone);
+  if (!g_bone_shapes || bone.shape != BoneShape::Custom || bone.shape_layer == 0) {
+    return false;
+  }
+  const Layer *source = layer_find(doc, bone.shape_layer);
+  return source && source->type == LayerType::Vector &&
+         std::any_of(source->drawing.shapes.begin(), source->drawing.shapes.end(),
+                     [](const Shape &s) { return !s.hidden && (s.has_fill || s.has_outline); });
+}
+
+/* A Pin bone is drawn (and picked) as a pin, having no tip to show, unless its Custom shape shows: then as that, as a
+ * Custom bone. */
+static bool shows_pin(const Document &doc, const Bone &bone)
+{
+  return bone_is_pin(bone) && !custom_shape_shows(doc, bone);
+}
+
+const char *viewport_bone_drawn_as(const Document &doc, const Bone &bone)
+{
+  return bone_is_controller(bone) ? "CONTROLLER" : shows_pin(doc, bone) ? "PIN"
+                                               : custom_shape_shows(doc, bone) ? "CUSTOM"
+                                                                               : "BONE";
 }
 
 static float pin_radius(const Bone &bone)
@@ -10261,7 +10281,9 @@ static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armatur
       if (dh.x * dh.x + dh.y * dh.y < 0.25f && dt.x * dt.x + dt.y * dt.y < 0.25f) {
         continue;
       }
-      if (i < armature.bones.size() && shows_pin(armature.bones[i])) {
+      if (i < armature.bones.size() &&
+          shows_pin(doc, armature.bones[i]))
+      {
         draw_pin(dl, swung[i], pin_radius(armature.bones[i]), IM_COL32(0x8c, 0xc8, 0xff, 40), col, 1.2f);
         continue;
       }
@@ -10392,7 +10414,7 @@ static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armatur
                         faint ? col_ghost : active ? col_active : COL_BONE_EDGE);
         continue;
       }
-      if (shows_pin(bone)) {
+      if (bone_is_pin(bone) && (as_bone || shows_pin(doc, bone))) {
         if (faint) {
           draw_pin(dl, sbs[i], pin_radius(bone), 0, col_ghost, 1.0f);
         }
@@ -10504,7 +10526,7 @@ static std::vector<BoneHit> pick_bone_parts(const Document &doc, const Layer &ar
       continue;
     }
     /* A pin is one round thing: clicking it picks the whole bone. */
-    if (shows_pin(bone)) {
+    if (shows_pin(doc, bone)) {
       const float d = distance(m, float2(sbs[i].head.x, sbs[i].head.y));
       if (d <= pin_radius(bone) + 3.0f) {
         found.push_back({{bone.id, BonePart::Body}, 0, d, 0});

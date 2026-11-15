@@ -5289,6 +5289,14 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return collection_layers_change_text(collection_layers_change(doc, id, c->id, assign));
   });
+  /* How the viewport draws a bone (oanim.wm.bone_drawn_as). */
+  m.def("bone_drawn_as", [layer_or_raise](uint64_t id, const std::string &name) {
+    const Bone *bone = bone_find_by_name(layer_or_raise(id), name);
+    if (!bone) {
+      throw py::value_error("no bone " + name);
+    }
+    return std::string(viewport_bone_drawn_as(*current_context().document, *bone));
+  });
   /* A bone layer's actions, and what of them plays now. */
   m.def("layer_actions", [layer_or_raise](uint64_t id) {
     Layer &layer = layer_or_raise(id);

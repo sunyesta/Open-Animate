@@ -2323,15 +2323,15 @@ static void bone_display_panel(Context &C, Layer &armature)
   /* Colour first, on every bone type: it colours the bone, pin or knob and box whatever its shape. */
   bone_color_rows(C, *active);
 
-  /* Shape: Bone | Custom, as Blender's tabs (a pin is a bone type: drawn as a pin whatever this says). */
+  /* Shape: Bone | Custom, as Blender's tabs (on a pin, Bone is its pin). */
   props_label("Shape");
   {
-    static const char *const names[] = {"Bone", "Custom"};
-    static const char *const tips[] = {"Drawn as a bone",
-                                       "Drawn as a vector layer's drawing, where that layer sits at rest"};
+    const bool pin = bone_is_pin(*active);
+    const char *const names[] = {pin ? "Pin" : "Bone", "Custom"};
+    const char *const tips[] = {pin ? "Drawn as a pin" : "Drawn as a bone",
+                                "Drawn as a vector layer's drawing, where that layer sits at rest"};
     const float gap = 1.0f;
     const float w = (ImGui::GetContentRegionAvail().x - gap) / 2.0f;
-    ImGui::BeginDisabled(bone_is_pin(*active));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(gap, style.ItemSpacing.y));
     for (int k = 0; k < 2; k++) {
       if (k > 0) {
@@ -2355,9 +2355,8 @@ static void bone_display_panel(Context &C, Layer &armature)
       }
     }
     ImGui::PopStyleVar();
-    ImGui::EndDisabled();
   }
-  if (bone_is_pin(*active)) {
+  if (bone_is_pin(*active) && active->shape != BoneShape::Custom) {
     props_label("Pin Size");
     ui_drag_float("##pin_size", &active->pin_size, 0.01f, 0.1f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
