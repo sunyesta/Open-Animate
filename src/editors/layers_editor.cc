@@ -190,7 +190,16 @@ static void icon_layer_type(ImDrawList *dl, ImVec2 c, float s, const Layer &laye
     dl->AddLine(c + ImVec2(-s * 0.35f, s * 0.7f), c + ImVec2(s * 0.35f, s * 0.7f), col, 1.3f);
     return;
   }
-  if (layer.is_group()) {
+  if (layer.is_bone_layer()) {
+    /* A cartoon bone, corner to corner: a bone layer (sub bone groups too), told apart from a plain group's folder. */
+    dl->AddLine(c + ImVec2(-s * 0.425f, s * 0.425f), c + ImVec2(s * 0.425f, -s * 0.425f), col, s * 0.325f);
+    for (const ImVec2 knob : {ImVec2(-0.6125f, 0.3875f), ImVec2(-0.3875f, 0.6125f), ImVec2(0.3875f, -0.6125f),
+                              ImVec2(0.6125f, -0.3875f)})
+    {
+      dl->AddCircleFilled(c + knob * s, s * 0.2375f, col, 12);
+    }
+  }
+  else if (layer.is_group()) {
     /* A folder. */
     dl->AddRectFilled(c + ImVec2(-s * 0.8f, -s * 0.55f), c + ImVec2(-s * 0.1f, -s * 0.3f), col, 1.0f);
     dl->AddRectFilled(c + ImVec2(-s * 0.8f, -s * 0.35f), c + ImVec2(s * 0.8f, s * 0.6f), col, 1.5f);
