@@ -2576,17 +2576,6 @@ static void bone_display_panel(Context &C, Layer &armature)
       ImGui::SetTooltip("When the box shows in the viewport: always, only while the controller is selected (hovering\n"
                         "the knob shows it faintly), or never. The knob always shows, and Ctrl still lands on its spots");
     }
-    props_label("Frame Size");
-    if (ui_drag_float("##controller_frame_size", &active->controller_frame_size, 0.0001f, 0.00001f, 10.0f, "%.4f")) {
-      active->controller_size_auto = false;
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("How far one action frame is. The box is its actions' lengths times this; on the setup frame "
-                        "its corners drag it too");
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-      C.undo->push("Controller Frame Size", doc);
-    }
   }
   ui_panel_end();
 }

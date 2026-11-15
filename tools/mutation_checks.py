@@ -52,6 +52,13 @@ PENDING = [
      'A collection hidden on the bone layer worked in hides a sub bone group\'s bones in it', 'tests/test_sub_group_collections.py'),
     ('src/data/bones.cc', '  return !held;', '  return false;',
      'A bone or drawing in no collection shows with All hidden', 'tests/test_sub_group_collections.py'),
+    ('src/anim/animation.cc', '      if (knob.controller_size_auto && !sides_keyed) {', '      if (knob.controller_size_auto) {',
+     'Picking another action never moves a controller edge the knob was keyed to', 'tests/test_controller_box_from_keys.py'),
+    ('src/anim/animation.cc', '        if (!knob.controller_actions[side].empty() && own_timing[side].empty() && !across.empty()) {',
+     '        if (false) {',
+     'A controller side not keyed yet is as long as the opposite side is keyed', 'tests/test_controller_box_from_keys.py'),
+    ('src/anim/animation.cc', '        if (most <= 1e-6f) {', '        if (false) {',
+     'A controller side keyed only at rest counts as not keyed', 'tests/test_controller_box_from_keys.py'),
 ]
 
 def build(root):

@@ -739,8 +739,9 @@ struct Bone {
   bool full_turn = false;
   /* A 2 Axis Controller: each side's action by ControllerSide, "" for none (a side with none isn't there). */
   std::array<std::string, CONTROLLER_SIDES> controller_actions;
-  /* How far one action frame is (bone layer units), the same either way: the box is its actions' frames times this, so
-   * its shape is how long they are. Fitted to the box's actions as they're picked, until it is set by hand. */
+  /* How far the knob's units are (bone layer units), the same either way: the box is where the knob is keyed in its
+   * sides' actions (their lengths, while none is keyed) times this. No setting of its own: fitted to the actions'
+   * lengths while no side is keyed and the box's corners haven't been dragged on the setup frame, which zooms it. */
   float controller_frame_size = 0.02f;
   /* Which way the box lies in the setup pose (bone layer space; 0 upright): turned with the bone on the setup frame, so
    * a slider can lie on a slant, its knob running along it. */

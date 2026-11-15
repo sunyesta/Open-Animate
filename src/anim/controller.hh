@@ -2,8 +2,9 @@
 
 /* 2 Axis Controllers (Toon Boom's Master Controller, on Moho's action bones): a bone drawn as a box with a knob, its
  * four sides each playing an action. The knob's position is the action frame: its position keys hold frames, right
- * and up positive, so an action's length is how far that side reaches and a key stays on its pose whatever happens to
- * the box's size (Bone::controller_frame_size) or to the action's end. Past the end it shows the last frame. A side
+ * and up positive, so a side reaches as far as the knob is keyed in its action (with no key there, as far as the opposite
+ * side is keyed, else its action's length), and a key stays on its pose whatever happens to the box's zoom
+ * (Bone::controller_frame_size) or to the action's end. Past the end it shows the last frame. A side
  * with no action isn't there, so a controller with only Left and Right is a slider.
  *
  * The knob never bends a drawing: posed, the bone stays where it rests, riding on its parent, and its children and

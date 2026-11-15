@@ -4446,9 +4446,26 @@ void controllers_update(Document &doc)
           most = std::max(most, along);
           timing.push_back({float(key.frame), most});
         }
+        /* Keyed only at rest it has no length: as not keyed. */
+        if (most <= 1e-6f) {
+          timing.clear();
+        }
       }
-      if (knob.controller_size_auto) {
+      /* The box comes from where the knob is keyed in its sides' actions: fitted to their lengths only while no side
+       * is keyed, so picking another action never moves an edge the knob was keyed to. */
+      const bool sides_keyed = std::any_of(knob.controller_timing.begin(), knob.controller_timing.end(),
+                                           [](const std::vector<float2> &t) { return !t.empty(); });
+      if (knob.controller_size_auto && !sides_keyed) {
         controller_fit_size(knob);
+      }
+      /* A side not keyed yet is as long as the opposite side is keyed (its own action's length when that isn't), its
+       * frames even along it, until its knob is keyed. */
+      const std::array<std::vector<float2>, CONTROLLER_SIDES> own_timing = knob.controller_timing;
+      for (int side = 0; side < CONTROLLER_SIDES; side++) {
+        const std::vector<float2> &across = own_timing[controller_side_opposite(side)];
+        if (!knob.controller_actions[side].empty() && own_timing[side].empty() && !across.empty()) {
+          knob.controller_timing[side] = {{controller_side_frames(knob, side), across.back().y}};
+        }
       }
       /* Editing one of its actions, the knob sits at its frame (what hangs from it with it); in a side's own action
        * it moves along that side, keying its timing. */
@@ -4522,7 +4539,7 @@ float2 controller_knob_shown(const Document &doc, const Layer &owner, const Bone
   };
   for (int side = 0; side < CONTROLLER_SIDES; side++) {
     /* At rest until its first key there: it moves only where keyed (with none, the mainline still plays frame N N
-     * Frame Sizes out). */
+     * frames out), or evenly out to the opposite side's length when only that is keyed. */
     if (knob.controller_actions[side] == doc.action && !knob.controller_timing[side].empty()) {
       put(side, std::min(float(doc.frame_current), controller_side_frames(knob, side)));
     }
