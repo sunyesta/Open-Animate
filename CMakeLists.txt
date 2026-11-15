@@ -571,6 +571,8 @@ add_test(NAME frame_last_noop
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_frame_last_noop.py)
 add_test(NAME layer_symmetrize_keys
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_layer_symmetrize_keys.py)
+add_test(NAME controller_step_end
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_step_end.py)
 add_test(NAME key_together_path_pick
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_path_pick.py)
 add_test(NAME timeline_switch_row

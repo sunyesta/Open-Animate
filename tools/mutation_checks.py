@@ -69,6 +69,9 @@ PENDING = [
      'Symmetrize Layers records edits made on the setup frame first', 'tests/test_layer_symmetrize_keys.py'),
     ('src/anim/symmetrize_keys.cc', '    return handle_change(to_setup, across(shown), -change.x, in);', '    return handle_change(to_setup, shown, -change.x, in);',
      'Handle keys go across mirrored', 'tests/test_layer_symmetrize_keys.py'),
+    ('src/anim/animation.cc', '  if (const float whole = std::round(t); std::abs(t - whole) < 1e-3f) {',
+     '  if (const float whole = std::round(t); false && std::abs(t - whole) < 1e-3f) {',
+     'A knob at its box edge plays the Step keys on its last frame', 'tests/test_controller_step_end.py'),
 ]
 
 def build(root):

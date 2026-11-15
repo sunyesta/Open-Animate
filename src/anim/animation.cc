@@ -2608,6 +2608,11 @@ static T action_bone_sample(const std::vector<Key<T>> &keys, const T &setup, flo
    * bone turning past a key's frame switches it, never a blend of the two. */
   c.constant = constant;
   c.set_key(0, setup);
+  /* A frame worked out a hair short of a whole one (a knob at its box's edge, through its timing's sums) is that frame:
+   * else a Step key there, such as a layer hidden at a blink's end, never comes. */
+  if (const float whole = std::round(t); std::abs(t - whole) < 1e-3f) {
+    t = whole;
+  }
   const int f0 = int(std::floor(t));
   const float frac = t - float(f0);
   const T a = c.evaluate(f0);
