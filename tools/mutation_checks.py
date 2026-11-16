@@ -184,6 +184,15 @@ PENDING = [
     ('src/ops/pose_clipboard.cc', '    g_paste_as = op_arg_bool(C, "ignore_bones") ? PasteAs::Place : PasteAs::Keys;',
      '    g_paste_as = PasteAs::Keys;',
      'Paste Pose ignore_bones=1 is no longer Same Place', 'tests/test_pose_paste_as.py'),
+    ('src/editors/timeline.cc', '      full[i].filter.channels = summed;',
+     '      (void)summed;',
+     "The timeline's Summary shows the keys of rows the filters take away", 'tests/test_timeline_summary_shown.py'),
+    ('src/ops/anim_ops.cc', '    filter.channels = timeline_summary_channels(C);',
+     '',
+     "Keying or picking through the Summary reaches channels the filters hide", 'tests/test_timeline_summary_shown.py'),
+    ('src/editors/timeline.cc', '    args["summary"] = "1";',
+     '',
+     "A click on the Summary picks keys of rows the filters take away", 'tests/test_timeline_summary_shown.py'),
 ]
 
 def build(root):

@@ -2750,18 +2750,25 @@ static KeyPress g_key_press;
 static constexpr float KEY_DRAG_PX = 4.0f;
 
 /* The keys a timeline row shows, by its layers and filter, as anim.keys_select takes them. */
+/* The arguments anim.keys_select and the other row operators take for a row's keys. In the timeline only the Summary's
+ * filter carries a set of channels (what the rows shown hold, with filters on): summary=1 has the operator work that
+ * set out again. */
 static OpArgs row_key_args(const std::vector<Layer *> &layers, const KeyFilter &filter)
 {
   std::string ids;
   for (const Layer *l : layers) {
     ids += (ids.empty() ? "" : ",") + std::to_string(l->id);
   }
-  return {{"layers", ids},
-          {"kinds", std::to_string(filter.kinds)},
-          {"selected_only", filter.selected_only ? "1" : "0"},
-          {"picked_bones", filter.picked_bones_only ? "1" : "0"},
-          {"path", filter.path},
-          {"pinned", filter.pinned_only ? "1" : "0"}};
+  OpArgs args{{"layers", ids},
+              {"kinds", std::to_string(filter.kinds)},
+              {"selected_only", filter.selected_only ? "1" : "0"},
+              {"picked_bones", filter.picked_bones_only ? "1" : "0"},
+              {"path", filter.path},
+              {"pinned", filter.pinned_only ? "1" : "0"}};
+  if (filter.channels) {
+    args["summary"] = "1";
+  }
+  return args;
 }
 
 /* A click on a row's key at `frame` (`keys`/`selected`: how many keys the row has there, and how many are
@@ -3619,6 +3626,20 @@ static std::vector<ChannelRow> channel_rows(const Area &area, const std::vector<
       keep[i] = keep[i - 1];
     }
   }
+  /* The Summary shows and acts on only what the rows kept hold: the channels of each channel's or chained row kept
+   * (a folder kept for what is inside it adds nothing of its own; folded later, its rows still show in it). */
+  auto summed = std::make_shared<std::set<const void *>>();
+  for (size_t i = 0; i < n; i++) {
+    const ChannelRow &row = full[i];
+    if (keep[i] && !row.summary && !row.media && (row_timeline_kind(row) != 0 || row.chain != ChannelRow::Chain::None)) {
+      summed->merge(layers_filtered_channel_set(row.layers, row.filter));
+    }
+  }
+  for (size_t i = 0; i < n; i++) {
+    if (full[i].summary) {
+      full[i].filter.channels = summed;
+    }
+  }
   if (r_hidden) {
     *r_hidden = hidden;
   }
@@ -3642,6 +3663,17 @@ static std::vector<ChannelRow> channel_rows(const Area &area, const std::vector<
     rows.push_back(std::move(row));
   }
   return rows_headed(std::move(rows));
+}
+
+std::shared_ptr<const std::set<const void *>> timeline_summary_channels(Context &C)
+{
+  Area area;
+  for (const ChannelRow &row : channel_rows(area, shown_layers_now(C), *C.document, timeline_pinned_layer_ids(C), true)) {
+    if (row.summary) {
+      return row.filter.channels;
+    }
+  }
+  return std::make_shared<std::set<const void *>>();
 }
 
 std::vector<std::pair<std::string, bool>> timeline_key_menu_top(Context &C, int row, int frame)
@@ -3796,27 +3828,14 @@ std::vector<TimelineRowInfo> timeline_rows_list(Context &C, bool as_shown)
   return list;
 }
 
-static std::string layer_ids(const std::vector<Layer *> &layers)
-{
-  std::string ids;
-  for (const Layer *l : layers) {
-    ids += (ids.empty() ? "" : ",") + std::to_string(l->id);
-  }
-  return ids;
-}
-
 /* anim.timeline_stretch_pick's arguments for an Alt click on `frame` of a row (its layers and channels). */
 static OpArgs timeline_stretch_pick_args(const std::vector<Layer *> &layers, const KeyFilter &filter, int frame,
                                          bool extend)
 {
-  return {{"frame", std::to_string(frame)},
-          {"layers", layer_ids(layers)},
-          {"kinds", std::to_string(filter.kinds)},
-          {"selected_only", filter.selected_only ? "1" : "0"},
-          {"picked_bones", filter.picked_bones_only ? "1" : "0"},
-          {"path", filter.path},
-          {"pinned", filter.pinned_only ? "1" : "0"},
-          {"extend", extend ? "1" : "0"}};
+  OpArgs args = row_key_args(layers, filter);
+  args["frame"] = std::to_string(frame);
+  args["extend"] = extend ? "1" : "0";
+  return args;
 }
 
 bool timeline_double_click_keys(bool double_click, bool alt)
@@ -4247,13 +4266,9 @@ static void timeline_body(Area &area, Context &C)
         const int r = row_at(io.MousePos.y);
         if (r >= 0 && !rows[size_t(r)].media) {
           const ChannelRow &row = rows[size_t(r)];
-          operator_call(C, "anim.keys_insert",
-                        {{"frame", std::to_string(std::max(0, int(std::lround(x_frame(io.MousePos.x)))))},
-                         {"layers", layer_ids(row.layers)},
-                         {"kinds", std::to_string(row.filter.kinds)},
-                         {"selected_only", row.filter.selected_only ? "1" : "0"},
-                         {"path", row.filter.path},
-                         {"pinned", row.filter.pinned_only ? "1" : "0"}});
+          OpArgs args = row_key_args(row.layers, row.filter);
+          args["frame"] = std::to_string(std::max(0, int(std::lround(x_frame(io.MousePos.x)))));
+          operator_call(C, "anim.keys_insert", args);
           g_press = {};
         }
       }
@@ -4353,13 +4368,9 @@ static void timeline_body(Area &area, Context &C)
           interp_menu_items(C, [&]() {
             const KeyFrameSummary sum = layers_key_summary(these, g_keyed_here.filter)[g_keyed_here.frame];
             if (sum.selected < sum.keys) {
-              operator_call(C, "anim.keys_select",
-                            {{"frame_start", std::to_string(g_keyed_here.frame)},
-                             {"layers", layer_ids(these)},
-                             {"kinds", std::to_string(g_keyed_here.filter.kinds)},
-                             {"selected_only", g_keyed_here.filter.selected_only ? "1" : "0"},
-                             {"path", g_keyed_here.filter.path},
-                             {"pinned", g_keyed_here.filter.pinned_only ? "1" : "0"}});
+              OpArgs args = row_key_args(these, g_keyed_here.filter);
+              args["frame_start"] = std::to_string(g_keyed_here.frame);
+              operator_call(C, "anim.keys_select", args);
             }
           });
           ui_submenu_end();
@@ -4522,17 +4533,13 @@ static void timeline_body(Area &area, Context &C)
           const int last = int(std::floor(x_frame(std::max(g_press.start.x, io.MousePos.x))));
           for (size_t i = 0; i < boxed.size(); i++) {
             const ChannelRow &row = rows[boxed[i]];
-            operator_call(C, "anim.keys_select",
-                          {{"frame_start", std::to_string(first)},
-                           {"frame_end", std::to_string(last)},
-                           {"layers", layer_ids(row.layers)},
-                           {"kinds", std::to_string(row.filter.kinds)},
-                           {"selected_only", row.filter.selected_only ? "1" : "0"},
-                           {"path", row.filter.path},
-                           {"pinned", row.filter.pinned_only ? "1" : "0"},
-                           /* Rows after the first add to what the first picked. */
-                           {"extend", io.KeyShift || i > 0 ? "1" : "0"},
-                           {"deselect", io.KeyCtrl ? "1" : "0"}});
+            OpArgs args = row_key_args(row.layers, row.filter);
+            args["frame_start"] = std::to_string(first);
+            args["frame_end"] = std::to_string(last);
+            /* Rows after the first add to what the first picked. */
+            args["extend"] = io.KeyShift || i > 0 ? "1" : "0";
+            args["deselect"] = io.KeyCtrl ? "1" : "0";
+            operator_call(C, "anim.keys_select", args);
           }
         }
         else if (!io.KeyShift) {

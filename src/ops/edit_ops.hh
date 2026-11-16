@@ -184,6 +184,9 @@ std::vector<Layer *> document_editable_layers(Document &doc);
 std::vector<Layer *> document_weight_layers(Document &doc);
 /* Their ids, for KeyFilter::point_layers: the points whose selection counts now. */
 std::shared_ptr<const std::set<uint64_t>> editable_layer_ids(Document &doc);
+/* The channels the timeline's Summary shows and acts on: with its filters on, those of the rows they keep; null while
+ * they keep every row (all of them). Defined with the timeline (editors/timeline.cc). */
+std::shared_ptr<const std::set<const void *>> timeline_summary_channels(Context &C);
 
 /* For an operator flagged OPTYPE_MIRROR while X mirror editing is on: the selected points' mirror
  * images are selected too, in the same layer (across its axis) or in a sided layer's partner (Ear_R

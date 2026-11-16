@@ -859,6 +859,8 @@ add_test(NAME symmetrize
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_symmetrize.py)
 add_test(NAME pose_paste_as
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_paste_as.py)
+add_test(NAME timeline_summary_shown
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_timeline_summary_shown.py)
 add_test(NAME layer_bone_group_panel
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_layer_bone_group_panel.py)
 add_test(NAME symmetrize_settings
