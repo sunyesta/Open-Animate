@@ -27,6 +27,15 @@ struct ToolSettings;
 void layer_operators_register();
 /* layer.copy and layer.paste (ops/layer_clipboard.cc). */
 void layer_clipboard_operators_register();
+void pose_clipboard_operators_register();
+/* What marks clipboard text as a copied pose (Copy Pose, src/ops/pose_clipboard.cc). */
+inline constexpr const char *POSE_CLIPBOARD_KEY = "open_animate_pose";
+/* The system clipboard's text when it holds copied layers, shapes or a pose (else the last such copy made here, as in
+ * background runs, which have none); and setting it. */
+std::string clipboard_text();
+void clipboard_text_set(const std::string &text);
+/* Copy Shapes onto the clipboard (what Shift D would copy of the drawings edited); how many shapes, 0 for none. */
+int shapes_copy_to_clipboard(Context &C);
 void vector_operators_register();
 void asset_operators_register();
 void anim_operators_register();

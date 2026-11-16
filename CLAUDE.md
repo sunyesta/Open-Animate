@@ -148,8 +148,9 @@ actions (`action_bone_action_turns` orders them), faded by `BoneFix::fade`, made
 `bone_fix_lines_draw` in `src/editors/viewport.cc`; mirrored by Symmetrize through `document_bone_fix_mirror`). Affected By (every animatable field's or timeline row's right-click submenu, its count left of the arrow (`ui_affected_available`, `ui_affected_count`; at 0 one line, `ui_affected_empty_text`), and its tooltip line, of what moves it besides its own keys: `layer_channel_sources` in `src/anim/animation.cc`, rows by `ui_affected_rows` and the submenu `ui_affected_menu` in `src/editors/driver_ui.cc`, `armature.bone_go`; fields are green or yellow from the shown timeline's keys only, no pink). Layer Symmetrize keeps the animation (`src/anim/symmetrize_keys.*`: Mirror Source's, Keep Partner's or None; actions around the copy mapped to their other side's by `symmetrize_action_names`, the copy's own renamed by `symmetrize_actions_apply`; `layer_actions_rename` in `animation.cc`).
 The Actions panel in the Armature
 tab (`actions_panel` in `src/editors/properties.cc`; `ActionPlay` in `src/data/layer.hh`: each action's Frame, mute and loop,
-played by `action_own_frames` and set by `action_frame_set`). Not yet: local
-armature viewport, copy/paste poses.
+played by `action_own_frames` and set by `action_frame_set`). Copy Pose and Paste Pose (`src/ops/pose_clipboard.cc`: Ctrl C / Ctrl V over the viewport off frame 0, the selected
+bones and points, by name and id; frame 0 keeps Copy Shapes, and Ctrl V pastes the shapes copied with a pose where its
+points aren't). Not yet: local armature viewport, Paste Pose Flipped.
 
 Preferences live in `%LOCALAPPDATA%\OpenAnimate\preferences.json`; background runs (tests) never read
 or write them.

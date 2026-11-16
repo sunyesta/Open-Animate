@@ -130,6 +130,18 @@ PENDING = [
      'Converting to a controller makes the moves in every action frames', 'tests/test_rest_keeps_animation.py'),
     ('src/anim/animation.cc', '  position_keys_scale(*bone, bone->controller_frame_size, !(own_right || own_left));', '  if (!(own_right || own_left)) {\n    for (Key<float2> &k : bone->position_keys.keys) {\n      k.value = k.value * bone->controller_frame_size;\n    }\n  }',
      "Converting to Regular makes the knob's frames moves in every ordinary action", 'tests/test_rest_keeps_animation.py'),
+    ('src/ops/pose_clipboard.cc', '      const float2 pos = ignore && invertible(skin) ?', '      const float2 pos = false && invertible(skin) ?',
+     "Paste Pose's Ignore Bones puts each point where it showed when copied", 'tests/test_pose_clipboard.py'),
+    ('src/ops/pose_clipboard.cc', '        p.pos = to_shown.inverted().apply(to_shown.apply(p.pos) + shift);', '        (void)shift;',
+     "Paste Pose's Keep Place keeps the pasted points' centre", 'tests/test_pose_clipboard.py'),
+    ('src/ops/pose_clipboard.cc', '      std::erase_if(onto, [](const auto &o) { return !o.first->selected; });', '',
+     "Paste Pose's On Selected Only leaves bones not selected", 'tests/test_pose_clipboard.py'),
+    ('src/ops/pose_clipboard.cc', '      b->turn = b->turn + (turn - b->turn) * factor;', '      b->turn = turn;',
+     "Paste Pose's Factor blends a bone's angle", 'tests/test_pose_clipboard.py'),
+    ('src/ops/pose_clipboard.cc', '      return pose.is_object() && pose_has_target(C, pose);', '      return pose.is_object();',
+     "Ctrl V pastes the shapes copied with a pose where its points aren't", 'tests/test_pose_clipboard.py'),
+    ('src/ops/pose_clipboard.cc', '      if (shapes_copy_to_clipboard(C) > 0) {', '      if (false) {',
+     'Copy Pose carries the shapes for Ctrl V elsewhere', 'tests/test_pose_clipboard.py'),
 ]
 
 def build(root):

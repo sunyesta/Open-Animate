@@ -108,6 +108,9 @@ KEYMAP = (
     ("Viewport", "mesh.shape_lower", "PAGE_DOWN", {}),
     ("Viewport", "mesh.shape_raise_to_front", "PAGE_UP", {"shift": True}),
     ("Viewport", "mesh.shape_lower_to_back", "PAGE_DOWN", {"shift": True}),
+    # Off the setup frame Ctrl C and Ctrl V copy and paste the selected bones' and points' pose, as Blender's pose mode.
+    ("Viewport", "pose.copy", "C", {"ctrl": True}),
+    ("Viewport", "pose.paste", "V", {"ctrl": True}),
     ("Viewport", "mesh.copy", "C", {"ctrl": True}),
     ("Viewport", "mesh.paste", "V", {"ctrl": True}),
     ("Viewport", "mesh.select_all", "A", {}),

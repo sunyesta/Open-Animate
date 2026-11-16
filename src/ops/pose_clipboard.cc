@@ -1,0 +1,524 @@
+/* Copy Pose and Paste Pose, as Blender's pose mode has them: Ctrl C and Ctrl V over the viewport off the setup frame
+ * (frame 0 is where the drawing and the rig are made, as Edit Mode; every other frame poses, as Pose Mode). The
+ * selected bones' and points' pose on the frame shown goes back on the same bones (by name) and points (by id, or by
+ * their order in a drawing with as many points) on another frame, in another action or in another file.
+ *
+ * What is copied is what their keys hold: each value's change from the setup, less what action bone actions add
+ * (they add it again where it is pasted, as the bones turn there). With it, where each point and handle showed
+ * through the bones, for Ignore Bones. The pose travels on the system clipboard, as copied layers do. A paste is an
+ * edit like any other: Auto Keying keys it, as Blender's does. */
+
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <set>
+
+#include <nlohmann/json.hpp>
+
+#include "anim/animation.hh"
+#include "anim/deform.hh"
+#include "core/log.hh"
+#include "data/bones.hh"
+#include "data/document.hh"
+#include "data/vector.hh"
+#include "ops/edit_ops.hh"
+#include "ops/operator.hh"
+#include "wm/context.hh"
+
+namespace oanim {
+
+using json = nlohmann::ordered_json;
+
+static json json_of(float2 v)
+{
+  return json::array({v.x, v.y});
+}
+
+static float2 float2_of(const json &j)
+{
+  if (!j.is_array() || j.size() != 2 || !j[0].is_number() || !j[1].is_number()) {
+    return {};
+  }
+  return {j[0].get<float>(), j[1].get<float>()};
+}
+
+static float float_of(const json &j, const char *name)
+{
+  const auto it = j.find(name);
+  return it != j.end() && it->is_number() ? it->get<float>() : 0.0f;
+}
+
+static bool invertible(const Transform2D &t)
+{
+  return std::fabs(t.a * t.d - t.b * t.c) > 1e-8f;
+}
+
+/* The drawings whose points are being edited, and the bone layer whose bones are (the active layer, a bone layer). */
+static std::vector<Layer *> pose_drawings(Context &C)
+{
+  std::vector<Layer *> out;
+  for (Layer *l : editable_layers(C)) {
+    if (l->type == LayerType::Vector && !l->is_reference()) {
+      out.push_back(l);
+    }
+  }
+  return out;
+}
+
+static Layer *pose_rig(Context &C)
+{
+  Layer *active = document_active_layer(*C.document);
+  return active && active->is_bone_layer() ? active : nullptr;
+}
+
+static Bone *bone_named(Layer &rig, const std::string &name)
+{
+  for (Bone &b : rig.bones) {
+    if (b.name == name) {
+      return &b;
+    }
+  }
+  return nullptr;
+}
+
+/* What Ctrl C finds to copy: the selected bones and points (a detail point follows its parent, so goes with it). */
+static bool pose_anything_selected(Context &C)
+{
+  if (const Layer *rig = pose_rig(C)) {
+    if (std::any_of(rig->bones.begin(), rig->bones.end(), [](const Bone &b) { return b.selected; })) {
+      return true;
+    }
+  }
+  for (const Layer *l : pose_drawings(C)) {
+    for (const MeshPoint &p : l->drawing.points) {
+      if (p.selected && p.detail.level == 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static json pose_copy_json(Context &C, int *r_bones, int *r_points)
+{
+  Document &doc = *C.document;
+  json layers = json::array();
+  *r_bones = *r_points = 0;
+  if (Layer *rig = pose_rig(C)) {
+    json bones = json::array();
+    for (Bone b : rig->bones) {
+      if (!b.selected) {
+        continue;
+      }
+      bone_changes_from_values(b);
+      bones.push_back({{"name", b.name},
+                       {"transform", json_of(b.transform - b.position_keys.from_action_bones)},
+                       {"turn", b.turn - b.angle_keys.from_action_bones},
+                       {"scale", json_of(b.scale - b.scale_keys.from_action_bones)}});
+    }
+    if (!bones.empty()) {
+      *r_bones = int(bones.size());
+      layers.push_back({{"id", rig->id}, {"name", rig->name}, {"bones", std::move(bones)}});
+    }
+  }
+  for (Layer *l : pose_drawings(C)) {
+    VectorDrawing d = l->drawing;
+    drawing_changes_from_values(d);
+    std::vector<Transform2D> skins = layer_point_skins(doc, *l);
+    skins.resize(d.points.size());
+    json points = json::array(), curve_points = json::array();
+    std::set<int> picked;
+    for (size_t i = 0; i < d.points.size(); i++) {
+      const MeshPoint &p = d.points[i];
+      if (!p.selected || p.detail.level > 0) {
+        continue;
+      }
+      picked.insert(int(i));
+      points.push_back({{"id", p.id},
+                        {"index", i},
+                        {"key", json_of(p.transform - p.pos_keys.from_action_bones)},
+                        {"radius", p.radius - p.radius_keys.from_action_bones},
+                        {"shown", json_of(skins[i].apply(p.pos))}});
+    }
+    for (size_t c = 0; c < d.curves.size(); c++) {
+      for (size_t j = 0; j < d.curves[c].points.size(); j++) {
+        const CurvePoint &cp = d.curves[c].points[j];
+        if (!picked.count(cp.point)) {
+          continue;
+        }
+        json h = {{"curve", c},
+                  {"index", j},
+                  {"point", d.points[size_t(cp.point)].id},
+                  {"curvature", cp.curvature - cp.curvature_keys.from_action_bones}};
+        /* A handle the curve works out for itself follows the points it is worked out from. */
+        if (cp.handles_set) {
+          const Transform2D &skin = skins[size_t(cp.point)];
+          h["in"] = json_of(cp.change_in - cp.handle_in_keys.from_action_bones);
+          h["out"] = json_of(cp.change_out - cp.handle_out_keys.from_action_bones);
+          h["in_shown"] = json_of(skin.apply_vector(cp.handle_in));
+          h["out_shown"] = json_of(skin.apply_vector(cp.handle_out));
+        }
+        curve_points.push_back(std::move(h));
+      }
+    }
+    if (!points.empty()) {
+      *r_points += int(points.size());
+      layers.push_back({{"id", l->id},
+                        {"name", l->name},
+                        {"count", d.points.size()},
+                        {"points", std::move(points)},
+                        {"curve_points", std::move(curve_points)}});
+    }
+  }
+  return {{"frame", doc.frame_current}, {"layers", std::move(layers)}};
+}
+
+/* Ignore Bones and Keep Place, kept from the last time they were set, as the timeline's Paste Keys keeps them. */
+static bool g_pose_ignore_bones = false, g_pose_keep_place = false;
+
+static bool remembered_arg(Context &C, const char *name, bool &kept)
+{
+  if (op_has_arg(C, name)) {
+    kept = op_arg_bool(C, name);
+  }
+  op_arg_used(C, name, kept ? "1" : "0");
+  return kept;
+}
+
+/* Each copied drawing's points matched with a drawing being edited here: by id, else by order in one with as many
+ * points. With `selected_only`, onto the copied points selected now (all of them if none is, as Blender's). */
+struct PoseTarget {
+  Layer *layer;
+  const json *copied;
+  std::map<uint64_t, size_t> points;
+};
+
+static std::vector<PoseTarget> pose_targets(Context &C, const json &copied, bool selected_only)
+{
+  const std::vector<Layer *> drawings = pose_drawings(C);
+  std::vector<PoseTarget> targets;
+  for (const json &lj : copied) {
+    if (!lj.contains("points")) {
+      continue;
+    }
+    const uint64_t id = lj.value("id", uint64_t(0));
+    const std::string name = lj.value("name", std::string());
+    auto it = std::find_if(drawings.begin(), drawings.end(), [&](const Layer *l) { return l->id == id; });
+    if (it == drawings.end()) {
+      it = std::find_if(drawings.begin(), drawings.end(), [&](const Layer *l) { return l->name == name; });
+    }
+    if (it == drawings.end()) {
+      continue;
+    }
+    PoseTarget t{*it, &lj, {}};
+    std::map<uint64_t, size_t> here;
+    for (size_t i = 0; i < t.layer->drawing.points.size(); i++) {
+      here[t.layer->drawing.points[i].id] = i;
+    }
+    for (const json &pj : lj["points"]) {
+      const auto found = here.find(pj.value("id", uint64_t(0)));
+      if (found != here.end()) {
+        t.points[pj.value("id", uint64_t(0))] = found->second;
+      }
+    }
+    if (t.points.empty() && lj.value("count", size_t(0)) == t.layer->drawing.points.size()) {
+      for (const json &pj : lj["points"]) {
+        t.points[pj.value("id", uint64_t(0))] = pj.value("index", size_t(0));
+      }
+    }
+    /* On Selected Only: onto the copied points selected now, or all of them if none is (as Blender's). */
+    if (selected_only) {
+      const bool any = std::any_of(t.points.begin(), t.points.end(),
+                                   [&](const auto &m) { return t.layer->drawing.points[m.second].selected; });
+      if (any) {
+        std::erase_if(t.points, [&](const auto &m) { return !t.layer->drawing.points[m.second].selected; });
+      }
+    }
+    if (!t.points.empty()) {
+      targets.push_back(std::move(t));
+    }
+  }
+  return targets;
+}
+
+/* The bone layer a copied one's bones paste onto: the active one (a bone layer). */
+static Layer *pose_rig_for(Context &C, const json &lj)
+{
+  Layer *active_rig = pose_rig(C);
+  if (!active_rig) {
+    return nullptr;
+  }
+  for (const json &bj : lj["bones"]) {
+    if (bone_named(*active_rig, bj.value("name", std::string()))) {
+      return active_rig;
+    }
+  }
+  return nullptr;
+}
+
+/* Whether a copied pose has bones or points here to paste onto: else Ctrl V pastes the shapes copied with it. */
+static bool pose_has_target(Context &C, const json &pose)
+{
+  const json &copied = pose["layers"];
+  if (!copied.is_array()) {
+    return false;
+  }
+  if (!pose_targets(C, copied, false).empty()) {
+    return true;
+  }
+  return std::any_of(copied.begin(), copied.end(),
+                     [&](const json &lj) { return lj.contains("bones") && pose_rig_for(C, lj); });
+}
+
+static OpStatus pose_paste(Context &C, const json &pose)
+{
+  Document &doc = *C.document;
+  if (doc.frame_current == 0) {
+    report(ReportType::Warning, "Paste Pose poses: go to a frame other than the setup frame (frame 0)");
+    return OpStatus::Cancelled;
+  }
+  const bool selected_only = op_arg_bool(C, "selected_mask");
+  const float factor = op_arg_float(C, "factor", 1.0f);
+  const bool ignore = remembered_arg(C, "ignore_bones", g_pose_ignore_bones);
+  const bool keep_place = remembered_arg(C, "keep_place", g_pose_keep_place);
+  const json &copied = pose["layers"];
+  if (!copied.is_array()) {
+    return OpStatus::Cancelled;
+  }
+  std::vector<PoseTarget> targets = pose_targets(C, copied, selected_only);
+
+  /* Keep Place: where the pasted points' centre shows now, before anything moves (the bones pasted too). */
+  float2 centre_was;
+  int centre_count = 0;
+  if (keep_place) {
+    for (PoseTarget &t : targets) {
+      std::vector<Transform2D> skins = layer_point_skins(doc, *t.layer);
+      skins.resize(t.layer->drawing.points.size());
+      const Transform2D world = layer_world_transform(doc, t.layer->id);
+      for (const auto &[pid, i] : t.points) {
+        centre_was += (world * skins[i]).apply(t.layer->drawing.points[i].pos);
+        centre_count++;
+      }
+    }
+  }
+
+  /* The bones first: the points' skins, for Ignore Bones and Keep Place, are the pasted pose's. */
+  int bones_pasted = 0;
+  for (const json &lj : copied) {
+    if (!lj.contains("bones")) {
+      continue;
+    }
+    Layer *rig = pose_rig_for(C, lj);
+    if (!rig) {
+      continue;
+    }
+    std::vector<std::pair<Bone *, const json *>> onto;
+    for (const json &bj : lj["bones"]) {
+      if (Bone *b = bone_named(*rig, bj.value("name", std::string()))) {
+        onto.push_back({b, &bj});
+      }
+    }
+    if (selected_only && std::any_of(onto.begin(), onto.end(), [](const auto &o) { return o.first->selected; })) {
+      std::erase_if(onto, [](const auto &o) { return !o.first->selected; });
+    }
+    for (auto &[b, bj] : onto) {
+      bone_changes_from_values(*b);
+      const float2 transform = float2_of((*bj)["transform"]) + b->position_keys.from_action_bones;
+      const float turn = float_of(*bj, "turn") + b->angle_keys.from_action_bones;
+      const float2 scale = float2_of((*bj)["scale"]) + b->scale_keys.from_action_bones;
+      b->transform = b->transform + (transform - b->transform) * factor;
+      b->turn = b->turn + (turn - b->turn) * factor;
+      b->scale = b->scale + (scale - b->scale) * factor;
+      bone_values_from_changes(*b);
+      bones_pasted++;
+    }
+  }
+
+  /* Then the points: each where its key puts it here, or with Ignore Bones where it showed when copied. */
+  struct Placed {
+    Layer *layer;
+    size_t point;
+    float2 pos;
+  };
+  std::vector<Placed> placed;
+  std::map<Layer *, std::vector<Transform2D>> skins_of;
+  for (PoseTarget &t : targets) {
+    VectorDrawing &d = t.layer->drawing;
+    drawing_changes_from_values(d);
+    std::vector<Transform2D> &skins = skins_of[t.layer];
+    skins = layer_point_skins(doc, *t.layer);
+    skins.resize(d.points.size());
+    for (const json &pj : (*t.copied)["points"]) {
+      const auto m = t.points.find(pj.value("id", uint64_t(0)));
+      if (m == t.points.end()) {
+        continue;
+      }
+      MeshPoint &p = d.points[m->second];
+      const Transform2D &skin = skins[m->second];
+      const float2 pos = ignore && invertible(skin) ? skin.inverted().apply(float2_of(pj["shown"])) :
+                                                      p.setup_pos + float2_of(pj["key"]) + p.pos_keys.from_action_bones;
+      placed.push_back({t.layer, m->second, pos});
+      const float radius = float_of(pj, "radius") + p.radius_keys.from_action_bones;
+      p.radius = p.radius + (radius - p.radius) * factor;
+    }
+    for (const json &cj : (*t.copied)["curve_points"]) {
+      const auto m = t.points.find(cj.value("point", uint64_t(0)));
+      const size_t c = cj.value("curve", size_t(0)), j = cj.value("index", size_t(0));
+      if (m == t.points.end() || c >= d.curves.size() || j >= d.curves[c].points.size() ||
+          size_t(d.curves[c].points[j].point) != m->second)
+      {
+        continue;
+      }
+      CurvePoint &cp = d.curves[c].points[j];
+      const float curvature = float_of(cj, "curvature") + cp.curvature_keys.from_action_bones;
+      cp.curvature = cp.curvature + (curvature - cp.curvature) * factor;
+      if (!cj.contains("in") || !cp.handles_set) {
+        continue;
+      }
+      const Transform2D &skin = skins[m->second];
+      for (const bool in : {true, false}) {
+        float2 handle;
+        if (ignore && invertible(skin)) {
+          handle = skin.inverted().apply_vector(float2_of(cj[in ? "in_shown" : "out_shown"]));
+        }
+        else {
+          const Channel<float2> &ch = in ? cp.handle_in_keys : cp.handle_out_keys;
+          handle = handle_from_change(in ? cp.setup_in : cp.setup_out, float2_of(cj[in ? "in" : "out"]) + ch.from_action_bones,
+                                      in);
+        }
+        float2 &h = in ? cp.handle_in : cp.handle_out;
+        h = h + (handle - h) * factor;
+      }
+    }
+  }
+  /* Keep Place: the pasted shape moved as one, its centre showing where the points' centre did. */
+  if (keep_place && centre_count > 0 && !placed.empty()) {
+    float2 centre_now;
+    for (const Placed &p : placed) {
+      centre_now += (layer_world_transform(doc, p.layer->id) * skins_of[p.layer][p.point]).apply(p.pos);
+    }
+    const float2 shift = centre_was / float(centre_count) - centre_now / float(placed.size());
+    for (Placed &p : placed) {
+      const Transform2D to_shown = layer_world_transform(doc, p.layer->id) * skins_of[p.layer][p.point];
+      if (invertible(to_shown)) {
+        p.pos = to_shown.inverted().apply(to_shown.apply(p.pos) + shift);
+      }
+    }
+  }
+  for (const Placed &p : placed) {
+    MeshPoint &mp = p.layer->drawing.points[p.point];
+    mp.pos = mp.pos + (p.pos - mp.pos) * factor;
+  }
+  for (PoseTarget &t : targets) {
+    drawing_changes_from_values(t.layer->drawing);
+  }
+  const int points_pasted = int(placed.size());
+  if (bones_pasted + points_pasted == 0) {
+    report(ReportType::Warning, "The copied pose's bones and points aren't being edited here");
+    return OpStatus::Cancelled;
+  }
+  std::string note;
+  if (bones_pasted > 0) {
+    note = std::to_string(bones_pasted) + (bones_pasted == 1 ? " bone" : " bones");
+  }
+  if (points_pasted > 0) {
+    note += (note.empty() ? "" : ", ") + std::to_string(points_pasted) + (points_pasted == 1 ? " point" : " points");
+  }
+  op_note("Pasted onto " + note);
+  return OpStatus::Finished;
+}
+
+/* The pose on the clipboard (null json if none). */
+static json clipboard_pose()
+{
+  const std::string text = clipboard_text();
+  if (text.find(POSE_CLIPBOARD_KEY) == std::string::npos) {
+    return json();
+  }
+  json root = json::parse(text, nullptr, false);
+  if (root.is_discarded() || !root.is_object() || !root.contains("pose")) {
+    return json();
+  }
+  return std::move(root["pose"]);
+}
+
+void pose_clipboard_operators_register()
+{
+  {
+    OperatorType ot;
+    ot.idname = "pose.copy";
+    ot.name = "Copy Pose";
+    ot.description = "Copy the selected bones' and points' pose on this frame to the clipboard (Ctrl C over the "
+                     "viewport off the setup frame), to paste on another frame, in another action or file";
+    ot.flag = OPTYPE_REGISTER;
+    ot.poll = [](Context &C) { return C.document && C.document->frame_current != 0 && pose_anything_selected(C); };
+    ot.exec = [](Context &C) {
+      int bones = 0, points = 0;
+      const json pose = pose_copy_json(C, &bones, &points);
+      if (bones + points == 0) {
+        report(ReportType::Warning, "Select bones or points to copy their pose");
+        return OpStatus::Cancelled;
+      }
+      /* With it the shapes, as Copy Shapes would copy them, for Ctrl V where these bones and points aren't. */
+      json root;
+      if (shapes_copy_to_clipboard(C) > 0) {
+        root = json::parse(clipboard_text(), nullptr, false);
+      }
+      if (!root.is_object()) {
+        root = json::object();
+      }
+      root[POSE_CLIPBOARD_KEY] = 1;
+      root["pose"] = pose;
+      clipboard_text_set(root.dump());
+      std::string what;
+      if (bones > 0) {
+        what = std::to_string(bones) + (bones == 1 ? " bone" : " bones");
+      }
+      if (points > 0) {
+        what += (what.empty() ? "" : " and ") + std::to_string(points) + (points == 1 ? " point" : " points");
+      }
+      report(ReportType::Info, "Copied the pose of " + what);
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
+  {
+    OperatorType ot;
+    ot.idname = "pose.paste";
+    ot.name = "Paste Pose";
+    ot.description = "Paste the copied pose onto the same bones (by name) and points on this frame (Ctrl V over the "
+                     "viewport off the setup frame); Auto Keying keys it. ignore_bones=1: each point shows where it did "
+                     "when copied, whatever the bones do here. keep_place=1: the shape only, its centre staying where "
+                     "it is here";
+    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+    /* Only where the copied bones or points are (else Ctrl V pastes the shapes copied with them). */
+    ot.poll = [](Context &C) {
+      if (!C.document || C.document->frame_current == 0) {
+        return false;
+      }
+      const json pose = clipboard_pose();
+      return pose.is_object() && pose_has_target(C, pose);
+    };
+    ot.props = {
+        op_bool_property("selected_mask", "On Selected Only",
+                         "Only paste onto the bones and points selected now (all of them when none is)", "0"),
+        op_float_property("factor", "Factor", "How far from the pose shown to the copied one (0.5: halfway)", "1",
+                          0.0f, 1.0f, 0.01f),
+        op_bool_property("ignore_bones", "Ignore Bones",
+                         "Keep each point where it showed when copied, whatever the bones do on this frame", "0"),
+        op_bool_property("keep_place", "Keep Place",
+                         "Paste the shape only: the pasted points keep the place their centre has on this frame", "0"),
+    };
+    ot.exec = [](Context &C) {
+      const json pose = clipboard_pose();
+      if (!pose.is_object()) {
+        report(ReportType::Warning, "Copy a pose first (Ctrl C over the viewport off the setup frame)");
+        return OpStatus::Cancelled;
+      }
+      return pose_paste(C, pose);
+    };
+    operators().add(std::move(ot));
+  }
+}
+
+}  // namespace oanim

@@ -57,11 +57,21 @@ static std::string clipboard_get()
     char *text = SDL_GetClipboardText();
     std::string s = text ? text : "";
     SDL_free(text);
-    if (s.find(CLIPBOARD_KEY) != std::string::npos) {
+    if (s.find(CLIPBOARD_KEY) != std::string::npos || s.find(POSE_CLIPBOARD_KEY) != std::string::npos) {
       return s;
     }
   }
   return layer_clipboard_fallback();
+}
+
+std::string clipboard_text()
+{
+  return clipboard_get();
+}
+
+void clipboard_text_set(const std::string &text)
+{
+  clipboard_set(text);
 }
 
 static void tree_walk(Layer &l, const std::function<void(Layer &)> &fn)
@@ -591,6 +601,11 @@ static int shapes_copy(Context &C)
   return std::max(shapes, 1);
 }
 
+int shapes_copy_to_clipboard(Context &C)
+{
+  return shapes_copy(C);
+}
+
 /* `piece` with no keys, as it showed when copied: that pose is its setup. */
 static void piece_as_shown(VectorDrawing &piece, const json &shown)
 {
@@ -678,9 +693,9 @@ static OpStatus shapes_paste(Context &C, const json &root)
     return OpStatus::Cancelled;
   }
   const bool keyframes = op_arg_bool(C, "keyframes");
-  const bool keep_place = !op_has_arg(C, "keep_place") || op_arg_bool(C, "keep_place");
+  const bool keep_place = !op_has_arg(C, "keep_look") || op_arg_bool(C, "keep_look");
   op_arg_used(C, "keyframes", keyframes ? "1" : "0");
-  op_arg_used(C, "keep_place", keep_place ? "1" : "0");
+  op_arg_used(C, "keep_look", keep_place ? "1" : "0");
   animation_record(doc);
 
   std::map<std::string, uint64_t> dest_bones;
@@ -879,7 +894,7 @@ void layer_clipboard_operators_register()
       return it != args.end() && it->second == "1";
     };
     OpProperty keep_place = op_bool_property(
-        "keep_place", "Keep Place",
+        "keep_look", "Keep Look",
         "They land exactly where they looked when copied, whatever this layer's place. Off, the same numbers in this "
         "layer's own space",
         "1");
@@ -896,6 +911,10 @@ void layer_clipboard_operators_register()
       if (!root.is_discarded() && root.is_object() && root.contains("shapes")) {
         op_arg_used(C, "shapes", "1");
         return shapes_paste(C, root);
+      }
+      /* A pose copied off the setup frame with no shapes pastes as one (Paste Pose says why it can't on frame 0). */
+      if (!root.is_discarded() && root.is_object() && root.contains(POSE_CLIPBOARD_KEY)) {
+        return operator_call(C, "pose.paste");
       }
       return operator_call(C, "layer.paste");
     };

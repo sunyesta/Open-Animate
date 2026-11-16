@@ -138,7 +138,7 @@ assert all(close(a, b) for a, b in zip(sorted(got), sorted(wanted))), ("where it
 ops.ed.undo()
 target = find("Target")
 layers.active = target
-assert ops.mesh.paste(keep_place="0") == {'FINISHED'}
+assert ops.mesh.paste(keep_look="0") == {'FINISHED'}
 got = [tuple(p[:2]) for p in target.points[4:]]
 assert all(close(a, b[:2]) for a, b in zip(sorted(got), sorted(tuple(p[:2]) for p in source.points[:4]))), got
 ops.ed.undo()
@@ -257,7 +257,7 @@ doc.frame_current = 12
 into2 = find("Lost")
 paste_key(into2)
 into2 = find("Lost")
-assert ops.mesh.paste(keyframes="1", keep_place="0") == {'FINISHED'}
+assert ops.mesh.paste(keyframes="1", keep_look="0") == {'FINISHED'}
 into2 = find("Lost")
 at(12)
 assert close(into2.points[8][:2], waved), ("the action's, while in it", into2.points[8], waved)
@@ -334,7 +334,7 @@ outside = find("Outside")
 layers.active = outside
 copy_keys(find("Acting"), [0, 1, 2, 3])
 layers.active = outside
-assert ops.mesh.paste(keyframes="1", keep_place="0") == {'FINISHED'}
+assert ops.mesh.paste(keyframes="1", keep_look="0") == {'FINISHED'}
 assert ops.layer.move_to_group(group=str(find("Rig").id)) == {'FINISHED'}
 layers.active = find("Rig")
 assert ops.anim.action_set(name="Wave") == {'FINISHED'}

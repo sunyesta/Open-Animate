@@ -119,6 +119,7 @@ set(OANIM_SOURCES
   src/ops/file_ops.cc
   src/ops/layer_ops.cc
   src/ops/layer_clipboard.cc
+  src/ops/pose_clipboard.cc
   src/ops/operator.cc
   src/ops/rig_ops.cc
   src/ops/draw_ops.cc
@@ -692,6 +693,8 @@ add_test(NAME motion_path_picks_traced
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_motion_path_picks_traced.py)
 add_test(NAME rest_keeps_animation
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_rest_keeps_animation.py)
+add_test(NAME pose_clipboard
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_clipboard.py)
 add_test(NAME key_whole_drawing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_whole_drawing.py)
 add_test(NAME key_whole_drawing_actions
