@@ -154,6 +154,21 @@ PENDING = [
      "An _L drawing's pose flips onto its _R partner", 'tests/test_pose_paste_flipped.py'),
     ('src/ops/pose_clipboard.cc', '          return neighbour == reach_in ? 1 : neighbour == reach_out ? 0 : -1;', '          return neighbour == reach_in ? 0 : neighbour == reach_out ? 1 : -1;',
      "A flipped handle goes on the image's handle reaching for the image of what it reached for", 'tests/test_pose_paste_flipped.py'),
+    ('src/ops/rig_ops.cc', '                   bone_symmetrize_settings(*C.document, armature, source, *bone_find(armature, to));',
+     '                   (void)source;',
+     "Symmetrize leaves the other side's settings as they were", 'tests/test_symmetrize_settings.py'),
+    ('src/ops/rig_ops.cc', '  dst.controller_knob_parent = src.controller_knob_parent ? bone_mirror_id(armature, src.controller_knob_parent) : 0;',
+     '  dst.controller_knob_parent = src.controller_knob_parent;',
+     "Symmetrize keeps the first side's Knob Parent", 'tests/test_symmetrize_settings.py'),
+    ('src/ops/rig_ops.cc', '      c.min_angle = -hi;',
+     '      c.min_angle = lo;',
+     "Symmetrize copies Limit Angle's limits without turning them the other way", 'tests/test_symmetrize_settings.py'),
+    ('src/ops/rig_ops.cc', '    if (i < own.size() && own[i].type == c.type) {',
+     '    if (false && i < own.size() && own[i].type == c.type) {',
+     "Symmetrize takes an existing bone's constraint keys away", 'follow_point_stress'),
+    ('src/ops/rig_ops.cc', '                       copy.constraints.clear();',
+     '',
+     "Symmetrize gives a new bone the first side's Follow Point keys", 'follow_point_stress'),
 ]
 
 def build(root):

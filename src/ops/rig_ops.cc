@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <numbers>
 #include <set>
 #include <tuple>
 
@@ -84,7 +85,156 @@ static bool on_setup_frame(Context &C)
   return false;
 }
 
-/* Bone Symmetrize's Mirror Action Bone Actions: the action bone actions of the bones it made the other side of go
+/* The layer on the other side of `id` by name (Hand_L for Hand_R), or `id` itself when there is none. */
+static uint64_t layer_mirror_id(const Document &doc, uint64_t id)
+{
+  const Layer *layer = id ? layer_find(doc, id) : nullptr;
+  if (!layer) {
+    return id;
+  }
+  const std::string other = bone_mirror_name(layer->name);
+  if (other == layer->name) {
+    return id;
+  }
+  for (const Layer *l : document_layers_flat(doc)) {
+    if (l->name == other) {
+      return l->id;
+    }
+  }
+  return id;
+}
+
+/* `to` keeps `from`'s keys: every keyed setting of a constraint (its own keys and the actions' on it). */
+static void constraint_keys_take(BoneConstraint &to, const BoneConstraint &from)
+{
+  to.influence_keys = from.influence_keys;
+  for (int i = 0; i < 3; i++) {
+    to.follow_shift_keys_at(i) = const_cast<BoneConstraint &>(from).follow_shift_keys_at(i);
+  }
+  BoneSpring BoneConstraint::*springs[] = {&BoneConstraint::angle_spring, &BoneConstraint::position_spring,
+                                           &BoneConstraint::scale_spring};
+  for (BoneSpring BoneConstraint::*s : springs) {
+    BoneSpring &a = to.*s;
+    const BoneSpring &b = from.*s;
+    a.settle_speed_keys = b.settle_speed_keys;
+    a.bounce_keys = b.bounce_keys;
+    a.inertia_keys = b.inertia_keys;
+    a.stretch_keys = b.stretch_keys;
+    a.limit_keys = b.limit_keys;
+    a.squash_limit_keys = b.squash_limit_keys;
+  }
+  to.weight_keys = from.weight_keys;
+  to.wind_catch_keys = from.wind_catch_keys;
+  to.gravity_keys = from.gravity_keys;
+  to.wind_keys = from.wind_keys;
+  to.wind_direction_keys = from.wind_direction_keys;
+  to.wind_gusts_keys = from.wind_gusts_keys;
+  to.wind_gust_speed_keys = from.wind_gust_speed_keys;
+  to.wind_turbulence_keys = from.wind_turbulence_keys;
+}
+
+/* Bone Symmetrize: `dst`, the other side of `src`, takes every setting `src` has, mirrored, as Blender's Symmetrize
+ * copies the whole bone: what it names (its Knob Parent, its constraints' bones and layers, its shape's layer, its
+ * collections) switched to the other side's, the same where there is none, and what has a way flipped left to right
+ * (the box's slant, Limit Angle's limits, its own wind). Its place, sides and spots are set by Symmetrize itself; its
+ * name, id, keys, bindings, selection and swap stay its own. One step for a bone made and one already there, so a new
+ * setting can't be left out of one. */
+static void bone_symmetrize_settings(Document &doc, Layer &armature, const Bone &src, Bone &dst)
+{
+  dst.connected = src.connected && dst.parent != 0;
+  dst.strength = src.strength;
+  dst.color_set = src.color_set;
+  dst.custom_colors = src.custom_colors;
+  dst.follow_knob = src.follow_knob;
+  dst.inherit_rotation = src.inherit_rotation;
+  dst.inherit_scale = src.inherit_scale;
+  dst.local_location = src.local_location;
+  dst.ik_ignore = src.ik_ignore;
+  dst.arc_ik = src.arc_ik;
+  dst.shape = src.shape;
+  dst.pin_size = src.pin_size;
+  dst.shape_layer = layer_mirror_id(doc, src.shape_layer);
+  dst.full_turn = src.full_turn;
+  dst.depth = src.depth;
+  dst.type = src.type;
+  dst.controller_frame_size = src.controller_frame_size;
+  dst.controller_size_auto = src.controller_size_auto;
+  dst.controller_box_show = src.controller_box_show;
+  dst.controller_contain_knob = src.controller_contain_knob;
+  dst.controller_knob_independent = src.controller_knob_independent;
+  dst.controller_knob_parent = src.controller_knob_parent ? bone_mirror_id(armature, src.controller_knob_parent) : 0;
+  if (dst.controller_knob_parent == dst.id) {
+    dst.controller_knob_parent = 0;
+  }
+  /* Its x axis (Right) mirrored is the other side's Left: the other's Right lies at minus the slant. */
+  dst.controller_box_angle = -src.controller_box_angle;
+  /* A parent in a bone layer around this one: that layer's bone on the other side. */
+  dst.outer_layer = src.outer_layer;
+  dst.outer_bone = src.outer_bone;
+  if (const Layer *outer = src.outer_layer ? layer_find(doc, src.outer_layer) : nullptr) {
+    dst.outer_bone = bone_mirror_id(*outer, src.outer_bone);
+  }
+  dst.collections.clear();
+  for (const uint64_t id : src.collections) {
+    uint64_t to = id;
+    if (const Collection *c = collection_find(doc, id)) {
+      if (const Collection *other = collection_find_by_name(doc, bone_mirror_name(c->name))) {
+        to = other->id;
+      }
+    }
+    if (std::find(dst.collections.begin(), dst.collections.end(), to) == dst.collections.end()) {
+      dst.collections.push_back(to);
+    }
+  }
+  const std::vector<BoneConstraint> own = std::move(dst.constraints);
+  dst.constraints = src.constraints;
+  for (size_t i = 0; i < dst.constraints.size(); i++) {
+    BoneConstraint &c = dst.constraints[i];
+    /* Drivers follow a constraint by this: the copy is a constraint of its own. */
+    c.uid = 0;
+    if (c.target) {
+      c.target = bone_mirror_id(armature, c.target);
+    }
+    if (c.type == BoneConstraintType::LimitAngle) {
+      /* A mirrored bone turns the other way: its limits swap and change sign. */
+      const float lo = c.min_angle, hi = c.max_angle;
+      c.min_angle = -hi;
+      c.max_angle = -lo;
+    }
+    if (c.type == BoneConstraintType::Dynamics) {
+      c.wind_direction = std::numbers::pi_v<float> - c.wind_direction;
+      for (auto &key : c.wind_direction_keys.keys) {
+        key.value = std::numbers::pi_v<float> - key.value;
+      }
+    }
+    if (c.shape_layer) {
+      const uint64_t layer = layer_mirror_id(doc, c.shape_layer);
+      if (layer != c.shape_layer && c.shape_id != 0) {
+        /* The other side's shape: the same id where it has it (a copy keeps ids), else the one at the same place. */
+        const Layer *from = layer_find(doc, c.shape_layer), *to = layer_find(doc, layer);
+        const auto &shapes = from->drawing.shapes;
+        const auto at = std::find_if(shapes.begin(), shapes.end(), [&](const Shape &s) { return s.id == c.shape_id; });
+        const auto &others = to->drawing.shapes;
+        const bool kept = std::any_of(others.begin(), others.end(), [&](const Shape &s) { return s.id == c.shape_id; });
+        const size_t index = size_t(at - shapes.begin());
+        c.shape_id = kept ? c.shape_id : at != shapes.end() && index < others.size() ? others[index].id : 0;
+      }
+      c.shape_layer = layer;
+    }
+    c.fit_layer = layer_mirror_id(doc, c.fit_layer);
+    if (c.type == BoneConstraintType::FollowPoint) {
+      follow_point_mirror(doc, armature, c);
+    }
+    /* Keys stay the bone's own: one already there keeps its keys on a constraint where it has one of the same type
+     * (Mirror Action Bone Actions puts the actions' across). */
+    if (i < own.size() && own[i].type == c.type) {
+      constraint_keys_take(c, own[i]);
+    }
+  }
+}
+
+/* Bone Symmetrize's Mirror Action Bone Actions: the action bone actions
+ of the bones it made the other side of go
  * there too, each as the action of its bone's partner, replacing what that had, then `sides_later` (knobs' sides whose
  * actions are only now there: knob, side, action), then their fixes. With both sides picked and both actions there,
  * `left_to_right` says which is the source. */
@@ -4559,7 +4709,7 @@ void rig_operators_register()
                  }
                  const std::vector<uint64_t> picked = sources;
                  const auto reflect = [](float2 p) { return float2(-p.x, p.y); };
-                 /* Both on unless turned off: Mirror Positions off leaves the other side's bones where they are (to
+                 /* Both on unless turned off: Mirror Bones off leaves the other side's bones as they are (to
                   * mirror only actions); a bone not there yet is still made, mirrored, its actions needing it. */
                  const auto on = [&](const char *name) {
                    const std::string v = op_arg(C, name, "1");
@@ -4572,6 +4722,9 @@ void rig_operators_register()
                  /* Controller sides whose other side's action Mirror Action Bone Actions makes (or makes anew, which
                   * takes it off the side): set once it is there. */
                  std::vector<std::tuple<std::string, int, std::string>> sides_later;
+                 /* Each bone and the other side it makes (or moves): their settings are mirrored once every bone is
+                  * there, so a setting naming a bone made later in this run (an IK target) finds it. */
+                 std::vector<std::pair<uint64_t, uint64_t>> settings;
                  /* Parents before children, so a mirrored child finds its mirrored parent. */
                  for (size_t pass = 0; pass < armature.bones.size() && !sources.empty(); pass++) {
                    for (auto it = sources.begin(); it != sources.end();) {
@@ -4647,20 +4800,23 @@ void rig_operators_register()
                        existing->controller_size_auto = copy.controller_size_auto;
                        existing->controller_spots = copy.controller_spots;
                        existing->controller_box_show = copy.controller_box_show;
+                       settings.emplace_back(src->id, existing->id);
                      }
                      else {
                        changed = true;
                        copy.id = armature.next_bone_id++;
+                       /* Its constraints come with its settings, with no keys of its own to keep. */
+                       copy.constraints.clear();
+                       settings.emplace_back(src->id, copy.id);
                        armature.bones.push_back(copy);
-                       for (BoneConstraint &c : armature.bones.back().constraints) {
-                         if (c.type == BoneConstraintType::FollowPoint) {
-                           follow_point_mirror(*C.document, armature, c);
-                         }
-                       }
                      }
                      made++;
                      it = sources.erase(it);
                    }
+                 }
+                 for (const auto &[from, to] : settings) {
+                   const Bone source = *bone_find(armature, from);
+                   bone_symmetrize_settings(*C.document, armature, source, *bone_find(armature, to));
                  }
                  if (made > 0 && (mirror_all || !sides_later.empty())) {
                    changed = true;
@@ -4672,9 +4828,10 @@ void rig_operators_register()
                },
                [] {
                  OpProperty positions = op_bool_property(
-                     "positions", "Mirror Positions",
-                     "Move the other side's bones to mirror these (off: only their actions are mirrored; a bone not there "
-                     "yet is still made)",
+                     "positions", "Mirror Bones",
+                     "Make the other side's bones mirror these, in place and in every setting (relations, knob, IK, "
+                     "look, collections, constraints; off: only their actions are mirrored; a bone not there yet is still "
+                     "made)",
                      "1");
                  OpProperty action_bone_actions = op_bool_property(
                      "action_bone_actions", "Mirror Action Bone Actions",

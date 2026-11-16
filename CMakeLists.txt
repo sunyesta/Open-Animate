@@ -857,6 +857,8 @@ add_test(NAME point_transform
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_point_transform.py)
 add_test(NAME symmetrize
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_symmetrize.py)
+add_test(NAME symmetrize_settings
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_symmetrize_settings.py)
 add_test(NAME symmetrize_match
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_symmetrize_match.py)
 add_test(NAME view_settings
