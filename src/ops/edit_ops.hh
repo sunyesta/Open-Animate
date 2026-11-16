@@ -52,6 +52,8 @@ void draw_operators_register();
 /* Ends a stroke of `ink` on `layer` as `mode` makes it (a line, painted fill, or a cut), with no undo step. False:
  * nothing came of it. */
 bool draw_stroke_commit(Context &C, Layer &layer, InkStroke &ink, DrawMode mode);
+/* The Draw tool's line brush was drawn with: first in the brush button's Recently Used. */
+void draw_brush_used(ToolSettings &ts);
 /* Makes `mode` the Draw tool's kind of pen, with the preset it last used. */
 void draw_mode_set(ToolSettings &ts, DrawMode mode);
 /* annotation.* and guide.* (ops/annotation_ops.cc). */

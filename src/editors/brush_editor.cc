@@ -1538,4 +1538,81 @@ bool brush_row(Context &C, const BrushSettings &brush, const Style &style, const
   }
 }
 
+
+/* ------------------------------------------------------------------------------------------------
+ * The Draw tool's brush button: a preview of its line brush, and a popover of the brushes to draw with. */
+
+/* A brush's tile: its preview stroke and name. True when clicked. */
+static bool brush_tile(const Document &doc, const std::string &key, const BrushSettings &brush, const Style &style,
+                       ImVec2 size, bool picked)
+{
+  ImGui::PushID(key.c_str());
+  const ImVec2 a = ImGui::GetCursorScreenPos();
+  const bool clicked = ImGui::InvisibleButton("##tile", size);
+  const bool hovered = ImGui::IsItemHovered();
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  dl->AddRectFilled(a, a + size, picked ? CARD_PICKED : hovered ? CARD_HOVER : CARD_BG, 4.0f);
+  const float pad = 5.0f, text_h = ImGui::GetTextLineHeight();
+  const ImVec2 pa = a + ImVec2(pad, pad), pb = a + ImVec2(size.x - pad, size.y - text_h - pad * 1.6f);
+  if (ImGui::IsItemVisible()) {
+    preview_draw(dl, "tile:" + key, brush, style, pa, pb, picked ? 0x2a3d57 : 0x262626, 1.0f, true);
+  }
+  const std::string name = brush_shown_name(doc, brush);
+  const ImVec2 text_at(a.x + pad + 2.0f, pb.y + pad * 0.6f);
+  dl->PushClipRect(text_at, ImVec2(a.x + size.x - pad, a.y + size.y), true);
+  dl->AddText(text_at, IM_COL32(0xe6, 0xe6, 0xe6, 255), name.c_str());
+  dl->PopClipRect();
+  if (hovered && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("%s", name.c_str());
+  }
+  ImGui::PopID();
+  return clicked;
+}
+
+void brush_button_preview(ImDrawList *dl, const Document &doc, const BrushSettings &brush, const Style &style, ImVec2 a,
+                          ImVec2 b)
+{
+  (void)doc;
+  preview_draw(dl, "tool_button", brush, style, a, b, 0x545454, 1.0f, true);
+}
+
+void brush_tool_popover(Context &C)
+{
+  const Document &doc = *C.document;
+  ToolSettings &ts = C.wm->tool_settings;
+  const float h = ImGui::GetFrameHeight();
+  const ImVec2 tile(h * 5.0f, h * 2.6f);
+  ImGui::TextDisabled("Active");
+  brush_tile(doc, "active", ts.style.brush, ts.style, tile, true);
+  ImGui::Spacing();
+  ImGui::TextDisabled("Recently Used");
+  int shown = 0;
+  const BrushSettings now = brush_settings_unnamed(ts.style.brush);
+  for (size_t i = 0; i < ts.brush_recent.size(); i++) {
+    if (brush_settings_unnamed(ts.brush_recent[i]) == now) {
+      continue;
+    }
+    if (shown % 2 == 1) {
+      ImGui::SameLine();
+    }
+    if (brush_tile(doc, "recent" + std::to_string(i), ts.brush_recent[i], ts.style, tile, false)) {
+      operator_call(C, "brush.recent_pick", {{"index", std::to_string(i)}});
+      ImGui::CloseCurrentPopup();
+      break;
+    }
+    shown++;
+  }
+  if (shown == 0) {
+    ImGui::TextDisabled("None yet");
+  }
+  ImGui::Separator();
+  if (ImGui::Button("More Brushes...", ImVec2(tile.x * 2.0f + ImGui::GetStyle().ItemSpacing.x, 0.0f))) {
+    brush_window_open(BrushTarget::Tool, true);
+    ImGui::CloseCurrentPopup();
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("Every line brush, and its settings, in the Brush Settings window");
+  }
+}
+
 }  // namespace oanim

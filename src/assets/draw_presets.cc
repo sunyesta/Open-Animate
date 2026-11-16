@@ -166,7 +166,11 @@ static json preset_json(const DrawPreset &p)
           {"tiltWidth", ink.tilt_width},
           {"taperStart", ink.taper_start},
           {"taperEnd", ink.taper_end},
-          {"eraseWhole", ink.erase_whole}};
+          {"eraseWhole", ink.erase_whole},
+          {"sizeView", ink.size_view},
+          {"viewSize", ink.view_size},
+          {"nibAngle", ink.nib_angle},
+          {"nibDirection", ink.nib_direction}};
 }
 
 static DrawPreset preset_from_json(const json &j, const std::string &fallback_name)
@@ -204,6 +208,10 @@ static DrawPreset preset_from_json(const json &j, const std::string &fallback_na
   ink.taper_start = std::max(j.value("taperStart", none.taper_start), 0.0f);
   ink.taper_end = std::max(j.value("taperEnd", none.taper_end), 0.0f);
   ink.erase_whole = j.value("eraseWhole", none.erase_whole);
+  ink.size_view = j.value("sizeView", none.size_view);
+  ink.view_size = std::clamp(j.value("viewSize", none.view_size), 0.0f, 500.0f);
+  ink.nib_angle = std::fmod(j.value("nibAngle", none.nib_angle), 180.0f);
+  ink.nib_direction = amount("nibDirection", none.nib_direction);
   p.category = DRAW_CATEGORY_MINE;
   return p;
 }

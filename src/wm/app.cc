@@ -1315,6 +1315,18 @@ void App::draw_preferences()
                                                                                        : "Using Windows Ink, with WinTab ready");
   }
 
+  ImGui::TextUnformatted("Prediction");
+  ImGui::SameLine(130);
+  ImGui::SetNextItemWidth(160.0f);
+  if (ImGui::SliderFloat("##pen_prediction", &prefs.pen_prediction, 0.0f, 30.0f, prefs.pen_prediction > 0.0f ? "%.0f ms" : "Off",
+                         ImGuiSliderFlags_AlwaysClamp)) {
+    preferences_save();
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("While you draw with a pen, the line runs this far ahead of it, the way it is going,\n"
+                      "so it keeps up with your hand. The line you lift is the one you drew either way.");
+  }
+
   /* The overlays' colours (editors/overlay_contrast.hh): each piece of a wire, point or path takes its usual colour,
    * or where that is hard to see on the drawing under it, the lighter one (over something darker) or the darker. */
   ImGui::SeparatorText("Selecting");

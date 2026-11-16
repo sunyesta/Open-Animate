@@ -1,6 +1,8 @@
 /* The Draw tool's operators (data/ink_stroke.hh, data/fill_paint.hh, assets/draw_presets.hh): a scripted stroke, picking,
  * saving, putting back and deleting presets, the presets popup, and F / Shift F to size the line. */
 
+#include <algorithm>
+#include <cmath>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -10,6 +12,7 @@
 #include "data/document.hh"
 #include "data/fill_paint.hh"
 #include "data/line_cut.hh"
+#include "data/quick_shape.hh"
 #include "ops/edit_ops.hh"
 #include "ops/operator.hh"
 #include "wm/context.hh"
@@ -68,15 +71,12 @@ void draw_mode_set(ToolSettings &ts, DrawMode mode)
   }
 }
 
-/* A stroke pen's line on the active drawing. */
-static bool stroke_line(Context &C, VectorDrawing &drawing, const InkStroke &ink)
+/* A line through `knots` on `drawing`, `line_width` wide (document units), its ends welded and overshoots trimmed as
+ * the Draw tool's options say (unless `closes`). Filled if closed and `fill`. */
+static bool line_add(Context &C, VectorDrawing &drawing, const std::vector<InkKnot> &knots, bool closes, bool fill,
+                     float line_width, float pixel)
 {
   ToolSettings &ts = C.wm->tool_settings;
-  const std::vector<InkPoint> &stroke = ink.points();
-  const float pixel = ink.view().pixel;
-  const bool closes = ts.draw_fill && stroke.size() > 8 && distance(stroke.front().pos, stroke.back().pos) < pixel * 14.0f;
-  const std::vector<InkKnot> knots = ink_fit(stroke, ink.settings(), ink.view(), closes);
-  C.wm->draw_last_closed = closes;
   if (knots.size() < 2) {
     return false;
   }
@@ -112,7 +112,8 @@ static bool stroke_line(Context &C, VectorDrawing &drawing, const InkStroke &ink
   drawing.curves.push_back(curve);
   Shape shape;
   shape.style = ts.style;
-  shape.has_fill = curve.closed;
+  shape.style.line_width = line_width;
+  shape.has_fill = curve.closed && fill;
   shape.name = "Stroke " + std::to_string(drawing.shapes.size() + 1);
   for (int s = 0; s < drawing.curves.back().segment_count(); s++) {
     shape.edges.push_back({int(drawing.curves.size()) - 1, s});
@@ -122,6 +123,77 @@ static bool stroke_line(Context &C, VectorDrawing &drawing, const InkStroke &ink
     drawing_trim_overshoots(drawing, int(drawing.curves.size()) - 1, OVERSHOOT_PIXELS * pixel, pixel);
   }
   return true;
+}
+
+/* A stroke pen's line on the active drawing. */
+static bool stroke_line(Context &C, VectorDrawing &drawing, const InkStroke &ink)
+{
+  ToolSettings &ts = C.wm->tool_settings;
+  const std::vector<InkPoint> &stroke = ink.points();
+  const float pixel = ink.view().pixel;
+  const bool closes = ts.draw_fill && stroke.size() > 8 && distance(stroke.front().pos, stroke.back().pos) < pixel * 14.0f;
+  const std::vector<InkKnot> knots = ink_fit(stroke, ink.settings(), ink.view(), closes);
+  C.wm->draw_last_closed = closes;
+  /* The width it was drawn at: with Size Unit View, what it was on screen. */
+  return line_add(C, drawing, knots, closes, true, ink.view().half_width * 2.0f, pixel);
+}
+
+/* "x,y" as a place; false when it isn't one. */
+static bool parse_pair(const std::string &text, float2 *r)
+{
+  std::stringstream row(text);
+  char comma = 0;
+  float x = 0.0f, y = 0.0f;
+  if (!(row >> x >> comma >> y) || comma != ',' || !std::isfinite(x) || !std::isfinite(y)) {
+    return false;
+  }
+  *r = {x, y};
+  return true;
+}
+
+/* Hold to Shape's line or ellipse (data/quick_shape.hh), on the active drawing. */
+static OpStatus quick_shape_exec(Context &C)
+{
+  Document &doc = *C.document;
+  ToolSettings &ts = C.wm->tool_settings;
+  Layer *layer = document_active_layer(doc);
+  std::vector<Layer *> layers = editable_layers(C);
+  if (doc.frame_current != 0 || !layer || std::find(layers.begin(), layers.end(), layer) == layers.end()) {
+    report(ReportType::Error, "draw.quick_shape draws on the active drawing, on the setup frame");
+    return OpStatus::Cancelled;
+  }
+  QuickShape shape;
+  const std::string kind = op_arg(C, "shape", "LINE");
+  bool ok = true;
+  if (kind == "ELLIPSE") {
+    shape.kind = QuickShape::Kind::Ellipse;
+    ok = parse_pair(op_arg(C, "center"), &shape.center) && parse_pair(op_arg(C, "radii"), &shape.radii);
+    shape.radii = {std::abs(shape.radii.x), std::abs(shape.radii.y)};
+    shape.angle = op_arg_float(C, "angle", 0.0f) * PI / 180.0f;
+    shape.circle = op_arg_bool(C, "circle");
+    ok = ok && quick_shape_radii(shape).x > 0.0f && quick_shape_radii(shape).y > 0.0f;
+  }
+  else if (kind == "LINE") {
+    ok = parse_pair(op_arg(C, "a"), &shape.a) && parse_pair(op_arg(C, "b"), &shape.b) && shape.a != shape.b;
+  }
+  else {
+    ok = false;
+  }
+  if (!ok) {
+    report(ReportType::Error, "draw.quick_shape takes shape=LINE with a=\"x,y\" b=\"x,y\", or shape=ELLIPSE with "
+                              "center=\"x,y\" radii=\"rx,ry\" angle= (degrees) circle=0|1");
+    return OpStatus::Cancelled;
+  }
+  const float pixel = op_arg_float(C, "pixel", 2.0f / std::max(float(doc.height), 1.0f));
+  const float width = std::max(op_arg_float(C, "line_width", ts.style.line_width), 0.0f);
+  const float radius = std::clamp(op_arg_float(C, "radius", 1.0f), 0.0f, 1.0f);
+  const bool closed = shape.kind == QuickShape::Kind::Ellipse;
+  if (!line_add(C, layer->drawing, quick_shape_knots(shape, radius), closed, ts.draw_fill, width, pixel)) {
+    return OpStatus::Cancelled;
+  }
+  draw_brush_used(ts);
+  op_note(closed ? (shape.circle ? "A circle" : "An ellipse") : "A straight line");
+  return OpStatus::Finished;
 }
 
 /* The Stroke Eraser's or Trimmer's stroke, on the active drawing or every one being edited. */
@@ -212,6 +284,19 @@ static bool stroke_erase(Context &C, Layer &layer, const std::vector<FillPiece> 
   return cut;
 }
 
+/* How many line brushes the brush button's Recently Used keeps. */
+static constexpr size_t BRUSH_RECENT_MAX = 8;
+
+void draw_brush_used(ToolSettings &ts)
+{
+  const BrushSettings used = brush_settings_unnamed(ts.style.brush);
+  std::erase_if(ts.brush_recent, [&](const BrushSettings &b) { return brush_settings_unnamed(b) == used; });
+  ts.brush_recent.insert(ts.brush_recent.begin(), ts.style.brush);
+  if (ts.brush_recent.size() > BRUSH_RECENT_MAX) {
+    ts.brush_recent.resize(BRUSH_RECENT_MAX);
+  }
+}
+
 bool draw_stroke_commit(Context &C, Layer &layer, InkStroke &ink, DrawMode mode)
 {
   ToolSettings &ts = C.wm->tool_settings;
@@ -222,7 +307,11 @@ bool draw_stroke_commit(Context &C, Layer &layer, InkStroke &ink, DrawMode mode)
   C.wm->draw_last = ink;
   C.wm->draw_last_closed = false;
   if (!draw_mode_paints(mode)) {
-    return stroke_line(C, layer.drawing, ink);
+    if (!stroke_line(C, layer.drawing, ink)) {
+      return false;
+    }
+    draw_brush_used(ts);
+    return true;
   }
   if (mode == DrawMode::StrokeEraser || mode == DrawMode::Trimmer) {
     return stroke_cut_lines(C, layer, ink, mode);
@@ -274,7 +363,7 @@ static OpStatus stroke_exec(Context &C)
     report(ReportType::Error, "draw.stroke needs a pen that draws by dragging, not the Bezier Pen");
     return OpStatus::Cancelled;
   }
-  ink.begin(ts.ink, {pixel, draw_width(ts, ts.draw_mode) * 0.5f, 2.0f / std::max(float(doc.height), 1.0f)});
+  ink.begin(ts.ink, {pixel, draw_half_width(ts, ts.draw_mode, pixel), 2.0f / std::max(float(doc.height), 1.0f)});
   for (const InkSample &sample : parse_samples(op_arg(C, "samples"))) {
     ink.add(sample);
   }
@@ -368,6 +457,45 @@ void draw_operators_register()
           return OpStatus::Cancelled;
         }
         C.wm->tool_settings.draw_changes.erase(op_arg(C, "name"));
+        return OpStatus::Finished;
+      });
+  {
+    OperatorType ot;
+    ot.idname = "draw.quick_shape";
+    ot.name = "Hold to Shape";
+    ot.description = "A straight line (shape=LINE, a= and b= its ends, \"x,y\" in the active layer's space) or an ellipse "
+                     "(shape=ELLIPSE, center=, radii=\"rx,ry\", angle= degrees, circle=1 for a circle) on the active "
+                     "drawing, as a freehand line held still at its end becomes one: line_width= (document units), "
+                     "radius= (its width, 0-1), pixel= (layer units a screen pixel stands for)";
+    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+    ot.poll = [](Context &C) { return C.document != nullptr; };
+    ot.exec = quick_shape_exec;
+    OpProperty round;
+    round.name = "circle";
+    round.label = "Shape";
+    round.description = "An ellipse as it was drawn, or a circle of their mean radius";
+    round.kind = OpProperty::Kind::Enum;
+    round.items = {{"0", "Ellipse"}, {"1", "Circle"}};
+    round.fallback = "0";
+    round.expand = true;
+    round.item_descriptions = {"The ellipse that fits the loop drawn", "A circle, the ellipse's two radii made their mean"};
+    round.visible = [](const OpArgs &args) {
+      const auto it = args.find("shape");
+      return it != args.end() && it->second == "ELLIPSE";
+    };
+    ot.props.push_back(round);
+    operators().add(std::move(ot));
+  }
+  add("brush.recent_pick", "Pick Recent Brush",
+      "Draw with the line brush index= in the brush button's Recently Used (0 the latest)", OPTYPE_REGISTER, nullptr,
+      [](Context &C) {
+        ToolSettings &ts = C.wm->tool_settings;
+        const int index = op_arg_int(C, "index", -1);
+        if (index < 0 || index >= int(ts.brush_recent.size())) {
+          report(ReportType::Error, "No recent brush " + op_arg(C, "index"));
+          return OpStatus::Cancelled;
+        }
+        ts.style.brush = ts.brush_recent[size_t(index)];
         return OpStatus::Finished;
       });
   add("draw.presets_popup", "Pens", "Show the Draw tool's pens at the mouse (Shift Space)", 0, draw_tool, [](Context &C) {

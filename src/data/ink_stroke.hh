@@ -61,6 +61,14 @@ struct InkSettings {
   float taper_end = 0.0f;
   /* The Stroke Eraser takes the whole of each line it touches. */
   bool erase_whole = false;
+  /* Size Unit: View keeps the line one size on screen at any zoom, `view_size` screen pixels across; Scene (off)
+   * keeps it one size in the drawing, the width field's document pixels. */
+  bool size_view = false;
+  float view_size = 6.0f;
+  /* A flat nib held at `nib_angle` degrees (from across, anticlockwise), as a calligraphy pen: a line drawn along
+   * its edge loses `nib_direction` (0-1) of its width, one drawn across it keeps all of it. */
+  float nib_angle = 30.0f;
+  float nib_direction = 0.0f;
   bool operator==(const InkSettings &) const = default;
 };
 
@@ -124,7 +132,9 @@ class InkStroke {
     void step(float2 target, float dt, float omega);
   };
 
-  float radius(float pressure, float2 tilt, float speed) const;
+  float radius(float pressure, float2 tilt, float speed, float nib = 1.0f) const;
+  /* How much of the width the nib leaves for a line heading `heading` (screen pixels; 1 with no nib). */
+  float nib(float2 heading) const;
   void emit(float2 pos, float pressure, float2 tilt, float speed);
   float filter_pressure(const Raw &raw);
   float recent_speed() const;
@@ -139,8 +149,10 @@ class InkStroke {
   std::vector<Raw> recent_;
   float pressure_ = 1.0f, pressure_rate_ = 0.0f;
   Spring spring_;
-  /* The last place emitted (screen pixels). */
+  /* The last place emitted (screen pixels), and the way the line has been heading there (a unit, smoothed), for
+   * the nib. */
   float2 emitted_;
+  float2 heading_;
 };
 
 /* How far (screen pixels) the Bezier points may be off for a `fidelity`. */

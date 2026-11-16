@@ -114,7 +114,9 @@ def draw_settings():
     preset (the pen's name), fill_size (the Fill Pen and erasers' width, document units), erase_all_layers,
     erase_selected, erase_whole (the Stroke Eraser takes whole lines), trim (ends past a crossing go), use_pressure, fill,
     fill_color and line_color to set (r, g, b, a),
-    weld (a stroke's ends join points they finish on), cursor_circle, line_width (document units), prediction (how far ahead of a pen's last sample the line is drawn while drawing, ms; 0 off),
+    weld (a stroke's ends join points they finish on), cursor_circle, hold_shape (Hold to Shape), line_width (document units), prediction (how far ahead of a pen's last sample the line is drawn while drawing, ms, 0 off: a preference),
+    brush_recent (the line brushes drawn with lately, latest first, each {name, preset}), size_view and view_size
+    (Size Unit View: the line view_size screen pixels across at any zoom), nib_angle (degrees) and nib_direction (0-1),
     stabilizer (OFF, SMART or PULLED_STRING), smoothing (Smart's amount, 0-1), string_length (screen pixels),
     catch_up, fidelity (how closely the Bezier points follow the line, 0-1), pressure_smoothing (0-1),
     pressure_curve (the two handles
@@ -132,6 +134,14 @@ def draw_presets():
 def set_draw(**values):
     """Change the Draw tool's settings by name (see draw_settings)."""
     _oanim.set_draw(values)
+
+
+def quick_shape_fit(points, end, pixel=1.0):
+    """Hold to Shape's fit: what a freehand line of points [(x, y)] held still at `end` becomes, as
+    ops.draw.quick_shape's options (a dict: shape LINE with a and b, or ELLIPSE with center, radii, angle and
+    circle), or None when it is too short to be one. pixel: layer units a screen pixel stands for."""
+    d = _oanim.quick_shape_fit([tuple(p) for p in points], tuple(end), float(pixel))
+    return None if d is None else dict(d)
 
 
 def ink_stroke(samples, pixel=1.0, line_width=10.0, closed=False, **settings):

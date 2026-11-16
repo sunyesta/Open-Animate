@@ -38,6 +38,7 @@
 #include "data/bones.hh"
 #include "data/camera.hh"
 #include "data/detail.hh"
+#include "data/quick_shape.hh"
 #include "data/media_layer.hh"
 #include "text/text_layer.hh"
 #include "text/text_outline.hh"
@@ -249,6 +250,10 @@ static void ink_settings_read(const InkSettings &ink, py::dict &d)
   d["taper_start"] = ink.taper_start;
   d["taper_end"] = ink.taper_end;
   d["erase_whole"] = ink.erase_whole;
+  d["size_view"] = ink.size_view;
+  d["view_size"] = ink.view_size;
+  d["nib_angle"] = ink.nib_angle;
+  d["nib_direction"] = ink.nib_direction;
 }
 
 /* A Stroke Pen setting by name, as oanim.wm.set_draw takes it; false: no such setting. */
@@ -304,6 +309,18 @@ static bool ink_setting(InkSettings &ink, const std::string &key, const py::hand
   }
   else if (key == "erase_whole") {
     ink.erase_whole = value.cast<bool>();
+  }
+  else if (key == "size_view") {
+    ink.size_view = value.cast<bool>();
+  }
+  else if (key == "view_size") {
+    ink.view_size = std::clamp(value.cast<float>(), 0.0f, 500.0f);
+  }
+  else if (key == "nib_angle") {
+    ink.nib_angle = std::fmod(value.cast<float>(), 180.0f);
+  }
+  else if (key == "nib_direction") {
+    ink.nib_direction = amount();
   }
   else {
     return false;
@@ -1026,7 +1043,16 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     d["weld"] = ts.draw_weld;
     d["trim"] = ts.draw_trim;
     d["cursor_circle"] = ts.draw_cursor_circle;
-    d["prediction"] = ts.draw_prediction;
+    d["prediction"] = preferences().pen_prediction;
+    d["hold_shape"] = ts.draw_hold_shape;
+    py::list recent;
+    for (const BrushSettings &b : ts.brush_recent) {
+      py::dict r;
+      r["name"] = b.name;
+      r["preset"] = b.preset;
+      recent.append(r);
+    }
+    d["brush_recent"] = recent;
     d["line_width"] = ts.style.line_width;
     ink_settings_read(ts.ink, d);
     return d;
@@ -1054,7 +1080,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         ts.draw_fill = value.cast<bool>();
       }
       else if (key == "prediction") {
-        ts.draw_prediction = std::clamp(value.cast<float>(), 0.0f, 30.0f);
+        preferences().pen_prediction = std::clamp(value.cast<float>(), 0.0f, 30.0f);
       }
       else if (key == "line_width") {
         ts.style.line_width = std::max(value.cast<float>(), 0.0f);
@@ -1080,6 +1106,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
       else if (key == "cursor_circle") {
         ts.draw_cursor_circle = value.cast<bool>();
+      }
+      else if (key == "hold_shape") {
+        ts.draw_hold_shape = value.cast<bool>();
       }
       else if (!ink_setting(ts.ink, key, value)) {
         throw py::value_error("no draw setting '" + key + "' (see oanim.wm.draw_settings)");
@@ -1120,6 +1149,26 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
                                   py::make_tuple(k.handle_out.x, k.handle_out.y), k.corner));
     }
     d["knots"] = knots;
+    return d;
+  });
+  /* Hold to Shape's fit (data/quick_shape.hh): what a line of points held at `end` becomes, as draw.quick_shape's
+   * options; None when it is too short. */
+  m.def("quick_shape_fit", [](const std::vector<std::pair<float, float>> &points, std::pair<float, float> end,
+                              float pixel) -> py::object {
+    std::vector<float2> line;
+    for (const auto &[x, y] : points) {
+      line.push_back({x, y});
+    }
+    QuickShape shape;
+    if (!quick_shape_fit(line, {end.first, end.second}, pixel, &shape)) {
+      return py::none();
+    }
+    std::vector<std::pair<std::string, std::string>> args;
+    quick_shape_args(shape, args);
+    py::dict d;
+    for (const auto &[key, value] : args) {
+      d[py::str(key)] = value;
+    }
     return d;
   });
   /* A WinTab packet as the app reads it: (screen x, screen y, pressure, tilt_x, tilt_y). */

@@ -55,6 +55,7 @@
 #include "data/document.hh"
 #include "data/media_layer.hh"
 #include "editors/brush_editor.hh"
+#include "data/quick_shape.hh"
 #include "media/media.hh"
 #include "editors/editors.hh"
 #include "editors/select_box.hh"
@@ -358,6 +359,14 @@ struct ToolDrag {
   int pen_point = -1;
   /* Shape tool: where the drag started, in layer space (snapped). */
   float2 shape_start;
+  /* Draw tool, Hold to Shape: where and since when (seconds) the pen has been still; once it snapped, the shape it
+   * snapped to, where the pen was then, the shape as the pen holds it now, and the line's width there. */
+  ImVec2 still_at;
+  double still_since = 0.0;
+  bool quick = false;
+  QuickShape quick_snapped, quick_now;
+  float2 quick_from;
+  float quick_radius = 1.0f;
 };
 
 
@@ -5840,32 +5849,131 @@ static void pressure_curve_edit(InkSettings &ink)
   ImGui::EndGroup();
 }
 
-/* The Stroke dropdown: how the hand becomes a line. */
-static void draw_stroke_dropdown(WindowManager &wm)
+/* A gear (settings), centred on `c`, `r` its outer radius. */
+static void gear_icon(ImDrawList *dl, ImVec2 c, float r, ImU32 col)
+{
+  const int teeth = 8;
+  for (int i = 0; i < teeth; i++) {
+    const float a = 2.0f * PI * float(i) / float(teeth);
+    const ImVec2 way(std::cos(a), std::sin(a));
+    dl->AddLine(c + way * (r * 0.55f), c + way * r, col, r * 0.42f);
+  }
+  dl->AddCircle(c, r * 0.62f, col, 16, r * 0.3f);
+}
+
+/* The Draw tool's Size: the line's width in pixels of the document's height (as the Shape tool's Width), or with Size
+ * Unit View its width on screen. `pressure`: with the pressure toggle joined to it. */
+static void draw_size_field(const Document &doc, ToolSettings &ts, DrawMode mode, bool pressure)
+{
+  const bool view = ts.ink.size_view;
+  const float units_to_pixels = float(doc.height) * 0.5f;
+  float pixels = view ? ts.ink.view_size : draw_width(ts, mode) * units_to_pixels;
+  ImGui::SetNextItemWidth(ImGui::GetFrameHeight() * (pressure ? 6.0f : 5.0f));
+  const char *format = view ? "Size %.1f px on screen" : "Size %.1f px";
+  if (pressure ? pressure_field("##draw_size", &pixels, 0.1f, 0.0f, 500.0f, format, &ts.ink.use_pressure,
+                                "Pen pressure sets the size")
+               : ui_drag_float("##draw_size", &pixels, 0.1f, 0.0f, 500.0f, format))
+  {
+    if (view) {
+      ts.ink.view_size = pixels;
+    }
+    else {
+      draw_width(ts, mode) = pixels / units_to_pixels;
+    }
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip(view ? "How wide the line is on screen, whatever the zoom (F). Size Unit is in Advanced"
+                      : draw_mode_paints(mode) ? "How wide the brush is, in pixels of the document's height (F)"
+                                               : "How wide the line is, in pixels of the document's height (F)");
+  }
+}
+
+/* The stabilizer's amount on the bar (Smart's smoothing, or the string's length; greyed while Off), its mode and
+ * Catch Up in the gear joined to it. */
+static void stabilizer_field(ToolSettings &ts)
+{
+  InkSettings &ink = ts.ink;
+  const float h = ImGui::GetFrameHeight();
+  const bool off = ink.stabilizer == InkStabilizer::Off;
+  ImGui::SetNextItemWidth(h * 5.2f);
+  ImGui::BeginDisabled(off);
+  if (ink.stabilizer == InkStabilizer::PulledString) {
+    ui_slider_float("##stabilize", &ink.string_length, 1.0f, 100.0f, "String %.0f px");
+  }
+  else {
+    float none = 0.0f;
+    ui_slider_float("##stabilize", off ? &none : &ink.smoothing, 0.0f, 1.0f, off ? "Stabilize Off" : "Stabilize %.2f");
+  }
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip(off ? "The stabilizer is off: the gear turns it on"
+                      : ink.stabilizer == InkStabilizer::Smart
+                          ? "How much of a slow hand's wobble the line leaves out (a fast hand it follows as it is)"
+                          : "How long the string the line is pulled on is, in screen pixels");
+  }
+  ImGui::SameLine(0.0f, 1.0f);
+  const ImVec2 at = ImGui::GetCursorScreenPos();
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+  if (ImGui::Button("##stabilizer_settings", ImVec2(h, h))) {
+    ImGui::OpenPopup("##stabilizer_popover");
+  }
+  ImGui::PopStyleVar();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("Stabilizer settings");
+  }
+  gear_icon(ImGui::GetWindowDrawList(), at + ImVec2(h, h) * 0.5f, h * 0.3f, ImGui::GetColorU32(ImGuiCol_Text));
+  ImGui::SetNextWindowPos(ImVec2(at.x, at.y + h + 2.0f), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopup("##stabilizer_popover")) {
+    return;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted("Stabilizer");
+  ImGui::SameLine();
+  static const char *const names[] = {"Off", "Smart", "String"};
+  static const char *const tips[] = {
+      "The line follows the pen exactly",
+      "Leaves out a slow hand's wobble and follows a fast one as it is",
+      "Pulled String: the line is pulled behind the pen on a string, for exact corners and a learned feel"};
+  for (int i = 0; i < 3; i++) {
+    if (i > 0) {
+      ImGui::SameLine(0.0f, 1.0f);
+    }
+    if (header_toggle((std::string(names[i]) + "##stabilizer_mode").c_str(), int(ink.stabilizer) == i, tips[i])) {
+      ink.stabilizer = InkStabilizer(i);
+    }
+  }
+  ImGui::BeginDisabled(ink.stabilizer != InkStabilizer::PulledString);
+  ImGui::Checkbox("Catch Up", &ink.catch_up);
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("With String: end the line at the pen, rather than a string's length short of it");
+  }
+  ImGui::EndPopup();
+}
+
+/* The Advanced dropdown: the pen's finer settings, the rarely changed in folded panels. */
+static void draw_advanced_dropdown(WindowManager &wm)
 {
   ToolSettings &ts = wm.tool_settings;
   InkSettings &ink = ts.ink;
-  ImGui::TextUnformatted("Stabilizer");
-  static const char *const names[] = {"Off", "Smart", "Pulled String"};
-  int stabilizer = int(ink.stabilizer);
-  ImGui::SetNextItemWidth(ImGui::GetFrameHeight() * 11.0f);
-  if (ImGui::Combo("##stabilizer", &stabilizer, names, 3)) {
-    ink.stabilizer = InkStabilizer(stabilizer);
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted("Size Unit");
+  ImGui::SameLine();
+  if (header_toggle("View##size_unit", ink.size_view, "Size is on screen: the line looks as wide at any zoom")) {
+    ink.size_view = true;
   }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip("Smart leaves out a slow hand's wobble and follows a fast one. Pulled String draws a line pulled "
-                      "behind the pen on a string: exact corners, a learned feel");
+  ImGui::SameLine(0.0f, 1.0f);
+  if (header_toggle("Scene##size_unit", !ink.size_view,
+                    "Size is in the drawing: zoomed in, the line is as wide on the character as zoomed out")) {
+    ink.size_view = false;
   }
-  if (ink.stabilizer == InkStabilizer::Smart) {
-    dropdown_bar("##smoothing", &ink.smoothing, 0.0f, 1.0f, "Smoothing %.2f", "How much wobble a slow line loses");
-  }
-  else if (ink.stabilizer == InkStabilizer::PulledString) {
-    dropdown_bar("##string", &ink.string_length, 1.0f, 100.0f, "String %.0f px", "How long the string is, in screen pixels");
-    ImGui::Checkbox("Catch Up", &ink.catch_up);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("End the line at the pen, rather than a string's length short of it");
-    }
-  }
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Taper");
+  dropdown_bar("##taper_start", &ink.taper_start, 0.0f, 300.0f, "Start %.0f px", "How long the line takes to widen from a point");
+  dropdown_bar("##taper_end", &ink.taper_end, 0.0f, 300.0f, "End %.0f px", "How long the line takes to narrow to a point");
   ImGui::Spacing();
   dropdown_bar("##fidelity", &ink.fidelity, 0.0f, 1.0f, "Fidelity %.2f",
                "How closely the line's points follow the hand: higher is closer and makes more of them");
@@ -5874,59 +5982,136 @@ static void draw_stroke_dropdown(WindowManager &wm)
   static size_t shown_samples = 0;
   static int shown_points = 0;
   const std::vector<InkPoint> &last = wm.draw_last.points();
-  if (!last.empty()) {
+  if (!last.empty() && !draw_mode_paints(ts.draw_mode)) {
     if (shown_fidelity != ink.fidelity || shown_samples != last.size()) {
       InkSettings settings = wm.draw_last.settings();
       settings.fidelity = ink.fidelity;
       shown_points = int(ink_fit(last, settings, wm.draw_last.view(), wm.draw_last_closed).size());
-      /* A painted area's own points depend on what it merged with: nothing to say for those. */
       shown_fidelity = ink.fidelity;
       shown_samples = last.size();
     }
-    if (!draw_mode_paints(ts.draw_mode)) {
-      ImGui::TextDisabled("Last line makes %d points", shown_points);
-    }
-  }
-  if (draw_mode_paints(ts.draw_mode)) {
-    return;
+    ImGui::TextDisabled("Last line makes %d points", shown_points);
   }
   ImGui::Spacing();
-  ImGui::Checkbox("Close and Fill", &ts.draw_fill);
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip("A stroke ending where it started closes, and fills");
+  if (ImGui::TreeNodeEx("Pressure##draw_pressure", ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    pressure_curve_edit(ink);
+    dropdown_bar("##min_size", &ink.min_size, 0.0f, 1.0f, "Min Size %.2f",
+                 "The thinnest the line gets from pressure, speed, tilt and the nib, as a part of its width");
+    dropdown_bar("##pressure_smoothing", &ink.pressure_smoothing, 0.0f, 1.0f, "Smoothing %.2f",
+                 "Evens out pressure's jitter, which is what makes a slow line's width wobble");
+    ImGui::TreePop();
   }
-  ImGui::Checkbox("Weld Ends", &ts.draw_weld);
+  if (ImGui::TreeNodeEx("Dynamics##draw_dynamics", ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    dropdown_bar("##speed_width", &ink.speed_width, 0.0f, 1.0f, "Width / Speed %.2f",
+                 "A fast pen draws thinner: width without a tablet");
+    dropdown_bar("##tilt_width", &ink.tilt_width, 0.0f, 1.0f, "Width / Tilt %.2f",
+                 "A leaning pen draws wider, as the side of a pencil");
+    ImGui::TreePop();
+  }
+  if (ImGui::TreeNodeEx("Nib##draw_nib", ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    dropdown_bar("##nib_angle", &ink.nib_angle, 0.0f, 180.0f, "Angle %.0f\xc2\xb0",
+                 "The way the flat nib is held, from across, anticlockwise");
+    dropdown_bar("##nib_direction", &ink.nib_direction, 0.0f, 1.0f, "Width / Direction %.2f",
+                 "How much thinner the line is drawn along the nib's edge than across it, as a calligraphy pen");
+    ImGui::TreePop();
+  }
+}
+
+/* The Options dropdown at the strip's right end: what every pen shares. */
+static void draw_options_dropdown(ToolSettings &ts)
+{
+  const DrawMode mode = ts.draw_mode;
+  const bool lines = mode == DrawMode::Freehand;
+  ImGui::SeparatorText("Line");
+  ImGui::Checkbox(mode == DrawMode::Pen ? "Close and Fill (Auto Fill)" : "Close and Fill", &ts.draw_fill);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("A stroke ending where it started closes, and fills; the fill colour shows beside the line's");
+  }
+  ImGui::BeginDisabled(!lines);
+  ImGui::Checkbox("Weld Ends", &ts.draw_weld);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
     ImGui::SetTooltip("A stroke's ends join a point they finish on, so the two move together");
   }
   ImGui::Checkbox("Trim Overshoots", &ts.draw_trim);
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
     ImGui::SetTooltip("A stroke's ends past the last line they crossed go, on lifting");
+  }
+  ImGui::Checkbox("Hold to Shape", &ts.draw_hold_shape);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Hold the pen still at a line's end and it snaps straight, or to an ellipse if it came round to "
+                      "its start.\nStill holding, move to set its end, or to scale and turn it (Shift: 15 degree steps, "
+                      "or a circle);\nlifted, drag its handles until the next stroke");
+  }
+  ImGui::EndDisabled();
+  ImGui::SeparatorText("Cursor");
+  ImGui::Checkbox("Width Circle", &ts.draw_cursor_circle);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("Show the size as a circle round the mouse");
   }
 }
 
-/* The Advanced dropdown: how the pen sets the line's width. */
-static void draw_advanced_dropdown(ToolSettings &ts)
+/* The strip at the header's right end, shared by every pen: Options, then the line's colour and, while Close and Fill
+ * is on or with the Fill Pen, the fill's. */
+static bool draw_fill_shown(const ToolSettings &ts)
 {
-  InkSettings &ink = ts.ink;
-  ImGui::TextUnformatted("Pressure");
-  pressure_curve_edit(ink);
-  dropdown_bar("##min_size", &ink.min_size, 0.0f, 1.0f, "Min Size %.2f", "The thinnest the line gets, as a part of its width");
-  dropdown_bar("##pressure_smoothing", &ink.pressure_smoothing, 0.0f, 1.0f, "Pressure Smoothing %.2f",
-               "Evens out pressure's jitter, which is what makes a slow line's width wobble");
-  ImGui::Spacing();
-  ImGui::TextUnformatted("Taper");
-  dropdown_bar("##taper_start", &ink.taper_start, 0.0f, 300.0f, "Start %.0f px", "How long the line takes to widen from a point");
-  dropdown_bar("##taper_end", &ink.taper_end, 0.0f, 300.0f, "End %.0f px", "How long the line takes to narrow to a point");
-  ImGui::Spacing();
-  ImGui::TextUnformatted("Width From");
-  dropdown_bar("##speed_width", &ink.speed_width, 0.0f, 1.0f, "Speed %.2f", "A fast pen draws thinner: width without a tablet");
-  dropdown_bar("##tilt_width", &ink.tilt_width, 0.0f, 1.0f, "Tilt %.2f", "A leaning pen draws wider, as the side of a pencil");
-  ImGui::Spacing();
-  dropdown_bar("##prediction", &ts.draw_prediction, 0.0f, 30.0f, "Prediction %.0f ms",
-               "How far ahead of the pen the line is drawn, to keep up with the hand");
+  return ts.draw_fill || ts.draw_mode == DrawMode::FillPen;
 }
 
+static float draw_shared_width(const ToolSettings &ts, float h)
+{
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float options = ImGui::CalcTextSize("Options").x + style.FramePadding.x * 2.0f + h * 0.55f;
+  const float swatch = h * 1.6f;
+  return options + 6.0f + swatch + (draw_fill_shown(ts) ? 2.0f + swatch : 0.0f);
+}
+
+static void draw_shared_buttons(Context &C)
+{
+  ToolSettings &ts = C.wm->tool_settings;
+  if (header_dropdown("Options", "##draw_options", "Close and Fill, Weld Ends, Trim Overshoots, Hold to Shape, the cursor")) {
+    draw_options_dropdown(ts);
+    ImGui::EndPopup();
+  }
+  ImGui::SameLine(0.0f, 6.0f);
+  color_swatch("##line_color", ts.style.line, "Line colour, for every pen");
+  if (draw_fill_shown(ts)) {
+    ImGui::SameLine(0.0f, 2.0f);
+    color_swatch("##fill_color", ts.style.fill,
+                 ts.draw_mode == DrawMode::FillPen ? "The colour the Fill Pen paints" : "Fill colour, for strokes that close");
+  }
+}
+
+/* The brush button: a preview of the line brush new strokes get, and its popover. */
+static void draw_brush_button(Context &C)
+{
+  const Document &doc = *C.document;
+  const ToolSettings &ts = C.wm->tool_settings;
+  const float h = ImGui::GetFrameHeight();
+  const ImVec2 size(h * 2.6f, h);
+  const ImVec2 at = ImGui::GetCursorScreenPos();
+  if (ImGui::Button("##draw_brush", size)) {
+    ImGui::OpenPopup("##draw_brush_popover");
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("The line brush: %s", brush_shown_name(doc, ts.style.brush).c_str());
+  }
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  brush_button_preview(dl, doc, ts.style.brush, ts.style, at + ImVec2(3.0f, 2.0f), at + ImVec2(size.x - h * 0.55f, h - 2.0f));
+  const ImVec2 tip = at + ImVec2(size.x - h * 0.3f, h * 0.5f);
+  dl->AddTriangleFilled(tip + ImVec2(-3.0f, -1.5f), tip + ImVec2(3.0f, -1.5f), tip + ImVec2(0.0f, 2.0f),
+                        ImGui::GetColorU32(ImGuiCol_Text));
+  ImGui::SetNextWindowPos(ImVec2(at.x, at.y + h + 2.0f), ImGuiCond_Appearing);
+  if (ImGui::BeginPopup("##draw_brush_popover")) {
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+      ImGui::CloseCurrentPopup();
+    }
+    brush_tool_popover(C);
+    ImGui::EndPopup();
+  }
+}
+
+/* The Draw tool's own settings (the pens' shared ones are at the strip's right end, draw_shared_buttons): the brush,
+ * Size and Opacity, the stabilizer, and Advanced; the Bezier Pen's Auto Fill, the erasers' choices. */
 static void draw_header(Context &C)
 {
   const Document &doc = *C.document;
@@ -5935,25 +6120,11 @@ static void draw_header(Context &C)
   const float h = ImGui::GetFrameHeight();
   const DrawMode mode = ts.draw_mode;
   const bool bezier = mode == DrawMode::Pen, fill_pen = mode == DrawMode::FillPen, eraser = draw_mode_cuts(mode);
-  const DrawPreset *preset = draw_preset_find(ts.draw_preset);
-  const bool changed = preset && !bezier && (!(preset->ink == ts.ink) || preset->line_width != draw_width(ts, mode));
-  const std::string name = bezier ? "Bezier Pen" : ts.draw_preset + (changed ? " *" : "");
-  if (ImGui::Button((name + "##draw_preset").c_str())) {
-    wm.draw_popup_request = true;
-  }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip(changed ? "The pen, changed from its saved settings: click for the pens (Shift Space)"
-                              : "The pen: click for the pens (Shift Space)");
-  }
-  ImGui::SameLine();
   if (!fill_pen && !eraser) {
-    color_swatch("##line_color", ts.style.line, "Line colour for new strokes");
+    draw_brush_button(C);
     ImGui::SameLine();
   }
-  width_field(doc, ts, draw_width(ts, mode), !bezier);
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip(fill_pen || eraser ? "How wide the brush is (F)" : "How wide the line is (F)");
-  }
+  draw_size_field(doc, ts, mode, !bezier);
   ImGui::SameLine();
   if (!eraser) {
     ImGui::SetNextItemWidth(h * 4.6f);
@@ -5961,12 +6132,6 @@ static void draw_header(Context &C)
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip(fill_pen ? "How solid the fill is (Shift F)" : "How solid the line is (Shift F)");
     }
-    ImGui::SameLine();
-    color_swatch("##fill_color", ts.style.fill, fill_pen ? "The colour to paint with" : "Fill colour for new shapes");
-    ImGui::SameLine();
-  }
-  if (!fill_pen && !eraser) {
-    tool_brush_button(C);
     ImGui::SameLine();
   }
   if (bezier) {
@@ -5991,21 +6156,10 @@ static void draw_header(Context &C)
     }
     ImGui::SameLine();
   }
-  if (header_dropdown("Stroke", "##draw_stroke", "Stabilizer and fidelity")) {
-    draw_stroke_dropdown(wm);
-    ImGui::EndPopup();
-  }
-  ImGui::SameLine(0, 2.0f);
-  if (header_dropdown("Advanced", "##draw_advanced", "Pressure, tapers, width from speed and tilt, prediction")) {
-    draw_advanced_dropdown(ts);
-    ImGui::EndPopup();
-  }
-  ImGui::SameLine(0, 2.0f);
-  if (header_dropdown("Cursor", "##draw_cursor", "What the mouse shows while drawing")) {
-    ImGui::Checkbox("Width Circle", &ts.draw_cursor_circle);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Show the width as a circle round the mouse");
-    }
+  stabilizer_field(ts);
+  ImGui::SameLine();
+  if (header_dropdown("Advanced", "##draw_advanced", "Size Unit, tapers, fidelity, pressure, dynamics and the nib")) {
+    draw_advanced_dropdown(wm);
     ImGui::EndPopup();
   }
 }
@@ -6216,7 +6370,9 @@ static void tool_settings_draw(Area &area, Context &C, ImVec2 origin, float widt
    * header: the Sculpt tool's Dyntopo. The tool's own settings keep to the room left of it. */
   const float h = ImGui::GetFrameHeight();
   const float arrow_w = h * 0.75f;
-  const float shared_w = ts.tool == Tool::Sculpt ? dyntopo_width(h, arrow_w) + 16.0f : 0.0f;
+  const float shared_w = ts.tool == Tool::Sculpt ? dyntopo_width(h, arrow_w) + 16.0f
+                         : ts.tool == Tool::Draw ? draw_shared_width(ts, h) + 16.0f
+                                                 : 0.0f;
   const ImVec2 shared_at = origin + ImVec2(width - shared_w, 0.0f);
   if (shared_w > 0.0f) {
     width = std::max(width - shared_w - 6.0f, 0.0f);
@@ -6351,7 +6507,12 @@ static void tool_settings_draw(Area &area, Context &C, ImVec2 origin, float widt
                                          std::max(area.tool_settings_width - width, 0.0f));
   if (shared_w > 0.0f) {
     ImGui::SetCursorScreenPos(shared_at + ImVec2(8.0f, 4.0f));
-    dyntopo_buttons(C, h, arrow_w);
+    if (ts.tool == Tool::Sculpt) {
+      dyntopo_buttons(C, h, arrow_w);
+    }
+    else {
+      draw_shared_buttons(C);
+    }
   }
   dl->ChannelsSetCurrent(0);
   if (area.tool_settings_width > 0.0f) {
@@ -8244,6 +8405,192 @@ static void draw_tool_preview(ImDrawList *dl, const ViewMapping &view, const Tra
   }
 }
 
+/* --- Hold to Shape (data/quick_shape.hh): the line or ellipse a stroke snapped to, its handles up until the next
+ * stroke, each drag on one running draw.quick_shape again with it moved (as Adjust Last Operation does). --- */
+
+struct QuickEdit {
+  bool active = false;
+  int area = 0;
+  QuickShape shape;
+  /* What it was drawn with: its width (a fraction of the line's), the line's width, and a screen pixel then. */
+  float radius = 1.0f, line_width = 0.0f, pixel = 1.0f;
+  /* The handle being dragged (quick_shape_handles' order; -1: none), and the shape as it was pressed. */
+  int dragging = -1;
+  QuickShape pressed;
+};
+static QuickEdit g_quick_edit;
+/* Within this many pixels a press takes a handle. */
+static constexpr float QUICK_HANDLE_PICK = 10.0f;
+
+static OpArgs quick_shape_op_args(const QuickShape &shape, float radius, float line_width, float pixel)
+{
+  std::vector<std::pair<std::string, std::string>> list;
+  quick_shape_args(shape, list);
+  OpArgs args(list.begin(), list.end());
+  const auto number = [](float v) {
+    char text[32];
+    std::snprintf(text, sizeof(text), "%.9g", double(v));
+    return std::string(text);
+  };
+  args["radius"] = number(radius);
+  args["line_width"] = number(line_width);
+  args["pixel"] = number(pixel);
+  return args;
+}
+
+/* The shape as the pen holds it, `width` screen pixels wide. */
+static void quick_shape_preview(ImDrawList *dl, const ViewMapping &view, const Transform2D &to_document,
+                                const QuickShape &shape, Color color, float width)
+{
+  std::vector<ImVec2> points;
+  for (const float2 p : quick_shape_outline(shape)) {
+    points.push_back(view.to_screen(to_document.apply(p)));
+  }
+  const ImU32 col = ImGui::ColorConvertFloat4ToU32(ImVec4(color.r, color.g, color.b, std::max(color.a, 0.35f)));
+  dl->AddPolyline(points.data(), int(points.size()), col,
+                  shape.kind == QuickShape::Kind::Ellipse ? ImDrawFlags_Closed : ImDrawFlags_None, std::max(width, 1.0f));
+}
+
+/* The Ellipse | Circle switch over an ellipse's top: its two halves' boxes. */
+static void quick_switch_boxes(const ViewMapping &view, const Transform2D &to_document, const QuickShape &shape,
+                               ImVec2 *r_a0, ImVec2 *r_a1, ImVec2 *r_b0, ImVec2 *r_b1)
+{
+  float top = FLT_MAX, left = FLT_MAX, right = -FLT_MAX;
+  for (const float2 p : quick_shape_outline(shape, 36)) {
+    const ImVec2 s = view.to_screen(to_document.apply(p));
+    top = std::min(top, s.y);
+    left = std::min(left, s.x);
+    right = std::max(right, s.x);
+  }
+  const float h = ImGui::GetFrameHeight();
+  const float w = std::max(ImGui::CalcTextSize("Ellipse").x, ImGui::CalcTextSize("Circle").x) + 14.0f;
+  const ImVec2 at(0.5f * (left + right) - w, top - h - 14.0f);
+  *r_a0 = at;
+  *r_a1 = at + ImVec2(w, h);
+  *r_b0 = at + ImVec2(w + 1.0f, 0.0f);
+  *r_b1 = at + ImVec2(w * 2.0f + 1.0f, h);
+}
+
+static bool in_box(ImVec2 p, ImVec2 a, ImVec2 b)
+{
+  return p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y;
+}
+
+/* Runs the shape again as `shape`; true if it took. */
+static bool quick_edit_apply(Context &C, const QuickShape &shape)
+{
+  QuickEdit &q = g_quick_edit;
+  if (operator_redo_last(C, quick_shape_op_args(shape, q.radius, q.line_width, q.pixel)) != OpStatus::Finished) {
+    return false;
+  }
+  q.shape = shape;
+  return true;
+}
+
+/* A press on the shape's handles or its switch: true if it took the press (no stroke starts). */
+static bool quick_edit_press(Context &C, const Area &area, const ViewMapping &view, const Transform2D &to_document)
+{
+  QuickEdit &q = g_quick_edit;
+  if (!q.active || q.area != area.id) {
+    return false;
+  }
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  if (q.shape.kind == QuickShape::Kind::Ellipse) {
+    ImVec2 a0, a1, b0, b1;
+    quick_switch_boxes(view, to_document, q.shape, &a0, &a1, &b0, &b1);
+    if (in_box(mouse, a0, a1) || in_box(mouse, b0, b1)) {
+      QuickShape changed = q.shape;
+      changed.circle = in_box(mouse, b0, b1);
+      if (changed.circle != q.shape.circle) {
+        quick_edit_apply(C, changed);
+      }
+      return true;
+    }
+  }
+  int best = -1;
+  float best_d = QUICK_HANDLE_PICK;
+  const std::vector<float2> handles = quick_shape_handles(q.shape);
+  for (size_t i = 0; i < handles.size(); i++) {
+    const ImVec2 s = view.to_screen(to_document.apply(handles[i]));
+    const float d = std::hypot(s.x - mouse.x, s.y - mouse.y);
+    if (d <= best_d) {
+      best_d = d;
+      best = int(i);
+    }
+  }
+  if (best < 0) {
+    return false;
+  }
+  q.dragging = best;
+  q.pressed = q.shape;
+  return true;
+}
+
+/* Each frame with the Draw tool: lets the shape go once it can't be run again (undone, another edit, another frame
+ * or tool), follows a handle dragged, and draws the handles and the switch. */
+static void quick_edit_frame(Context &C, const Area &area, const ViewMapping &view, const Transform2D &to_document,
+                             float2 mouse_layer, ImDrawList *dl)
+{
+  QuickEdit &q = g_quick_edit;
+  if (!q.active || q.area != area.id) {
+    return;
+  }
+  const LastOperation *last = operator_last_redo(C);
+  if (!last || last->idname != "draw.quick_shape" || C.wm->tool_settings.tool != Tool::Draw ||
+      C.document->frame_current != 0)
+  {
+    q = {};
+    return;
+  }
+  /* Adjust Last Operation may have made it a circle, or an ellipse again. */
+  if (const auto it = last->args.find("circle"); it != last->args.end()) {
+    q.shape.circle = it->second == "1";
+  }
+  const ImGuiIO &io = ImGui::GetIO();
+  if (q.dragging >= 0) {
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      q.dragging = -1;
+    }
+    else {
+      const QuickShape moved = quick_shape_handle_moved(q.pressed, q.dragging, mouse_layer);
+      const std::vector<float2> was = quick_shape_handles(q.shape), now = quick_shape_handles(moved);
+      if (was != now) {
+        quick_edit_apply(C, moved);
+      }
+    }
+  }
+  const std::vector<float2> handles = quick_shape_handles(q.shape);
+  for (size_t i = 0; i < handles.size(); i++) {
+    const ImVec2 s = view.to_screen(to_document.apply(handles[i]));
+    const bool hot = int(i) == q.dragging ||
+                     (q.dragging < 0 && std::hypot(s.x - io.MousePos.x, s.y - io.MousePos.y) <= QUICK_HANDLE_PICK);
+    /* The middle or centre, which moves it all, is a ring; the others dots. */
+    const bool mover = i + 1 == handles.size();
+    dl->AddCircleFilled(s, 6.5f, IM_COL32(0x10, 0x10, 0x10, 200));
+    if (mover) {
+      dl->AddCircle(s, 4.5f, hot ? IM_COL32(0xff, 0xff, 0xff, 255) : IM_COL32(0x6f, 0xb8, 0xff, 255), 0, 2.0f);
+    }
+    else {
+      dl->AddCircleFilled(s, 4.5f, hot ? IM_COL32(0xff, 0xff, 0xff, 255) : IM_COL32(0x6f, 0xb8, 0xff, 255));
+    }
+  }
+  if (q.shape.kind == QuickShape::Kind::Ellipse) {
+    ImVec2 a0, a1, b0, b1;
+    quick_switch_boxes(view, to_document, q.shape, &a0, &a1, &b0, &b1);
+    const auto half = [&](ImVec2 p0, ImVec2 p1, const char *label, bool lit, ImDrawFlags corners) {
+      const bool over = in_box(io.MousePos, p0, p1);
+      dl->AddRectFilled(p0, p1, lit ? IM_COL32(0x47, 0x72, 0xb3, 255) : over ? IM_COL32(0x50, 0x50, 0x50, 245)
+                                                                          : IM_COL32(0x2b, 0x2b, 0x2b, 235),
+                        4.0f, corners);
+      const ImVec2 size = ImGui::CalcTextSize(label);
+      dl->AddText(ImVec2(0.5f * (p0.x + p1.x) - size.x * 0.5f, 0.5f * (p0.y + p1.y) - size.y * 0.5f),
+                  IM_COL32(0xf0, 0xf0, 0xf0, 255), label);
+    };
+    half(a0, a1, "Ellipse", !q.shape.circle, ImDrawFlags_RoundCornersLeft);
+    half(b0, b1, "Circle", q.shape.circle, ImDrawFlags_RoundCornersRight);
+  }
+}
+
 static void pen_click(Context &C, Layer &layer, float2 mouse, float radius)
 {
   ToolSettings &ts = C.wm->tool_settings;
@@ -9204,16 +9551,21 @@ static bool draw_adjust_input(Context &C, Area &area, float pixel, bool hovered,
   ToolSettings &ts = wm.tool_settings;
   const ImGuiIO &io = ImGui::GetIO();
   DrawAdjust &adjust = g_draw_adjust;
-  float &value = wm.draw_adjust_request == 'R' || adjust.kind == 'R' ? draw_width(ts, ts.draw_mode)
-                 : ts.draw_mode == DrawMode::FillPen                  ? ts.style.fill.a
-                                                                      : ts.style.line.a;
+  const bool sizing = wm.draw_adjust_request == 'R' || adjust.kind == 'R';
+  /* With Size Unit View the size is screen pixels, a pixel being a pixel. */
+  const bool on_screen = sizing && ts.ink.size_view;
+  float &value = on_screen                         ? ts.ink.view_size
+                 : sizing                          ? draw_width(ts, ts.draw_mode)
+                 : ts.draw_mode == DrawMode::FillPen ? ts.style.fill.a
+                                                     : ts.style.line.a;
+  const float size_pixel = on_screen ? 1.0f : pixel;
   if (wm.draw_adjust_request && hovered && !g_drag.active) {
     adjust = {};
     adjust.kind = wm.draw_adjust_request;
     adjust.area = area.id;
     adjust.was = value;
     adjust.anchor = io.MousePos;
-    adjust.base_x = io.MousePos.x - (adjust.kind == 'R' ? value * 0.5f / pixel : value * DRAW_OPACITY_PX);
+    adjust.base_x = io.MousePos.x - (adjust.kind == 'R' ? value * 0.5f / size_pixel : value * DRAW_OPACITY_PX);
   }
   wm.draw_adjust_request = 0;
   if (!adjust.kind || adjust.area != area.id) {
@@ -9222,10 +9574,10 @@ static bool draw_adjust_input(Context &C, Area &area, float pixel, bool hovered,
   const float reach = adjust_reach(adjust.base_x, adjust.slow, adjust.slow_x, adjust.slow_reach);
   char text[64];
   if (adjust.kind == 'R') {
-    value = reach * 2.0f * pixel;
+    value = reach * 2.0f * size_pixel;
     dl->AddCircle(adjust.anchor, reach, IM_COL32(0xff, 0xff, 0xff, 230), 64, 1.5f);
     dl->AddCircle(adjust.anchor, reach + 1.5f, IM_COL32(0x00, 0x00, 0x00, 160), 64, 1.0f);
-    std::snprintf(text, sizeof(text), "Width %.1f px", double(value) * C.document->height * 0.5);
+    std::snprintf(text, sizeof(text), "Size %.1f px", on_screen ? double(value) : double(value) * C.document->height * 0.5);
   }
   else {
     value = std::clamp(reach / DRAW_OPACITY_PX, 0.0f, 1.0f);
@@ -17967,7 +18319,7 @@ static void viewport_draw_contents(Area &area, Context &C)
     }
     if (ts.tool == Tool::Draw && ts.draw_mode != DrawMode::Pen && ts.draw_cursor_circle && !g_drag.active) {
       /* The line's width round the mouse, in black and white to show on any drawing. */
-      const float half = draw_width(ts, ts.draw_mode) * 0.5f / pixel;
+      const float half = draw_half_width(ts, ts.draw_mode, pixel) / pixel;
       if (half >= 1.5f) {
         dl->AddCircle(io.MousePos, half, IM_COL32(0x00, 0x00, 0x00, 170), 0, 1.0f);
         dl->AddCircle(io.MousePos, half + 1.0f, IM_COL32(0xff, 0xff, 0xff, 170), 0, 1.0f);
@@ -17982,6 +18334,11 @@ static void viewport_draw_contents(Area &area, Context &C)
     else if (draws && doc.frame_current != 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       report_banner(ReportType::Warning, "Switch to Setup (frame 0) to draw");
     }
+    else if (ts.tool == Tool::Draw && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+             quick_edit_press(C, area, view, to_document))
+    {
+      /* A press on the last shape's handles or switch edits it. */
+    }
     else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       g_drag = {};
       g_drag.active = true;
@@ -17989,6 +18346,8 @@ static void viewport_draw_contents(Area &area, Context &C)
       g_drag.start = io.MousePos;
       switch (ts.tool) {
         case Tool::Draw:
+          /* The next stroke leaves the last shape as it is. */
+          g_quick_edit = {};
           if (ts.draw_mode == DrawMode::Pen) {
             pen_click(C, *layer, mouse_layer, radius);
           }
@@ -17998,7 +18357,7 @@ static void viewport_draw_contents(Area &area, Context &C)
             g_drag.ink_mode = erase && ts.draw_mode == DrawMode::FillPen    ? DrawMode::FillEraser
                               : erase && ts.draw_mode == DrawMode::Freehand ? DrawMode::StrokeEraser
                                                                             : ts.draw_mode;
-            g_drag.ink.begin(ts.ink, {pixel, draw_width(ts, g_drag.ink_mode) * 0.5f,
+            g_drag.ink.begin(ts.ink, {pixel, draw_half_width(ts, g_drag.ink_mode, pixel),
                                       2.0f / std::max(float(doc.height), 1.0f)});
             if ((g_drag.pen_stroke = pen_touch_pressed())) {
               draw_take_pen(view, to_layer);
@@ -18103,19 +18462,56 @@ static void viewport_draw_contents(Area &area, Context &C)
           }
           break;
         }
+        if (g_drag.quick) {
+          /* Snapped: the pen moves the line's end, or scales and turns the ellipse (Shift: steps, or a circle). */
+          g_drag.quick_now = quick_shape_held(g_drag.quick_snapped, g_drag.quick_from, mouse_layer, io.KeyShift);
+          quick_shape_preview(dl, view, to_document, g_drag.quick_now, ts.style.line,
+                              g_drag.ink.view().half_width * 2.0f * g_drag.quick_radius * view.zoom * to_document.scale());
+          break;
+        }
         if (g_drag.pen_stroke) {
           draw_take_pen(view, to_layer);
         }
         else if (distance(mouse_layer, g_drag.ink.last_sample()) > pixel * 0.25f) {
           g_drag.ink.add({mouse_layer, wm.pen_pressure, {}, ImGui::GetTime()});
         }
+        if (ts.draw_hold_shape && g_drag.ink_mode == DrawMode::Freehand) {
+          /* Hold to Shape: still long enough, the line snaps. */
+          const double now = ImGui::GetTime();
+          const ImVec2 moved = io.MousePos - g_drag.still_at;
+          if (g_drag.still_since <= 0.0 ||
+              moved.x * moved.x + moved.y * moved.y > QUICK_SHAPE_STILL_PIXELS * QUICK_SHAPE_STILL_PIXELS)
+          {
+            g_drag.still_at = io.MousePos;
+            g_drag.still_since = now;
+          }
+          else if (now - g_drag.still_since >= QUICK_SHAPE_HOLD_SECONDS) {
+            std::vector<float2> line;
+            std::vector<float> radii;
+            for (const InkPoint &p : g_drag.ink.points()) {
+              line.push_back(p.pos);
+              radii.push_back(p.radius);
+            }
+            QuickShape shape;
+            if (!radii.empty() && quick_shape_fit(line, mouse_layer, pixel, &shape)) {
+              std::nth_element(radii.begin(), radii.begin() + radii.size() / 2, radii.end());
+              g_drag.quick = true;
+              g_drag.quick_snapped = g_drag.quick_now = shape;
+              g_drag.quick_from = mouse_layer;
+              g_drag.quick_radius = radii[radii.size() / 2];
+            }
+            /* Too short to be one: held another moment, it tries again. */
+            g_drag.still_since = now;
+          }
+        }
         {
           /* With a pen, a moment more of the line, the way it is going: the frame shown is a little
            * behind the hand, and this keeps the line at the pen's tip. The next frame draws the real
            * samples in its place. */
           float2 tip = g_drag.ink.last_sample();
-          if (g_drag.pen_stroke && g_drag.pen_stroke == pen_stroke_id() && ts.draw_prediction > 0.0f) {
-            const PenSample ahead = pen_predict(pen_stroke(), ts.draw_prediction * 1e-3, 40.0f);
+          const float prediction = preferences().pen_prediction;
+          if (g_drag.pen_stroke && g_drag.pen_stroke == pen_stroke_id() && prediction > 0.0f) {
+            const PenSample ahead = pen_predict(pen_stroke(), prediction * 1e-3, 40.0f);
             if (!pen_stroke().empty()) {
               tip = to_layer.apply(view.to_document(ImVec2(ahead.x, ahead.y)));
             }
@@ -18159,6 +18555,21 @@ static void viewport_draw_contents(Area &area, Context &C)
           if (ts.draw_mode == DrawMode::Pen) {
             push_undo(C, "Add Point");
           }
+          else if (g_drag.quick) {
+            const InkView &ink_view = g_drag.ink.view();
+            if (operator_call(C, "draw.quick_shape",
+                              quick_shape_op_args(g_drag.quick_now, g_drag.quick_radius, ink_view.half_width * 2.0f,
+                                                  ink_view.pixel)) == OpStatus::Finished)
+            {
+              g_quick_edit = {};
+              g_quick_edit.active = true;
+              g_quick_edit.area = area.id;
+              g_quick_edit.shape = g_drag.quick_now;
+              g_quick_edit.radius = g_drag.quick_radius;
+              g_quick_edit.line_width = ink_view.half_width * 2.0f;
+              g_quick_edit.pixel = ink_view.pixel;
+            }
+          }
           else {
             draw_take_pen(view, to_layer);
             if (draw_stroke_commit(C, *layer, g_drag.ink, g_drag.ink_mode)) {
@@ -18192,6 +18603,9 @@ static void viewport_draw_contents(Area &area, Context &C)
   }
   else if (g_drag.active && g_drag.area == area.id && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
     g_drag = {};
+  }
+  if (ts.tool == Tool::Draw && points_editable) {
+    quick_edit_frame(C, area, view, to_document, mouse_layer, dl);
   }
   /* A gizmo may have put back an earlier document: look the layer up again. */
   drawing = editable_drawing(C, &layer);

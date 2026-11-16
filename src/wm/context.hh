@@ -122,9 +122,6 @@ struct ToolSettings {
    * corner on its own), 2 Warp (a grid of `warp_cells` each way bending what's inside). */
   int gizmo_mode = 0;
   int warp_cells = 3;
-  /* While drawing with a pen, the line runs this far (ms) ahead of the pen's last sample, the way it is
-   * going, so it keeps up with the hand (0: off). */
-  float draw_prediction = 8.0f;
   /* How freehand strokes are made, set by picking a pen on the shelf (assets/draw_presets.hh; `draw_preset` names
    * it), then changed in the header. */
   InkSettings ink;
@@ -149,6 +146,11 @@ struct ToolSettings {
   bool draw_trim = false;
   /* The line's width as a circle round the mouse. */
   bool draw_cursor_circle = true;
+  /* Hold to Shape: a freehand line held still at its end snaps to a straight line, or to an ellipse if it
+   * came round to its start (draw.quick_shape). */
+  bool draw_hold_shape = true;
+  /* The line brushes drawn with lately, the latest first (the brush button's Recently Used). */
+  std::vector<BrushSettings> brush_recent;
   /* The 2D cursor in document space. */
   float2 cursor;
   /* Weight Paint brush, as Blender's: radius in screen pixels, the weight it paints, how hard,
@@ -263,6 +265,12 @@ struct ModalKey {
 inline float &draw_width(ToolSettings &ts, DrawMode mode)
 {
   return draw_mode_paints(mode) ? ts.fill_size : ts.style.line_width;
+}
+/* Half what a kind of pen draws across, in layer units where a screen pixel is `pixel` of them: its width, or
+ * with Size Unit View its size on screen. */
+inline float draw_half_width(ToolSettings &ts, DrawMode mode, float pixel)
+{
+  return ts.ink.size_view ? ts.ink.view_size * 0.5f * pixel : draw_width(ts, mode) * 0.5f;
 }
 
 struct WindowManager {

@@ -44,6 +44,11 @@ void brush_editor_frame_end(Context &C);
 /* How the UI names a brush: the preset it matches ("Ink"), "Custom" when it matches none (edited
  * since it was loaded, or never one), or "Solid line". */
 std::string brush_shown_name(const Document &doc, const BrushSettings &brush);
+/* The Draw tool's brush button: a preview stroke of `brush` in a..b, and its popover's contents (the brush in use,
+ * the line brushes drawn with lately, More Brushes for the Brush Settings window). */
+void brush_button_preview(ImDrawList *dl, const Document &doc, const BrushSettings &brush, const Style &style, ImVec2 a,
+                          ImVec2 b);
+void brush_tool_popover(Context &C);
 /* Blender's preset icon: three sliders, centred in the box a..b. */
 void brush_preset_icon(ImDrawList *dl, ImVec2 a, ImVec2 b, unsigned int color);
 

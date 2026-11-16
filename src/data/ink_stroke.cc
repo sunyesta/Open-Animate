@@ -80,10 +80,10 @@ float2 InkStroke::last_sample() const
   return recent_.empty() ? float2() : recent_.back().pos * view_.pixel;
 }
 
-float InkStroke::radius(float pressure, float2 tilt, float speed) const
+float InkStroke::radius(float pressure, float2 tilt, float speed, float nib) const
 {
   const InkSettings &s = settings_;
-  float v = s.use_pressure ? pressure_curve(s, pressure) : 1.0f;
+  float v = (s.use_pressure ? pressure_curve(s, pressure) : 1.0f) * nib;
   v *= 1.0f - s.speed_width * smooth_range(150.0f, 2500.0f, speed);
   if (s.tilt_width > 0.0f) {
     /* A pen leaning 60 degrees draws its full width. */
@@ -93,13 +93,32 @@ float InkStroke::radius(float pressure, float2 tilt, float speed) const
   return s.min_size + (1.0f - s.min_size) * v;
 }
 
+float InkStroke::nib(float2 heading) const
+{
+  const InkSettings &s = settings_;
+  if (s.nib_direction <= 0.0f || length(heading) < 1e-6f) {
+    return 1.0f;
+  }
+  const float across = std::abs(std::sin(std::atan2(heading.y, heading.x) - s.nib_angle * PI / 180.0f));
+  return 1.0f - s.nib_direction * (1.0f - across);
+}
+
 void InkStroke::emit(float2 pos, float pressure, float2 tilt, float speed)
 {
-  const float r = radius(pressure, tilt, speed);
   if (!points_.empty() && distance(pos, emitted_) < MIN_SPACING) {
     /* A pen resting in place: pressing harder there still shows. */
-    points_.back().radius = std::max(points_.back().radius, r);
+    points_.back().radius = std::max(points_.back().radius, radius(pressure, tilt, speed, nib(heading_)));
     return;
+  }
+  if (!points_.empty()) {
+    /* Steps are a fraction of a pixel: the way over the last few, so the nib's width doesn't flicker. */
+    const float2 way = normalize(pos - emitted_);
+    heading_ = length(heading_) < 1e-6f ? way : normalize(heading_ * 0.75f + way * 0.25f);
+  }
+  const float r = radius(pressure, tilt, speed, nib(heading_));
+  if (points_.size() == 1 && settings_.nib_direction > 0.0f) {
+    /* The first point had no way to go yet: it takes the next one's. */
+    points_[0].radius = r;
   }
   points_.push_back({pos * view_.pixel, r, speed});
   emitted_ = pos;
@@ -211,7 +230,9 @@ std::vector<InkPoint> InkStroke::tail(float2 pen) const
   }
   const float2 end = pen / view_.pixel;
   const float speed = has_string ? 0.0f : length(spring_.vel);
-  const float r = radius(pressure_, recent_.back().tilt, speed);
+  const float2 to_end = end - emitted_;
+  const float r = radius(pressure_, recent_.back().tilt, speed,
+                         nib(length(to_end) > 1.0f ? normalize(heading_ * 0.75f + normalize(to_end) * 0.25f) : heading_));
   float2 last = emitted_;
   if (smart(settings_)) {
     Spring spring = spring_;

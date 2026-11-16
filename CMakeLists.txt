@@ -70,6 +70,7 @@ set(OANIM_SOURCES
   src/data/vector.cc
   src/data/grid.cc
   src/data/ink_stroke.cc
+  src/data/quick_shape.cc
   src/editors/brush_editor.cc
   src/editors/console.cc
   src/editors/driver_ui.cc
@@ -827,6 +828,10 @@ add_test(NAME ink_stroke
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_ink_stroke.py)
 add_test(NAME draw_presets
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_draw_presets.py)
+add_test(NAME hold_to_shape
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_hold_to_shape.py)
+add_test(NAME draw_size_nib
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_draw_size_nib.py)
 add_test(NAME fill_paint
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_fill_paint.py)
 add_test(NAME line_cut

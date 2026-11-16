@@ -314,15 +314,24 @@ static double snap_value(double v, double lo, double hi, bool is_int, bool small
 
 /* --- Drawing ----------------------------------------------------------------------------------------- */
 
-/* A stylus: a slanted pen, its nib down and to the left (Blender's pressure icon). */
-static void draw_pen(ImDrawList *dl, ImVec2 c, float s, ImU32 col)
+void ui_pressure_icon(ImDrawList *dl, ImVec2 c, float s, ImU32 col)
 {
-  const ImVec2 tip(c.x - s * 0.6f, c.y + s * 0.6f), top(c.x + s * 0.55f, c.y - s * 0.55f);
-  const ImVec2 nib(c.x - s * 0.25f, c.y + s * 0.25f);
-  dl->AddLine(nib, top, col, s * 0.42f);
-  dl->AddTriangleFilled(tip, ImVec2(nib.x - s * 0.15f, nib.y - s * 0.15f + s * -0.05f), ImVec2(nib.x + s * 0.2f, nib.y + s * 0.2f),
-                        col);
-  dl->AddTriangleFilled(tip, ImVec2(nib.x - s * 0.22f, nib.y - s * 0.02f), ImVec2(nib.x + s * 0.02f, nib.y + s * 0.22f), col);
+  /* Blender's stylus_pressure icon, on its 16 unit grid: a pen slanting up to the right and two rings opening
+   * toward it round its nib, the inner one stronger. */
+  const float u = s / 16.0f;
+  const ImVec2 o = c - ImVec2(8.0f, 8.0f) * u;
+  const auto at = [&](float x, float y) { return o + ImVec2(x, y) * u; };
+  const ImVec4 rgba = ImGui::ColorConvertU32ToFloat4(col);
+  const auto faded = [&](float a) { return ImGui::ColorConvertFloat4ToU32(ImVec4(rgba.x, rgba.y, rgba.z, rgba.w * a)); };
+  const float deg = 3.14159265f / 180.0f;
+  dl->PathArcTo(at(6.45f, 9.5f), 3.5f * u, 18.0f * deg, 252.0f * deg, 20);
+  dl->PathStroke(faded(0.85f), 0, std::max(u, 1.0f));
+  dl->PathArcTo(at(6.45f, 9.5f), 5.5f * u, 12.0f * deg, 259.0f * deg, 28);
+  dl->PathStroke(faded(0.6f), 0, std::max(u, 1.0f));
+  const ImVec2 body[] = {at(12.5f, 1.0f), at(13.0f, 1.0f), at(15.0f, 3.0f), at(15.0f, 3.5f),
+                         at(10.0f, 8.5f), at(8.2f, 8.5f),  at(7.5f, 7.8f),  at(7.5f, 6.0f)};
+  dl->AddConvexPolyFilled(body, 8, col);
+  dl->AddLine(at(7.85f, 8.15f), at(7.0f, 9.0f), col, std::max(u, 1.0f));
 }
 
 /* --- The field ------------------------------------------------------------------------------------------- */
@@ -369,7 +378,7 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
     dl->AddRectFilled(toggle_bb.Min, toggle_bb.Max, bg, style.FrameRounding, ImDrawFlags_RoundCornersRight);
     dl->AddLine(ImVec2(toggle_bb.Min.x, toggle_bb.Min.y + 2.0f), ImVec2(toggle_bb.Min.x, toggle_bb.Max.y - 2.0f),
                 IM_COL32(0x2a, 0x2a, 0x2a, 255));
-    draw_pen(dl, toggle_bb.GetCenter(), h * 0.38f, ImGui::GetColorU32(ImGuiCol_Text));
+    ui_pressure_icon(dl, toggle_bb.GetCenter(), h * 0.78f, ImGui::GetColorU32(ImGuiCol_Text));
     ImGui::SetCursorScreenPos(back);
   }
 

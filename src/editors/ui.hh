@@ -72,6 +72,8 @@ struct NumberField {
   double default_value = std::numeric_limits<double>::quiet_NaN();
 };
 bool ui_number(const char *id, double *value, const NumberField &field);
+/* Blender's pen pressure icon, `size` pixels square, centred on `center`. */
+void ui_pressure_icon(ImDrawList *dl, ImVec2 center, float size, ImU32 color);
 /* A typed sum ("2*3", "90/4", "1.5 px"): its value, false if it isn't one. */
 bool ui_number_evaluate(const char *text, double *r_value);
 /* Whether the mouse is over a number field (this frame or the last): its keys (Ctrl C, Ctrl V, minus, Backspace)

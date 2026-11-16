@@ -89,6 +89,9 @@ void preferences_load()
   if (auto it = j.find("tablet_api"); it != j.end() && it->is_number_integer()) {
     preferences().tablet_api = std::clamp(it->get<int>(), 0, 2);
   }
+  if (auto it = j.find("pen_prediction"); it != j.end() && it->is_number()) {
+    preferences().pen_prediction = std::clamp(it->get<float>(), 0.0f, 30.0f);
+  }
   for (const auto &[key, flag] : {std::pair{"status_statistics", &Preferences::status_statistics},
                                  std::pair{"status_frame", &Preferences::status_frame},
                                  std::pair{"status_version", &Preferences::status_version},
@@ -180,6 +183,7 @@ void preferences_save()
                   {"remote_control", preferences().remote_control},
                   {"remote_port", preferences().remote_port},
                   {"tablet_api", preferences().tablet_api},
+                  {"pen_prediction", preferences().pen_prediction},
                   {"status_statistics", preferences().status_statistics},
                   {"status_frame", preferences().status_frame},
                   {"status_version", preferences().status_version},
