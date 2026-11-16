@@ -216,7 +216,7 @@ function redraw() {
       const p = s.raw[i];
       tip.push(p[0], p[1], half * (usePressure ? Math.max(p[2], minSize) : 1), 1);
     }
-    const c = state ? (state.mode === 'FILL_PEN' ? state.settings.fill_color : s.erasing ? [0.9, 0.3, 0.3, 0.4] : state.settings.line_color) : [0, 0, 0, 1];
+    const c = state ? (s.erasing ? [0.9, 0.3, 0.3, 0.4] : state.mode === 'FILL_PEN' ? state.settings.fill_color : state.settings.line_color) : [0, 0, 0, 1];
     drawVarLine(ctx, tip, c, V);
   }
   /* The width circle round the hovering Pencil. */
@@ -403,7 +403,7 @@ function penStart(e) {
   penDown = true;
   penRefused = false;
   penId = e.pointerId;
-  penErasing = e.button === 5 || (e.buttons & 32) !== 0;
+  penErasing = e.button === 5 || (e.buttons & 32) !== 0 || erasing();
   live = newStroke(penErasing);
   strokes.push(live);
   const s = coalesced(e).map(sampleOf);
@@ -437,24 +437,102 @@ function penCancel(tell = true) {
 }
 
 /* ---------------------------------------------------------------------------------------------------------------
- * Fingers: one pans, two pan, zoom and turn; a quick tap of two undoes, of three redoes. */
+ * Erasing. The button at the right edge swaps the pen for its eraser (the Stroke Pen's and the Bezier Pen's Stroke
+ * Eraser, the Fill Pen's Fill Eraser) and, tapped again, back to the pen it was. A finger held still anywhere on the
+ * canvas erases while it stays, as Ctrl does on the PC: the strokes drawn meanwhile take the pen's matching eraser. */
+
+const ERASES = ['FREEHAND', 'FILL_PEN'];
+const HOLD_MS = 300, PALM_PX = 60;   // a touch wider than this is a hand resting, never a held finger
+const eraseHolds = new Set();        // the fingers resting on the canvas
+const eraseButton = $('erase-button');
+let eraseBack = null;                // the pen the button swapped from: {preset, mode}
+
+const erases = () => !!state && ERASES.includes(state.mode);
+const erasing = () => erases() && eraseHolds.size > 0;
+
+/* The shelf's first pen of a mode. */
+const presetOf = (mode) => state.presets.find((p) => p.mode === mode);
+
+function eraserFor(mode) {
+  return presetOf(mode === 'FILL_PEN' ? 'FILL_ERASER' : 'STROKE_ERASER');
+}
+
+function eraseShow() {
+  if (!state) return;
+  const cut = CUTS.includes(state.mode);
+  eraseButton.hidden = state.tool !== 'DRAW' || (!cut && !eraserFor(state.mode));
+  eraseButton.classList.toggle('on', cut || erasing());
+  eraseButton.title = cut ? 'Back to the pen' : state.mode === 'FILL_PEN' ? 'Swap to the Fill Eraser' : 'Swap to the Stroke Eraser';
+}
+
+function eraseHold(id, on) {
+  if (on) eraseHolds.add(id);
+  else eraseHolds.delete(id);
+  eraseShow();
+}
+
+function eraseSwap() {
+  if (!state) return;
+  if (CUTS.includes(state.mode)) {
+    /* Back to the pen swapped from, or (an eraser picked on the shelf) the shelf's pen of its kind. */
+    const back = eraseBack && (state.presets.find((p) => p.name === eraseBack.preset && p.mode === eraseBack.mode)
+                               || presetOf(eraseBack.mode));
+    const pen = back || presetOf(state.mode === 'FILL_ERASER' ? 'FILL_PEN' : 'FREEHAND');
+    eraseBack = null;
+    if (pen) send({ t: 'preset', name: pen.name });
+    return;
+  }
+  const eraser = eraserFor(state.mode);
+  if (!eraser) return;
+  eraseBack = { preset: state.preset, mode: state.mode };
+  send({ t: 'preset', name: eraser.name });
+}
+
+eraseButton.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  e.preventDefault();
+  closePopovers();
+  eraseSwap();
+});
+
+/* ---------------------------------------------------------------------------------------------------------------
+ * Fingers: one pans, two pan, zoom and turn; a quick tap of two undoes, of three redoes; one held still erases. */
 
 const touches = new Map();
 let anchor = null, tap = null;
 
 function reanchor() {
-  const pts = [...touches.values()];
+  const pts = [...touches.values()].filter((t) => !t.hold);
   anchor = { V: { ...V }, pts: pts.slice(0, 2).map((t) => [t.x, t.y]) };
 }
 
 function touchDown(e) {
-  if (penDown) return;
   closePopovers();
-  touches.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY });
+  /* A finger put down while the Pencil draws only ever holds the eraser on (for the next stroke). */
+  const t = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, hold: penDown, V: { ...V },
+              palm: Math.max(e.width || 0, e.height || 0) > PALM_PX };
+  touches.set(e.pointerId, t);
+  t.timer = setTimeout(() => touchRest(e.pointerId), HOLD_MS);
+  if (penDown) return;
   if (touches.size === 1) tap = { t0: performance.now(), most: 1, moved: false };
   else if (tap) tap.most = Math.max(tap.most, touches.size);
   art.classList.add('moving');
   reanchor();
+}
+
+/* A finger still where it went down, alone on the canvas (two resting are a pinch about to start): it stops panning,
+ * the view goes back to where it was when it went down, and it holds the eraser on until lifted. */
+function touchRest(id) {
+  const t = touches.get(id);
+  if (!t || t.moved || t.palm || (!t.hold && touches.size > 1) || !erases()) return;
+  if (!t.hold) {
+    t.hold = true;
+    V = t.V;
+    applyView();
+    tap = null;
+    reanchor();
+  }
+  eraseHold(id, true);
 }
 
 function touchMove(e) {
@@ -462,9 +540,13 @@ function touchMove(e) {
   if (!t) return;
   t.x = e.clientX;
   t.y = e.clientY;
-  if (Math.hypot(t.x - t.x0, t.y - t.y0) > 10 && tap) tap.moved = true;
-  if (!anchor || penDown) return;
-  const pts = [...touches.values()].slice(0, 2).map((p) => [p.x, p.y]);
+  if (Math.hypot(t.x - t.x0, t.y - t.y0) > 10) {
+    t.moved = true;
+    if (tap) tap.moved = true;
+  }
+  if (!anchor || penDown || t.hold) return;
+  const pts = [...touches.values()].filter((p) => !p.hold).slice(0, 2).map((p) => [p.x, p.y]);
+  if (!pts.length) return;
   if (pts.length === 1 || anchor.pts.length === 1) {
     const dx = pts[0][0] - anchor.pts[0][0], dy = pts[0][1] - anchor.pts[0][1];
     V = { ...anchor.V, e: anchor.V.e + dx, f: anchor.V.f + dy };
@@ -488,9 +570,12 @@ function touchMove(e) {
 }
 
 function touchUp(e) {
-  if (!touches.has(e.pointerId)) return;
+  const gone = touches.get(e.pointerId);
+  if (!gone) return;
+  clearTimeout(gone.timer);
   touches.delete(e.pointerId);
-  if (touches.size > 0) {
+  if (gone.hold) eraseHold(e.pointerId, false);
+  if ([...touches.values()].some((t) => !t.hold)) {
     reanchor();
     return;
   }
@@ -965,6 +1050,7 @@ function showState() {
   }
   else if (!bannerTimer || b.hidden) b.hidden = true;
   bannerTimer = 0;
+  eraseShow();
   if (interacting > 0) {
     stateWaiting = true;
     return;
