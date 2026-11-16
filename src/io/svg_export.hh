@@ -12,6 +12,7 @@
 namespace oanim {
 
 struct Document;
+class VectorSceneCache;
 
 struct SvgExport {
   /* The picture's size in pixels (0: the document's). */
@@ -20,6 +21,8 @@ struct SvgExport {
   bool transparent = false;
   /* Guides too, as the viewport shows them (VectorSceneOptions::guides). */
   bool guides = false;
+  /* Layers drawn as last time taken from it (VectorSceneOptions::cache). */
+  VectorSceneCache *cache = nullptr;
 };
 
 /* What a file holds, for the report. */

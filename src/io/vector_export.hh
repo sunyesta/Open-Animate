@@ -9,6 +9,7 @@
  * with an opacity; media pictures are pictures. */
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,21 @@ struct VectorScene {
   int fills = 0, lines = 0, brushed = 0;
 };
 
+/* What vector_scene keeps between calls (VectorSceneOptions::cache), so a layer drawn as last time (its drawing as
+ * evaluated, where it goes, what its shapes are drawn as) isn't worked out again: the iPad's canvas, made after every
+ * edit. Layers with brushed lines or lines cut by other layers are always worked out. One caller at a time. */
+class VectorSceneCache {
+ public:
+  VectorSceneCache();
+  ~VectorSceneCache();
+  VectorSceneCache(const VectorSceneCache &) = delete;
+  VectorSceneCache &operator=(const VectorSceneCache &) = delete;
+  struct Impl;
+  std::unique_ptr<Impl> impl;
+  /* In the last scene: layers' shapes taken from it, and worked out. */
+  int reused = 0, made = 0;
+};
+
 struct VectorSceneOptions {
   /* The picture's size in pixels (0: the document's). */
   int width = 0, height = 0;
@@ -78,6 +94,8 @@ struct VectorSceneOptions {
   bool guides = false;
   /* Brushed lines' pictures at this many pixels a pixel. */
   float picture_scale = 2.0f;
+  /* Layers drawn as in the last scene made with it taken from it (null: everything worked out). */
+  VectorSceneCache *cache = nullptr;
 };
 
 /* The document's current frame. */
@@ -85,5 +103,7 @@ VectorScene vector_scene(const Document &doc, const VectorSceneOptions &options)
 
 /* A number as the files write it: two decimals at most, no trailing zeros. */
 std::string vector_number(float v);
+/* The same, added to `out`. */
+void vector_number_append(std::string &out, float v);
 
 }  // namespace oanim

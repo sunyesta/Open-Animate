@@ -22,8 +22,11 @@ struct Document;
 Transform2D ipad_canvas_transform(const Document &doc, int width, int height);
 
 /* The canvas as a message: {"t":"canvas","w","h","svg","frame","onion":[{"c":[r,g,b,a],"lines":[[x,y,...],...]}]},
- * the onion skins being the viewport's (the drawings being edited, on the frames around). */
-std::string ipad_canvas_message(Context &C, int width, int height);
+ * the onion skins being the viewport's (the drawings being edited, on the frames around). Layers drawn as in the last
+ * canvas are taken from it (VectorSceneCache) unless `cached` is off. */
+std::string ipad_canvas_message(Context &C, int width, int height, bool cached = true);
+/* In the last canvas made with the cache: layers' shapes taken from it, and worked out. */
+void ipad_canvas_cache_counts(int *r_reused, int *r_made);
 
 /* One of the Pencil's samples: canvas pixels, pressure 0-1, tilt in degrees (across, up), seconds. */
 struct IpadSample {

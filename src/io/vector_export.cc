@@ -1,6 +1,7 @@
 #include "io/vector_export.hh"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <functional>
@@ -43,6 +44,7 @@ struct Pass {
   bool filled = false;
   bool inside_stroke = false;
   int extend = 0;
+  bool operator==(const Pass &) const = default;
 };
 
 /* A mask card as it applies in renders: its steps with only the layers still there. */
@@ -176,10 +178,34 @@ class DabCanvas {
   }
 };
 
+}  // namespace
+
+/* A layer's shapes as one call made them, and what it was made from (see cached). */
+struct VectorSceneCache::Impl {
+  struct Entry {
+    bool coverage = false;
+    float opacity = 1.0f;
+    int fill_mask = -1, line_mask = -1;
+    Pass pass;
+    Transform2D to_px;
+    int quality = 0;
+    VectorDrawing drawing;
+    std::vector<VectorNode> nodes;
+    int fills = 0, lines = 0;
+    bool used = false;
+  };
+  std::map<uint64_t, std::vector<Entry>> layers;
+};
+
+VectorSceneCache::VectorSceneCache() : impl(std::make_unique<Impl>()) {}
+VectorSceneCache::~VectorSceneCache() = default;
+
+namespace {
+
 class SceneWalker {
  public:
   SceneWalker(const Document &doc, const VectorSceneOptions &options, VectorScene &scene)
-      : doc_(doc), options_(options), scene_(scene)
+      : doc_(doc), options_(options), scene_(scene), cache_(options.cache ? options.cache->impl.get() : nullptr)
   {
     const int width = scene.width, height = scene.height;
     /* As Render Frame: the camera's frame, 2 units tall, fills the picture; y runs down. */
@@ -218,10 +244,96 @@ class SceneWalker {
   const Document &doc_;
   const VectorSceneOptions &options_;
   VectorScene &scene_;
+  VectorSceneCache::Impl *cache_ = nullptr;
   Transform2D to_px_;
   int quality_ = 32;
   std::map<std::pair<uint64_t, int>, int> card_ids_;
   std::map<std::vector<int>, int> combined_ids_;
+
+  /* --- Layers drawn as last time ------------------------------------------------------------------ */
+
+  using Entry = VectorSceneCache::Impl::Entry;
+
+  /* A drawing as it is drawn: without its keys (which change as timelines are swapped in, the shapes not) and what
+   * is picked; nor its point groups and grids. */
+  static VectorDrawing drawn_part(const VectorDrawing &drawing)
+  {
+    VectorDrawing d;
+    d.points = drawing.points;
+    d.curves = drawing.curves;
+    d.shapes = drawing.shapes;
+    for (MeshPoint &p : d.points) {
+      p.selected = false;
+      p.pos_keys = {};
+      p.radius_keys = {};
+    }
+    for (Curve &curve : d.curves) {
+      for (CurvePoint &cp : curve.points) {
+        cp.select_in = cp.select_out = false;
+        cp.curvature_keys = {};
+        cp.handle_in_keys = {};
+        cp.handle_out_keys = {};
+      }
+    }
+    return d;
+  }
+
+  /* The shapes a call with these made last time, if its drawing (drawn_part) and where it went are as now; else
+   * null. */
+  Entry *cached(const Layer &layer, bool coverage, float opacity, int fill_mask, int line_mask, const Pass &pass,
+                const Transform2D &to_px, const VectorDrawing &drawing) const
+  {
+    const auto it = cache_->layers.find(layer.id);
+    if (it == cache_->layers.end()) {
+      return nullptr;
+    }
+    for (Entry &e : it->second) {
+      if (e.coverage == coverage && e.opacity == opacity && e.fill_mask == fill_mask && e.line_mask == line_mask &&
+          e.pass == pass && e.to_px == to_px && e.quality == quality_ && e.drawing == drawing)
+      {
+        return &e;
+      }
+    }
+    return nullptr;
+  }
+
+  /* An entry's shapes put in again, as the call that made them did. */
+  void reuse(Entry &e, std::vector<VectorNode> &to)
+  {
+    e.used = true;
+    to.insert(to.end(), e.nodes.begin(), e.nodes.end());
+    scene_.fills += e.fills;
+    scene_.lines += e.lines;
+    options_.cache->reused++;
+  }
+
+  /* What a call made (to's nodes from `first`), kept for the next scene. */
+  void remember(const Layer &layer, bool coverage, float opacity, int fill_mask, int line_mask, const Pass &pass,
+                const Transform2D &to_px, const VectorDrawing &drawing, const std::vector<VectorNode> &to,
+                size_t first, int fills, int lines)
+  {
+    Entry e;
+    e.coverage = coverage;
+    e.opacity = opacity;
+    e.fill_mask = fill_mask;
+    e.line_mask = line_mask;
+    e.pass = pass;
+    e.to_px = to_px;
+    e.quality = quality_;
+    e.drawing = drawing;  // drawn_part's
+    e.nodes.assign(to.begin() + std::ptrdiff_t(first), to.end());
+    e.fills = fills;
+    e.lines = lines;
+    e.used = true;
+    cache_->layers[layer.id].push_back(std::move(e));
+    options_.cache->made++;
+  }
+
+  static bool brushed(const VectorDrawing &drawing)
+  {
+    return std::any_of(drawing.shapes.begin(), drawing.shapes.end(),
+                       [](const Shape &s) { return !s.style.brush.name.empty(); });
+  }
 
   /* --- What shows --------------------------------------------------------------------------- */
 
@@ -469,6 +581,17 @@ class SceneWalker {
     const Transform2D to_px = to_px_ * transform;
     const float pixel = 1.0f / std::max(to_px.scale(), 1e-6f);
     const LineCutter cutter = line_cutter(doc_, layer, true);
+    /* Brushed lines' stamps and lines cut by other layers depend on more than the drawing: always worked out. */
+    const bool keep = cache_ && cutter.empty() && !brushed(drawing);
+    const VectorDrawing drawn = keep ? drawn_part(drawing) : VectorDrawing();
+    if (keep) {
+      if (Entry *e = cached(layer, false, opacity, fill_mask, line_mask, Pass(), to_px, drawn)) {
+        reuse(*e, to);
+        return;
+      }
+    }
+    const size_t first = to.size();
+    const int fills_before = scene_.fills, lines_before = scene_.lines;
     /* The drawing as on the setup frame, which brushed lines lay their stamps out on (made when one needs it). */
     VectorDrawing setup;
     bool setup_made = false;
@@ -540,6 +663,10 @@ class SceneWalker {
                     scene_.lines++;
                   });
       }
+    }
+    if (keep) {
+      remember(layer, false, opacity, fill_mask, line_mask, Pass(), to_px, drawn, to, first,
+               scene_.fills - fills_before, scene_.lines - lines_before);
     }
   }
 
@@ -927,6 +1054,23 @@ class SceneWalker {
     const VectorDrawing &drawing = drawing_of(layer, evaluated, &transform);
     OANIM_PROFILE("vector_coverage");
     const Transform2D to_px = to_px_ * transform;
+    const VectorDrawing drawn = cache_ ? drawn_part(drawing) : VectorDrawing();
+    if (cache_) {
+      if (Entry *e = cached(layer, true, 1.0f, -1, -1, pass, to_px, drawn)) {
+        reuse(*e, to);
+        return;
+      }
+    }
+    const size_t first = to.size();
+    covered(drawing, pass, to_px, transform, to);
+    if (cache_) {
+      remember(layer, true, 1.0f, -1, -1, pass, to_px, drawn, to, first, 0, 0);
+    }
+  }
+
+  void covered(const VectorDrawing &drawing, const Pass &pass, const Transform2D &to_px, const Transform2D &transform,
+               std::vector<VectorNode> &to)
+  {
     const float pixel = 1.0f / std::max(to_px.scale(), 1e-6f);
     /* The bands that shrinking clears are painted black. */
     const Color paint = pass.stage == Pass::Bands ? BLACK : WHITE;
@@ -1035,20 +1179,36 @@ class SceneWalker {
 
 }  // namespace
 
-std::string vector_number(float v)
+void vector_number_append(std::string &out, float v)
 {
-  char text[32];
-  std::snprintf(text, sizeof(text), "%.2f", double(v));
-  std::string s = text;
-  if (s.find('.') != std::string::npos) {
-    while (s.back() == '0') {
-      s.pop_back();
+  /* As "%.2f" (to_chars rounds the same), without printf's cost: a canvas writes tens of thousands. */
+  char text[64];
+  const std::to_chars_result r = std::to_chars(text, text + sizeof(text), double(v), std::chars_format::fixed, 2);
+  if (r.ec != std::errc()) {
+    out += '0';
+    return;
+  }
+  char *end = r.ptr;
+  if (std::find(text, end, '.') != end) {
+    while (end[-1] == '0') {
+      end--;
     }
-    if (s.back() == '.') {
-      s.pop_back();
+    if (end[-1] == '.') {
+      end--;
     }
   }
-  return s == "-0" ? "0" : s;
+  if (end - text == 2 && text[0] == '-' && text[1] == '0') {
+    out += '0';
+    return;
+  }
+  out.append(text, end);
+}
+
+std::string vector_number(float v)
+{
+  std::string s;
+  vector_number_append(s, v);
+  return s;
 }
 
 VectorScene vector_scene(const Document &doc, const VectorSceneOptions &options)
@@ -1060,7 +1220,23 @@ VectorScene vector_scene(const Document &doc, const VectorSceneOptions &options)
   scene.width = options.width > 0 ? options.width : std::max(doc.width, 1);
   scene.height = options.height > 0 ? options.height : std::max(doc.height, 1);
   OANIM_PROFILE("vector_scene");
+  if (options.cache) {
+    options.cache->reused = options.cache->made = 0;
+    for (auto &[id, list] : options.cache->impl->layers) {
+      for (VectorSceneCache::Impl::Entry &e : list) {
+        e.used = false;
+      }
+    }
+  }
   SceneWalker(doc, options, scene).walk();
+  /* What this scene didn't use goes (a layer deleted, a drawing changed). */
+  if (options.cache) {
+    auto &layers = options.cache->impl->layers;
+    for (auto it = layers.begin(); it != layers.end();) {
+      std::erase_if(it->second, [](const VectorSceneCache::Impl::Entry &e) { return !e.used; });
+      it = it->second.empty() ? layers.erase(it) : std::next(it);
+    }
+  }
   return scene;
 }
 

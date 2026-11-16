@@ -21,6 +21,7 @@
 #include "editors/draw_tile.hh"
 #include "gpu/brush_stroke.hh"
 #include "io/svg_export.hh"
+#include "io/vector_export.hh"
 #include "ops/edit_ops.hh"
 #include "ops/operator.hh"
 #include "ops/undo.hh"
@@ -315,13 +316,27 @@ Transform2D ipad_canvas_transform(const Document &doc, int width, int height)
          Transform2D{scale, 0, 0, scale, float(width) * 0.5f, float(height) * 0.5f} * camera_to_frame(doc);
 }
 
-std::string ipad_canvas_message(Context &C, int width, int height)
+/* The canvas's layers as last made, kept for the next (only the layers an edit changed are worked out again). */
+static VectorSceneCache &canvas_cache()
+{
+  static VectorSceneCache cache;
+  return cache;
+}
+
+void ipad_canvas_cache_counts(int *r_reused, int *r_made)
+{
+  *r_reused = canvas_cache().reused;
+  *r_made = canvas_cache().made;
+}
+
+std::string ipad_canvas_message(Context &C, int width, int height, bool cached)
 {
   OANIM_PROFILE("ipad_canvas");
   const Document &doc = *C.document;
   SvgExport options;
   options.width = width;
   options.height = height;
+  options.cache = cached ? &canvas_cache() : nullptr;
   /* The canvas the iPad draws over is the viewport's: reference pictures on guide layers show. */
   options.guides = true;
   std::string out = "{\"t\":\"canvas\",\"w\":" + std::to_string(width) + ",\"h\":" + std::to_string(height) +

@@ -65,26 +65,32 @@ std::string png_base64(const VectorPicture &picture)
 
 std::string path_data(const VectorPath &path)
 {
-  const auto &num = vector_number;
   std::string d;
+  d.reserve(path.points.size() * 14);
+  const auto point = [&](size_t p) {
+    vector_number_append(d, path.points[p].x);
+    d += ' ';
+    vector_number_append(d, path.points[p].y);
+  };
   size_t p = 0;
   VectorPath::Op last = VectorPath::Close;
   for (const VectorPath::Op op : path.ops) {
     switch (op) {
       case VectorPath::Move:
-        d += "M" + num(path.points[p].x) + " " + num(path.points[p].y);
-        p++;
+        d += 'M';
+        point(p++);
         break;
       case VectorPath::Line:
-        d += (last == VectorPath::Line || last == VectorPath::Move ? (last == VectorPath::Move ? "L" : " ") : "L") +
-             num(path.points[p].x) + " " + num(path.points[p].y);
-        p++;
+        d += last == VectorPath::Line ? ' ' : 'L';
+        point(p++);
         break;
       case VectorPath::Cubic:
-        d += "C";
+        d += 'C';
         for (int k = 0; k < 3; k++) {
-          d += (k ? " " : "") + num(path.points[p].x) + " " + num(path.points[p].y);
-          p++;
+          if (k) {
+            d += ' ';
+          }
+          point(p++);
         }
         break;
       case VectorPath::Close:
@@ -173,6 +179,7 @@ std::string svg_frame(const Document &doc, const SvgExport &options, SvgExportRe
   scene_options.height = options.height;
   scene_options.transparent = options.transparent;
   scene_options.guides = options.guides;
+  scene_options.cache = options.cache;
   const VectorScene scene = vector_scene(doc, scene_options);
   OANIM_PROFILE("svg_write");
   const std::string w = std::to_string(scene.width), h = std::to_string(scene.height);

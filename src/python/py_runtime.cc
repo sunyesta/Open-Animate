@@ -496,8 +496,18 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return out;
   });
   m.def("ipad_send", [](int client, const std::string &text) { ipad_server_send(client, text); });
-  m.def("ipad_canvas", [](int width, int height) {
-    return py::bytes(ipad_canvas_message(current_context(), std::clamp(width, 1, 8192), std::clamp(height, 1, 8192)));
+  m.def(
+      "ipad_canvas",
+      [](int width, int height, bool cached) {
+        return py::bytes(
+            ipad_canvas_message(current_context(), std::clamp(width, 1, 8192), std::clamp(height, 1, 8192), cached));
+      },
+      py::arg("width"), py::arg("height"), py::arg("cached") = true);
+  /* In the last canvas: (layers' shapes taken from the last, worked out). */
+  m.def("ipad_canvas_cache", []() {
+    int reused = 0, made = 0;
+    ipad_canvas_cache_counts(&reused, &made);
+    return py::make_tuple(reused, made);
   });
   m.def("ipad_draw_refused", []() { return ipad_draw_refused(current_context()); });
   /* Changes whenever the canvas may have: an edit or selection (onion skins follow it), the frame, the active layer,

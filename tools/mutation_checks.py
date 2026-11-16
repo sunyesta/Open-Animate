@@ -74,6 +74,10 @@ PENDING = [
      "Each line drawn fast on the iPad is answered by its id", 'tests/test_ipad.py'),
     ('scripts/modules/oanim/ipad.py', '                before.setdefault(text, i)', '                pass',
      "An undo on the iPad sends only what it changed of the canvas", 'tests/test_ipad.py'),
+    ('src/io/vector_export.cc', 'e.quality == quality_ && e.drawing == drawing)', 'e.quality == quality_)',
+     "The iPad's canvas works out again a layer whose drawing changed", 'tests/test_ipad.py'),
+    ('src/io/vector_export.cc', 'e.pass == pass && e.to_px == to_px && e.quality', 'e.pass == pass && e.quality',
+     "The iPad's canvas works out again a layer moved or seen through another camera", 'tests/test_ipad.py'),
 ]
 
 def build(root):

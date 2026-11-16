@@ -414,4 +414,79 @@ head, defs, body = ipad.svg_pieces('<?xml version="1.0"?>\n<svg a="1"><defs><mas
 assert head.endswith('<svg a="1">') and defs == ['<mask id="m0"><path d="M0 0"/></mask>'], (head, defs)
 assert body == ['<path d="M1 1"/>', '<g mask="url(#m0)"><path d="M2 2"/></g>', '<path d="M1 1"/>'], body
 
+
+# --- The canvas keeps each layer's shapes for the next: what it takes from it is what working them out again gives ------
+doc, got = fresh()
+layers = oanim.data.layers
+art = layers.active
+art.add_curve([(0.1, 0.0), (0.3, 0.1), (0.7, 0.0), (0.9, 0.1)])
+art.add_curve([(0.2, -0.4), (0.8, -0.4), (0.8, -0.1), (0.2, -0.1)], closed=True, fill=True)
+ops.layer.new_bone()
+rig = layers.active
+layers.active = art
+ops.layer.move_to_group(group=str(rig.id))
+layers.active = rig
+ops.armature.bone_add(name="upper_L", head_x="0", head_y="0", tail_x="0.5", tail_y="0")
+ops.armature.bone_add(name="lower_L", head_x="0.5", head_y="0", tail_x="1", tail_y="0")
+layers.active = art
+assert ops.weight.automatic() == {'FINISHED'}
+ops.layer.new()
+other = layers.active
+other.add_curve([(-0.8, -0.5), (-0.2, -0.5), (-0.2, 0.1), (-0.8, 0.1)], closed=True, fill=True)
+ops.layer.new()
+cut = layers.active
+cut.name = "cut"
+cut.add_curve([(-0.5, -0.8), (0.0, -0.8), (0.0, 0.0), (-0.5, 0.0)], closed=True, fill=True)
+cut.visible = False
+layers.active = other
+assert ops.mask.add(sources="cut", mode="SUBTRACT") == {'FINISHED'}
+layers.active = art
+
+
+def canvas_same(what):
+    cached = json.loads(_oanim.ipad_canvas(W, H))["svg"]
+    counts = _oanim.ipad_canvas_cache()
+    fresh_svg = json.loads(_oanim.ipad_canvas(W, H, cached=False))["svg"]
+    assert cached == fresh_svg, ("the canvas as worked out afresh", what, counts)
+    return counts
+
+
+canvas_same("first")
+reused, made = canvas_same("nothing changed")
+assert reused >= 3 and made == 0, (reused, made)
+doc.frame_current = 5
+canvas_same("frame 5")
+rig.bone_set("lower_L", angle=0.8)
+assert canvas_same("a bone bends the drawing")[1] >= 1
+doc.frame_current = 0
+canvas_same("back to the setup frame")
+art.set_shape_style(1, fill=(0.2, 0.6, 0.9, 1.0))
+assert canvas_same("a shape's colour")[1] >= 1
+other.opacity = 0.5
+canvas_same("a layer's opacity")
+cut.add_curve([(0.3, 0.3), (0.5, 0.3), (0.5, 0.5)], closed=True, fill=True)
+canvas_same("the mask's shapes")
+doc.render_quality = 8
+canvas_same("the render quality")
+doc.render_quality = 32
+oanim.data.camera.zoom = 1.5
+canvas_same("the camera")
+oanim.data.camera.zoom = 1.0
+for frame, x in ((10, 0.3), (20, -0.2)):
+    doc.frame_current = frame
+    other.location_x = x
+canvas_same("keyed motion, frame 20")
+doc.frame_current = 10
+canvas_same("frame 10")
+doc.frame_current = 0
+canvas_same("the setup frame")
+stroke(wave())
+canvas_same("a line drawn on the iPad")
+messages({"t": "undo"})
+canvas_same("undone")
+messages({"t": "redo"})
+canvas_same("redone")
+ops.layer.delete()
+canvas_same("a layer deleted")
+
 print("ipad: ok")
