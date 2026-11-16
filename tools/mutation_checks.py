@@ -142,6 +142,18 @@ PENDING = [
      "Ctrl V pastes the shapes copied with a pose where its points aren't", 'tests/test_pose_clipboard.py'),
     ('src/ops/pose_clipboard.cc', '      if (shapes_copy_to_clipboard(C) > 0) {', '      if (false) {',
      'Copy Pose carries the shapes for Ctrl V elsewhere', 'tests/test_pose_clipboard.py'),
+    ('src/ops/pose_clipboard.cc', '      Bone *b = flipped ? bone_named(*rig, bone_mirror_name(name)) : nullptr;', '      Bone *b = nullptr;',
+     "Paste Pose Flipped puts an _L bone's pose on its _R partner", 'tests/test_pose_paste_flipped.py'),
+    ('src/ops/pose_clipboard.cc', '          copied_transform = (to->setup.inverted() * flip * from->setup).apply_vector(copied_transform);', '          (void)flip;',
+     "A flipped bone's Transform is reflected through both bones' setups", 'tests/test_pose_paste_flipped.py'),
+    ('src/ops/pose_clipboard.cc', '        copied_turn = -copied_turn;', '',
+     'A flipped bone turns the other way', 'tests/test_pose_paste_flipped.py'),
+    ('src/ops/pose_clipboard.cc', '      const float2 key = t.to.apply_vector(float2_of(pj["key"]));', '      const float2 key = float2_of(pj["key"]);',
+     "A flipped point's change is reflected", 'tests/test_pose_paste_flipped.py'),
+    ('src/ops/pose_clipboard.cc', '  if (const std::string other = bone_mirror_name(source->name); other != source->name) {', '  if (const std::string other = source->name; other != source->name) {',
+     "An _L drawing's pose flips onto its _R partner", 'tests/test_pose_paste_flipped.py'),
+    ('src/ops/pose_clipboard.cc', '          return neighbour == reach_in ? 1 : neighbour == reach_out ? 0 : -1;', '          return neighbour == reach_in ? 0 : neighbour == reach_out ? 1 : -1;',
+     "A flipped handle goes on the image's handle reaching for the image of what it reached for", 'tests/test_pose_paste_flipped.py'),
 ]
 
 def build(root):

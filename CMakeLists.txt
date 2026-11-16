@@ -695,6 +695,8 @@ add_test(NAME rest_keeps_animation
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_rest_keeps_animation.py)
 add_test(NAME pose_clipboard
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_clipboard.py)
+add_test(NAME pose_paste_flipped
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_paste_flipped.py)
 add_test(NAME key_whole_drawing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_whole_drawing.py)
 add_test(NAME key_whole_drawing_actions

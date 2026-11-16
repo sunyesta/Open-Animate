@@ -111,6 +111,7 @@ KEYMAP = (
     # Off the setup frame Ctrl C and Ctrl V copy and paste the selected bones' and points' pose, as Blender's pose mode.
     ("Viewport", "pose.copy", "C", {"ctrl": True}),
     ("Viewport", "pose.paste", "V", {"ctrl": True}),
+    ("Viewport", "pose.paste_flipped", "V", {"ctrl": True, "shift": True}),
     ("Viewport", "mesh.copy", "C", {"ctrl": True}),
     ("Viewport", "mesh.paste", "V", {"ctrl": True}),
     ("Viewport", "mesh.select_all", "A", {}),

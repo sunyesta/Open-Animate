@@ -150,7 +150,7 @@ The Actions panel in the Armature
 tab (`actions_panel` in `src/editors/properties.cc`; `ActionPlay` in `src/data/layer.hh`: each action's Frame, mute and loop,
 played by `action_own_frames` and set by `action_frame_set`). Copy Pose and Paste Pose (`src/ops/pose_clipboard.cc`: Ctrl C / Ctrl V over the viewport off frame 0, the selected
 bones and points, by name and id; frame 0 keeps Copy Shapes, and Ctrl V pastes the shapes copied with a pose where its
-points aren't). Not yet: local armature viewport, Paste Pose Flipped.
+points aren't). Ctrl Shift V is Paste Pose Flipped (_L / _R bones and drawings, points onto their mirror images). Not yet: local armature viewport.
 
 Preferences live in `%LOCALAPPDATA%\OpenAnimate\preferences.json`; background runs (tests) never read
 or write them.
