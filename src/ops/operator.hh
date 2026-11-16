@@ -47,6 +47,12 @@ struct OpProperty {
    * `disabled_why` added to its tooltip. */
   std::function<bool(Context &)> enabled;
   std::string disabled_why;
+  /* Greyed out unless this says so of the run's other choices (null: always on), as Blender's inactive settings. */
+  std::function<bool(const OpArgs &)> active;
+  /* Enum: a row of buttons side by side, one lit (Blender's expanded enum), instead of a dropdown; and each item's
+   * tooltip (by the items' order; none: `description`). */
+  bool expand = false;
+  std::vector<std::string> item_descriptions;
 };
 
 struct OperatorType {

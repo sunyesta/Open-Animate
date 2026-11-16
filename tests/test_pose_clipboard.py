@@ -112,7 +112,7 @@ assert not close(before[0], was_stored[0])
 assert wm.event_simulate("V", ctrl=True, area="Viewport")
 assert last_step() == "Paste Pose", last_step()
 op = wm.last_operation()
-assert op and op[0] == "pose.paste" and {"selected_mask", "factor", "ignore_bones", "keep_place"} <= set(op[1]), op
+assert op and op[0] == "pose.paste" and {"selected_mask", "factor", "paste_as", "keep_place"} <= set(op[1]), op
 now = stored()
 assert close(now[0], was_stored[0]) and close(now[1], was_stored[1]), (now, was_stored)
 assert close(now[2], before[2]), "a point not copied stays"

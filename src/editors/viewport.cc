@@ -5267,6 +5267,26 @@ static bool menu_operator(Context &C, const char *label, const char *idname, con
   return false;
 }
 
+/* Copy Pose and Paste Pose at the top of the bones' and points' right-click menus off the setup frame, as Blender's pose
+ * menu has them, with Paste Pose As's three choices one click each. */
+static void pose_menu_items(Context &C)
+{
+  if (C.document->frame_current == 0) {
+    return;
+  }
+  menu_operator(C, "Copy Pose", "pose.copy");
+  menu_operator(C, "Paste Pose", "pose.paste");
+  const OperatorType *paste = operators().find("pose.paste");
+  if (paste && ui_submenu_begin("Paste Pose As", operator_poll(C, *paste))) {
+    menu_operator(C, "Keys", "pose.paste", {{"paste_as", "KEYS"}});
+    menu_operator(C, "Same Look", "pose.paste", {{"paste_as", "LOOK"}});
+    menu_operator(C, "Same Place", "pose.paste", {{"paste_as", "PLACE"}});
+    ui_submenu_end();
+  }
+  menu_operator(C, "Paste Pose Flipped", "pose.paste_flipped");
+  ImGui::Separator();
+}
+
 /* Decimate Curve on the selected points (mesh.decimate), for the Select tool's menus: greyed out, saying why, where no
  * selected point is on a drawing it can change (one with animation keeps its points). */
 static void decimate_menu_item(Context &C)
@@ -15755,6 +15775,7 @@ static void bone_parent_menus(Context &C, bool hovered)
     ui_menu_end();
   }
   if (ui_menu_begin("##bone_menu")) {
+    pose_menu_items(C);
     menu_operator(C, "Subdivide", "armature.subdivide");
     ImGui::Separator();
     menu_operator(C, "Extrude", "armature.extrude");
@@ -18500,6 +18521,7 @@ static void viewport_draw_contents(Area &area, Context &C)
     ui_menu_end();
   }
   if (ui_menu_begin("##point_menu")) {
+    pose_menu_items(C);
     /* Editing them from another layer (a bone layer, or several layers at once): go to theirs. */
     bool elsewhere = false;
     for (const Layer *editing : editable_layers(C)) {

@@ -1246,7 +1246,20 @@ void ui_action_panel_draw(Context &C, const char *area, const char *fold_key, Im
   const float pad = 6.0f, gap = 3.0f;
   const float header_h = unit + 4.0f;
   const float folded_w = std::max(unit * 7.5f, ImGui::CalcTextSize(ot->name.c_str()).x + unit * 2.5f);
-  const float w = panel_open ? std::max(folded_w, unit * 14.0f) : folded_w;
+  /* Wide enough that an expanded choice's buttons each show their whole name (values take 60% less 6). */
+  float open_w = unit * 14.0f;
+  for (const OpProperty *prop : shown_props) {
+    if (prop->kind == OpProperty::Kind::Enum && prop->expand && !prop->items.empty()) {
+      float widest = 0.0f;
+      for (const auto &item : prop->items) {
+        widest = std::max(widest, ImGui::CalcTextSize(item.second.c_str()).x);
+      }
+      const float buttons = float(prop->items.size()) * (widest + ImGui::GetStyle().FramePadding.x * 2.0f + 4.0f) +
+                            float(prop->items.size() - 1);
+      open_w = std::max(open_w, (buttons + 6.0f) / 0.6f + pad * 2.0f);
+    }
+  }
+  const float w = panel_open ? std::max(folded_w, open_w) : folded_w;
   const size_t rows = shown_props.size() + (last->note.empty() ? 0 : 1);
   const float body_h = panel_open ? float(rows) * (unit + gap) - gap + pad * 2.0f : 0.0f;
   const ImVec2 min(origin.x + left, origin.y + size.y - header_h - body_h - 8.0f);
@@ -1308,7 +1321,7 @@ void ui_action_panel_draw(Context &C, const char *area, const char *fold_key, Im
   for (const OpProperty *shown_prop : shown_props) {
     const OpProperty &prop = *shown_prop;
     ImGui::PushID(prop.name.c_str());
-    const bool enabled = !prop.enabled || prop.enabled(C);
+    const bool enabled = (!prop.enabled || prop.enabled(C)) && (!prop.active || prop.active(args));
     ImGui::BeginDisabled(!enabled);
     const std::string value = args[prop.name];
     if (prop.kind != OpProperty::Kind::Bool) {
@@ -1316,7 +1329,36 @@ void ui_action_panel_draw(Context &C, const char *area, const char *fold_key, Im
       dl->AddText(ImVec2(value_x - 6.0f - tw, y + (unit - fs) * 0.5f), text, prop.label.c_str());
     }
     ImGui::SetCursorScreenPos(ImVec2(value_x, y));
-    if (prop.kind == OpProperty::Kind::Enum) {
+    if (prop.kind == OpProperty::Kind::Enum && prop.expand) {
+      /* Side by side, the one picked lit, as Blender's expanded enum. */
+      const float button_gap = 1.0f;
+      const float bw = (value_w - button_gap * float(prop.items.size() - 1)) / float(prop.items.size());
+      for (size_t k = 0; k < prop.items.size(); k++) {
+        const auto &[id, label] = prop.items[k];
+        if (k > 0) {
+          ImGui::SameLine(0.0f, button_gap);
+        }
+        const bool lit = id == value;
+        if (lit) {
+          ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0x47, 0x72, 0xb3, 255));
+          ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(0x54, 0x80, 0xc2, 255));
+        }
+        ImGui::PushID(int(k));
+        if (ImGui::Button(label.c_str(), ImVec2(bw, unit)) && !lit) {
+          args[prop.name] = id;
+          changed = true;
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+          ImGui::SetTooltip("%s", k < prop.item_descriptions.size() ? prop.item_descriptions[k].c_str()
+                                                                    : prop.description.c_str());
+        }
+        ImGui::PopID();
+        if (lit) {
+          ImGui::PopStyleColor(2);
+        }
+      }
+    }
+    else if (prop.kind == OpProperty::Kind::Enum) {
       std::string shown = value;
       for (const auto &[id, label] : prop.items) {
         if (id == value) {
