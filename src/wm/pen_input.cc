@@ -3,10 +3,12 @@
 #include <SDL3/SDL.h>
 
 #include <windows.h>
+#include <windowsx.h>
 
 #include <algorithm>
 #include <cmath>
 
+#include "wm/input_log.hh"
 #include "wm/pen_wintab.hh"
 
 namespace oanim {
@@ -164,11 +166,52 @@ void pen_input_wintab_left()
 
 /* Every message the window gets, before SDL handles it (which it then does as usual). A pen's pointer
  * message carries the samples coalesced into it as its history, newest first. */
+/* The mouse and pointer messages, for the input log (wm/input_log.hh). */
+static void log_message(const MSG &msg)
+{
+  const char *what = nullptr;
+  switch (msg.message) {
+    case WM_MOUSEMOVE: what = "WM_MOUSEMOVE"; break;
+    case WM_LBUTTONDOWN: what = "WM_LBUTTONDOWN"; break;
+    case WM_LBUTTONUP: what = "WM_LBUTTONUP"; break;
+    case WM_RBUTTONDOWN: what = "WM_RBUTTONDOWN"; break;
+    case WM_RBUTTONUP: what = "WM_RBUTTONUP"; break;
+    case WM_MOUSELEAVE: what = "WM_MOUSELEAVE"; break;
+    case WM_POINTERDOWN: what = "WM_POINTERDOWN"; break;
+    case WM_POINTERUP: what = "WM_POINTERUP"; break;
+    case WM_POINTERUPDATE: what = "WM_POINTERUPDATE"; break;
+    case WM_POINTERENTER: what = "WM_POINTERENTER"; break;
+    case WM_POINTERLEAVE: what = "WM_POINTERLEAVE"; break;
+    case WM_SETFOCUS: what = "WM_SETFOCUS"; break;
+    case WM_KILLFOCUS: what = "WM_KILLFOCUS"; break;
+    case WM_CAPTURECHANGED: what = "WM_CAPTURECHANGED"; break;
+    default: return;
+  }
+  const bool pointer = msg.message >= WM_POINTERUPDATE && msg.message <= WM_POINTERLEAVE;
+  float x = float(GET_X_LPARAM(msg.lParam)), y = float(GET_Y_LPARAM(msg.lParam));
+  uint64_t which = 0;
+  int type = 0;
+  if (pointer) {
+    /* A pointer message's place is the screen's. */
+    POINT at = {LONG(x), LONG(y)};
+    ScreenToClient(msg.hwnd, &at);
+    x = float(at.x);
+    y = float(at.y);
+    which = GET_POINTERID_WPARAM(msg.wParam);
+    POINTER_INPUT_TYPE t = PT_POINTER;
+    type = GetPointerType(UINT32(which), &t) ? int(t) : 0;
+  }
+  input_log_add(what, which, x, y, type, uint32_t(GetMessageExtraInfo()));
+}
+
 static bool SDLCALL pen_hook(void * /*userdata*/, MSG *msg)
 {
   const UINT m = msg->message;
   if (msg->hwnd == g_hwnd) {
     wintab_message(m, msg->wParam, msg->lParam);
+    if (input_log_on()) {
+      log_message(*msg);
+    }
   }
   if ((m != WM_POINTERDOWN && m != WM_POINTERUPDATE && m != WM_POINTERUP) || msg->hwnd != g_hwnd) {
     return true;

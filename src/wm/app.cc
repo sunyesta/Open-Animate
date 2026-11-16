@@ -28,6 +28,7 @@
 #include "core/log.hh"
 #include "data/layer_mirror.hh"
 #include "wm/clipboard_image.hh"
+#include "wm/input_log.hh"
 #include "wm/pen_input.hh"
 #include "wm/pen_wintab.hh"
 #include "data/camera.hh"
@@ -327,6 +328,47 @@ void App::update_number_grab()
   ui_number_grab_set_active(false);
 }
 
+/* SDL's mouse, pen and focus events, for the input log (wm/input_log.hh). */
+static void log_event(const SDL_Event &e)
+{
+  switch (e.type) {
+    case SDL_EVENT_MOUSE_MOTION:
+      input_log_add("SDL_MOUSE_MOTION", e.motion.which, e.motion.x, e.motion.y, 0, e.motion.state);
+      break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+      input_log_add(e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? "SDL_MOUSE_DOWN" : "SDL_MOUSE_UP", e.button.which,
+                    e.button.x, e.button.y, e.button.button, 0);
+      break;
+    case SDL_EVENT_PEN_MOTION:
+      input_log_add("SDL_PEN_MOTION", e.pmotion.which, e.pmotion.x, e.pmotion.y, 0, e.pmotion.pen_state);
+      break;
+    case SDL_EVENT_PEN_DOWN:
+    case SDL_EVENT_PEN_UP:
+      input_log_add(e.type == SDL_EVENT_PEN_DOWN ? "SDL_PEN_DOWN" : "SDL_PEN_UP", e.ptouch.which, e.ptouch.x,
+                    e.ptouch.y, e.ptouch.eraser ? 1 : 0, e.ptouch.pen_state);
+      break;
+    case SDL_EVENT_PEN_PROXIMITY_IN:
+    case SDL_EVENT_PEN_PROXIMITY_OUT:
+      input_log_add(e.type == SDL_EVENT_PEN_PROXIMITY_IN ? "SDL_PEN_NEAR" : "SDL_PEN_AWAY", e.pproximity.which, 0.0f,
+                    0.0f, 0, 0);
+      break;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+    case SDL_EVENT_WINDOW_MOUSE_ENTER:
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE: {
+      const char *what = e.type == SDL_EVENT_WINDOW_FOCUS_GAINED ? "SDL_FOCUS"
+                         : e.type == SDL_EVENT_WINDOW_FOCUS_LOST ? "SDL_UNFOCUS"
+                         : e.type == SDL_EVENT_WINDOW_MOUSE_ENTER ? "SDL_ENTER"
+                                                                  : "SDL_LEAVE";
+      input_log_add(what, 0, 0.0f, 0.0f, 0, 0);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 bool App::click_arriving() const
 {
   for (const ImGuiInputEvent &e : GImGui->InputEventsQueue) {
@@ -355,6 +397,9 @@ void App::main_loop()
       }
     }
     while (SDL_PollEvent(&event)) {
+      if (input_log_on()) {
+        log_event(event);
+      }
       if (number_grab_ && event.type == SDL_EVENT_MOUSE_MOTION) {
         /* A scrub reads how far the mouse goes; the hidden cursor stays where it was for ImGui. */
         ui_number_grab_motion(event.motion.xrel, event.motion.yrel);
@@ -379,11 +424,13 @@ void App::main_loop()
         pointer_pen_moved(pointer_, x, y, gx - float(wx), gy - float(wy));
       }
       else if (event.type == SDL_EVENT_MOUSE_MOTION && !pointer_mouse_moved(pointer_, event.motion.x, event.motion.y)) {
+        input_log_add("DROPPED_STRAY", event.motion.which, event.motion.x, event.motion.y, 0, 0, true);
         continue;
       }
       /* A release while the pen is down is SDL's check of the mouse's buttons letting go of the pen's: held back
        * until the pen lifts (wm/pointer_track.hh). */
       if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && !pointer_button_up(pointer_)) {
+        input_log_add("HELD_RELEASE", event.button.which, event.button.x, event.button.y, event.button.button, 0, true);
         release_held_ = event;
         continue;
       }

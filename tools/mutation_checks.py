@@ -51,6 +51,8 @@ PENDING = [
      'Only the same number field carries on a pen drag', 'tests/test_number_pen.py'),
     ('src/ops/undo.cc', '  if (join && active_ > 0', '  if (false && join && active_ > 0',
      'A pen drag carried on is one undo step', 'tests/test_number_pen.py'),
+    ('src/wm/input_log.cc', '  if (!g_on) {', '  if (false && !g_on) {',
+     'The input log logs nothing until asked', 'tests/test_input_log.py'),
 ]
 
 def build(root):

@@ -91,6 +91,23 @@ def mouse_simulate(x, y, button=None, down=True, ctrl=False, alt=False, shift=Fa
                           bool(eraser))
 
 
+def input_log(on=True):
+    """Log the window's mouse and pen input (on clears what was logged): Windows' own messages (WM_MOUSEMOVE,
+    WM_POINTERUPDATE, ...) with the mark Windows puts on mouse messages a pen or touch made, and the events SDL makes
+    of them (SDL_MOUSE_MOTION, SDL_PEN_MOTION, ...), with what was dropped before ImGui (DROPPED_STRAY, HELD_RELEASE).
+    For finding out what a tablet's driver sends. Read with input_log_take."""
+    _oanim.input_log(bool(on))
+
+
+def input_log_take():
+    """What input_log has logged since last taken, oldest first, and clears it: dicts with time (seconds, the pen's
+    clock), what, which (SDL's mouse or pen id; a pointer message's pointer id), x and y (window units for SDL's,
+    client pixels for Windows'), button (SDL: 1 left, 3 right; a pointer message's type: 2 touch, 3 pen, 4 mouse),
+    extra (a mouse message's GetMessageExtraInfo, 0xFF5157xx when a pen or touch made it; an SDL pen event's pen state;
+    a mouse motion's buttons) and dropped."""
+    return list(_oanim.input_log_take())
+
+
 def pen(samples=False):
     """The pen tablet as last heard from: a dict with windows_ink (samples have come through Windows Ink),
     near, touching, eraser (its eraser end), pressure (0-1), tilt (degrees across and toward you), touch

@@ -62,6 +62,7 @@
 #include "wm/context.hh"
 #include "wm/pen_input.hh"
 #include "wm/pointer_track.hh"
+#include "wm/input_log.hh"
 #include "editors/number_pen.hh"
 #include "wm/event_system.hh"
 #include "wm/file_drop.hh"
@@ -1132,6 +1133,25 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         throw py::value_error("no draw setting '" + key + "' (see oanim.wm.draw_settings)");
       }
     }
+  });
+  /* The window's mouse and pen input as logged (wm/input_log.hh): turned on (cleared) or off, and taken. */
+  m.def("input_log", [](bool on) { input_log_set(on); });
+  m.def("input_log_add", [](const std::string &what, float x, float y) { input_log_add(what.c_str(), 0, x, y, 0, 0); });
+  m.def("input_log_take", []() {
+    py::list out;
+    for (const InputLogEntry &e : input_log_take()) {
+      py::dict d;
+      d["time"] = e.time;
+      d["what"] = e.what;
+      d["which"] = e.which;
+      d["x"] = e.x;
+      d["y"] = e.y;
+      d["button"] = e.button;
+      d["extra"] = e.extra;
+      d["dropped"] = e.dropped;
+      out.append(d);
+    }
+    return out;
   });
   /* A number field scrubbed with a pen (editors/number_pen.hh): how far it goes before a press is a drag, how much of
    * each pixel across counts at `dy` off the row, and whether a press `after` seconds from lifting off the same field

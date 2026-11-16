@@ -134,6 +134,7 @@ set(OANIM_SOURCES
   src/wm/event_system.cc
   src/wm/file_dialog.cc
   src/wm/file_drop.cc
+  src/wm/input_log.cc
   src/wm/pen_input.cc
   src/wm/pen_wintab.cc
   src/wm/keymap.cc
@@ -842,6 +843,8 @@ add_test(NAME pointer_track
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pointer_track.py)
 add_test(NAME number_pen
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_number_pen.py)
+add_test(NAME input_log
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_input_log.py)
 add_test(NAME timeline_sweep_fixes
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_timeline_sweep_fixes.py)
 add_test(NAME rig_sweep_fixes
