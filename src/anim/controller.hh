@@ -107,6 +107,10 @@ std::string controller_action_name_free(const Layer &owner, const std::string &b
  * the name and " 2"), which would become the bone's own, as a side never plays. `besides`' own sides aside (a controller
  * made Regular turns its own sides into its own actions). */
 std::string controller_side_named(const Layer &owner, const std::string &name, const Bone *besides = nullptr);
+/* Why `bone` of `owner` can't be renamed `to` ("" when it can): another bone's name (bones are found by name), or, for a
+ * bone that isn't a controller, an ordinary action's or a knob's side's (it would become this bone's own action, as
+ * Rename Action refuses the other way round). The Bone tab's Name and Python's bone_set(name=) both ask it. */
+std::string bone_rename_refusal(const Layer &owner, const Bone &bone, const std::string &to);
 
 /* A side's action's length in frames: 0 for a side with no action. */
 float controller_side_frames(const Bone &knob, int side);

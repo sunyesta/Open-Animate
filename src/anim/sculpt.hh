@@ -217,6 +217,8 @@ inline constexpr float SCULPT_RESOLUTION_MIN = 1.0f, SCULPT_RESOLUTION_MAX = 500
 inline constexpr float SCULPT_DYNTOPO_TOLERANCE = 0.1f;
 /* How far Collapse lets the line's width stray, as a share of the width there (its place strays a share of a step). */
 inline constexpr float SCULPT_DYNTOPO_WIDTH_TOLERANCE = 0.05f;
+/* And its opacity, by this much (the Stroke Pen's fit keeps it as close, ink_stroke.cc's OPACITY_TOLERANCE). */
+inline constexpr float SCULPT_DYNTOPO_OPACITY_TOLERANCE = 0.04f;
 /* One Resolution step on layer `id` as it shows (document space): the grid cell's two sides, along the layer's own x
  * and y, scaled, turned and stretched as the layer and its groups are. */
 void sculpt_dyntopo_cell(const Document &doc, uint64_t id, float resolution, float2 *r_x, float2 *r_y);

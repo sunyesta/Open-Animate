@@ -33,10 +33,11 @@ bool merge_takes_shape(const VectorDrawing &drawing, const Shape &shape, const s
 
 namespace {
 
-/* A shape's outline as a polygon, with the line's width at each corner (absolute, layer units). */
+/* A shape's outline as a polygon, with the line's width at each corner (absolute, layer units) and its opacity there
+ * (the points'). */
 struct Polygon {
   c2::PathD path;
-  std::vector<float> widths;
+  std::vector<float> widths, opacity;
   int owner = 0;
 };
 
@@ -45,7 +46,7 @@ void add_shape_polygons(const VectorDrawing &drawing, const Shape &shape, const 
 {
   const float scale = to_layer.scale();
   std::vector<float2> points;
-  std::vector<float> radii;
+  std::vector<float> radii, opacity;
   /* With a fill rule its loops fill together: their pieces go in as they fill, outer rings one way round
    * and holes the other, so the holes stay holes. */
   if (shape_fills_together(drawing, shape)) {
@@ -58,6 +59,7 @@ void add_shape_polygons(const VectorDrawing &drawing, const Shape &shape, const 
           const float2 p = to_layer.apply(q);
           poly.path.push_back({double(p.x), double(p.y)});
           poly.widths.push_back(width);
+          poly.opacity.push_back(1.0f);
         }
         /* A flip (a mirrored source) turns every ring: turn them back. */
         if ((c2::Area(poly.path) < 0.0) != (&ring != &piece.rings.front())) {
@@ -73,7 +75,7 @@ void add_shape_polygons(const VectorDrawing &drawing, const Shape &shape, const 
     points.clear();
     radii.clear();
     /* Fine enough that the curves stay smooth at any zoom a merge is looked at. */
-    shape_outline(drawing, run, 12, points, &radii, &closed, nullptr, nullptr, 0.0002f);
+    shape_outline(drawing, run, 12, points, &radii, &closed, nullptr, nullptr, 0.0002f, &opacity);
     if (!closed || points.size() < 3) {
       continue;
     }
@@ -83,12 +85,14 @@ void add_shape_polygons(const VectorDrawing &drawing, const Shape &shape, const 
       const float2 p = to_layer.apply(points[i]);
       poly.path.push_back({double(p.x), double(p.y)});
       poly.widths.push_back((i < radii.size() ? radii[i] : 1.0f) * shape.style.line_width * scale);
+      poly.opacity.push_back(i < opacity.size() ? opacity[i] : 1.0f);
     }
     /* All the same way round: a shape drawn (or flipped, or mirrored) the other way would count
      * against the others where they overlap, cutting it out instead of joining it. */
     if (c2::Area(poly.path) < 0.0) {
       std::reverse(poly.path.begin(), poly.path.end());
       std::reverse(poly.widths.begin(), poly.widths.end());
+      std::reverse(poly.opacity.begin(), poly.opacity.end());
     }
     r_polygons.push_back(std::move(poly));
   }
@@ -281,7 +285,7 @@ uint64_t drawing_merge_hash(const VectorDrawing &d)
 {
   uint64_t h = mix(d.points.size(), d.curves.size() * 31 + d.shapes.size());
   for (const MeshPoint &p : d.points) {
-    h = mix_double(mix_double(mix_double(h, p.pos.x), p.pos.y), p.radius);
+    h = mix_double(mix_double(mix_double(mix_double(h, p.pos.x), p.pos.y), p.radius), p.opacity);
     h = mix(h, p.id);
   }
   for (const Curve &c : d.curves) {
@@ -313,7 +317,7 @@ uint64_t drawing_merge_hash(const VectorDrawing &d)
 struct MergeOutline {
   struct Corner {
     float2 pos;
-    float radius = 1.0f;
+    float radius = 1.0f, opacity = 1.0f;
     float2 handle_in, handle_out;
   };
   std::vector<int> taken;
@@ -375,8 +379,8 @@ static MergeOutline merge_outline(const VectorDrawing &drawing, const std::vecto
       const float2 p(float(path[i].x), float(path[i].y));
       const float2 prev(float(path[(i + n - 1) % n].x), float(path[(i + n - 1) % n].y));
       const float2 next(float(path[(i + 1) % n].x), float(path[(i + 1) % n].y));
-      /* The line as wide as where it came from. */
-      float width = line_width, best = std::numeric_limits<float>::max();
+      /* The line as wide, and as solid, as where it came from. */
+      float width = line_width, solid = 1.0f, best = std::numeric_limits<float>::max();
       for (const Polygon &poly : polygons) {
         for (size_t k = 0; k < poly.path.size(); k++) {
           const float d = float((poly.path[k].x - p.x) * (poly.path[k].x - p.x) +
@@ -384,12 +388,14 @@ static MergeOutline merge_outline(const VectorDrawing &drawing, const std::vecto
           if (d < best) {
             best = d;
             width = poly.widths[k];
+            solid = k < poly.opacity.size() ? poly.opacity[k] : 1.0f;
           }
         }
       }
       MergeOutline::Corner corner;
       corner.pos = p;
       corner.radius = std::clamp(width / line_width, 0.0f, POINT_RADIUS_MAX);
+      corner.opacity = std::clamp(solid, 0.0f, 1.0f);
       const float2 in_dir = p - prev, out_dir = next - p;
       const float lin = length(in_dir), lout = length(out_dir);
       const float turn = (lin > 1e-9f && lout > 1e-9f) ? std::acos(std::clamp(dot(in_dir, out_dir) / (lin * lout), -1.0f, 1.0f))
@@ -453,6 +459,7 @@ bool drawing_merge(VectorDrawing &drawing, const std::vector<uint64_t> &own, con
       point.pos = corner.pos;
       point.setup_pos = corner.pos;
       point.radius = corner.radius;
+      point.opacity = corner.opacity;
       point.id = drawing.next_id++;
       drawing.points.push_back(point);
       CurvePoint cp;

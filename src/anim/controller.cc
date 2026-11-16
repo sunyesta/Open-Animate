@@ -128,6 +128,25 @@ std::string controller_side_named(const Layer &owner, const std::string &name, c
   return "";
 }
 
+std::string bone_rename_refusal(const Layer &owner, const Bone &bone, const std::string &to)
+{
+  if (to == bone.name) {
+    return "";
+  }
+  for (const Bone &other : owner.bones) {
+    if (&other != &bone && other.name == to) {
+      return "Another bone is named " + to;
+    }
+  }
+  if (bone_is_controller(bone)) {
+    return "";
+  }
+  if (std::find(owner.actions.begin(), owner.actions.end(), to) != owner.actions.end()) {
+    return to + " is an action: a bone named so would take it for its own action";
+  }
+  return controller_side_named(owner, to);
+}
+
 float controller_side_frames(const Bone &knob, int side)
 {
   if (knob.controller_actions[side].empty()) {

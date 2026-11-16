@@ -403,6 +403,14 @@ void mirror_drawing_keys(Link &link, const std::string &from, const std::string 
       mirror_keys(from_handle.curve_point->curvature_keys, mine[m].curve_point->curvature_keys, from, to,
                   [](float v) { return v; });
     }
+    /* An aligned point's handles stay in line: a free partner's turn them apart, each taken across on its own. */
+    for (Curve &curve : target.curves) {
+      for (CurvePoint &cp : curve.points) {
+        if (cp.point == t && cp.aligned) {
+          curve_point_align_action_keys(cp, to, AlignFollow::Both);
+        }
+      }
+    }
   }
   for (const LineSpot &spot : spots) {
     key_on_line(link, spot, from, to);

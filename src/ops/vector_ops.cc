@@ -1085,14 +1085,20 @@ void vector_operators_register()
   /* What the X menu offers, as Blender's Delete menu: each whatever the selection mode is. */
   vector_operator("mesh.delete_points", "Delete Points", "Delete the selected points and the curves left too short",
                   MIRRORED, editable_with_selection_poll, [](Context &C) {
+                    /* A reference keeps its original's points (deleted there, they came back): not its. */
+                    bool removed = false;
                     for (Layer *layer : editable_layers(C)) {
+                      if (layer->is_reference()) {
+                        continue;
+                      }
                       std::vector<bool> remove(layer->drawing.points.size());
                       for (size_t i = 0; i < layer->drawing.points.size(); i++) {
                         remove[i] = layer->drawing.points[i].selected;
+                        removed |= remove[i];
                       }
                       drawing_remove_points(layer->drawing, remove);
                     }
-                    return OpStatus::Finished;
+                    return removed ? OpStatus::Finished : OpStatus::Cancelled;
                   });
   vector_operator("mesh.make_segment", "Make Segment",
                   "Join the two selected points with a segment (F, as Blender's): two curve ends make one curve of "
@@ -1154,6 +1160,9 @@ void vector_operators_register()
                   MIRRORED, editable_with_selection_poll, [](Context &C) {
                     int deleted = 0;
                     for (Layer *layer : editable_layers(C)) {
+                      if (layer->is_reference()) {
+                        continue;
+                      }
                       deleted += drawing_delete_edges(layer->drawing, drawing_selected_edges(layer->drawing));
                     }
                     return deleted ? OpStatus::Finished : OpStatus::Cancelled;
@@ -1161,7 +1170,11 @@ void vector_operators_register()
   vector_operator("mesh.dissolve_points", "Dissolve Points",
                   "Remove the selected points, joining the curve across each gap so lines and shapes stay whole",
                   MIRRORED, editable_with_selection_poll, [](Context &C) {
+                    bool dissolved = false;
                     for (Layer *layer : editable_layers(C)) {
+                      if (layer->is_reference()) {
+                        continue;
+                      }
                       VectorDrawing &drawing = layer->drawing;
                       /* All at once, so a run of neighbouring points is fitted as one span. */
                       std::vector<int> selected;
@@ -1170,9 +1183,10 @@ void vector_operators_register()
                           selected.push_back(i);
                         }
                       }
+                      dissolved |= !selected.empty();
                       drawing_dissolve_points(drawing, selected);
                     }
-                    return OpStatus::Finished;
+                    return dissolved ? OpStatus::Finished : OpStatus::Cancelled;
                   });
   {
     /* Blender's Subdivide (right-click on points): each segment between two selected points cut into
@@ -1392,7 +1406,13 @@ void vector_operators_register()
     vector_operator(peak ? "mesh.peak" : "mesh.smooth", peak ? "Peak" : "Smooth",
                     peak ? "Make the selected points sharp corners" : "Make the selected points smooth curves", UNDO,
                     editable_with_selection_poll, [peak](Context &C) {
+                      /* A reference's handles are its original's unless its Edit Points is on. */
+                      bool shaped = false;
                       for (Layer *layer : editable_layers(C)) {
+                        if (layer->is_reference() && !layer->reference.edit_points) {
+                          continue;
+                        }
+                        shaped |= has_selection(layer->drawing);
                         VectorDrawing &drawing = layer->drawing;
                         /* Peak: handles straight toward the neighbours; Smooth: smooth, aligned handles. Once. */
                         drawing_set_selected_handles_shape(drawing, peak);
@@ -1401,7 +1421,7 @@ void vector_operators_register()
                                                                             C.wm->tool_settings.mirror_x),
                                                         C.wm->tool_settings.mirror_y);
                       }
-                      return OpStatus::Finished;
+                      return shaped ? OpStatus::Finished : OpStatus::Cancelled;
                     });
   }
 
@@ -2120,7 +2140,7 @@ void vector_operators_register()
                   MIRRORED, editable_with_selection_poll, [](Context &C) {
                     bool copied = false;
                     for (Layer *layer : editable_layers(C)) {
-                      if (has_selection(layer->drawing)) {
+                      if (has_selection(layer->drawing) && !layer->is_reference()) {
                         copied |= drawing_duplicate_selected(layer->drawing);
                       }
                     }

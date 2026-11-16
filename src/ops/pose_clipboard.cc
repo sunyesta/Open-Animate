@@ -206,12 +206,29 @@ static json pose_copy_json(Context &C, int *r_bones, int *r_points)
 /* Paste As (a pick-one) and Keep Place, kept from the last time they were set, as the timeline's Paste Keys keeps
  * them. */
 enum class PasteAs { Keys, Look, Place };
+/* Same Place: a point or handle showing this close to where it was copied is already there. */
+static constexpr float SAME_PLACE_HAIR = 1e-5f;
 static PasteAs g_paste_as = PasteAs::Keys;
 static bool g_pose_keep_place = false;
 
 static const char *paste_as_id(PasteAs as)
 {
   return as == PasteAs::Look ? "LOOK" : as == PasteAs::Place ? "PLACE" : "KEYS";
+}
+
+/* Paste As from the operator's arguments, kept for the next paste; ignore_bones=1 (Ignore Bones, its old name) is Same
+ * Place, 0 Keys. */
+static PasteAs paste_as_take(Context &C)
+{
+  if (op_has_arg(C, "paste_as")) {
+    const std::string as = op_arg(C, "paste_as");
+    g_paste_as = as == "LOOK" ? PasteAs::Look : as == "PLACE" ? PasteAs::Place : PasteAs::Keys;
+  }
+  else if (op_has_arg(C, "ignore_bones")) {
+    g_paste_as = op_arg_bool(C, "ignore_bones") ? PasteAs::Place : PasteAs::Keys;
+  }
+  op_arg_used(C, "paste_as", paste_as_id(g_paste_as));
+  return g_paste_as;
 }
 
 static const char *paste_as_name(PasteAs as)
@@ -486,7 +503,7 @@ static void pose_paste_handles_flipped(PoseTarget &t, const std::vector<Transfor
   }
 }
 
-static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
+static OpStatus pose_paste_once(Context &C, const json &pose, bool flipped, bool quiet)
 {
   Document &doc = *C.document;
   if (doc.frame_current == 0) {
@@ -495,15 +512,7 @@ static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
   }
   const bool selected_only = op_arg_bool(C, "selected_mask");
   const float factor = op_arg_float(C, "factor", 1.0f);
-  /* Paste As; ignore_bones=1 (Ignore Bones, its old name) is Same Place, 0 Keys. */
-  if (op_has_arg(C, "paste_as")) {
-    const std::string as = op_arg(C, "paste_as");
-    g_paste_as = as == "LOOK" ? PasteAs::Look : as == "PLACE" ? PasteAs::Place : PasteAs::Keys;
-  }
-  else if (op_has_arg(C, "ignore_bones")) {
-    g_paste_as = op_arg_bool(C, "ignore_bones") ? PasteAs::Place : PasteAs::Keys;
-  }
-  op_arg_used(C, "paste_as", paste_as_id(g_paste_as));
+  paste_as_take(C);
   const bool ignore = g_paste_as == PasteAs::Place;
   const bool look = g_paste_as != PasteAs::Keys;
   /* Same Place puts each point where it was: there is no place of its own to keep. */
@@ -610,8 +619,11 @@ static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
       /* Flipped: the change and where it showed reflected into the target (`to` is the identity otherwise). */
       const float2 shown = t.to.apply(float2_of(pj["shown"]));
       const float2 key = t.to.apply_vector(copied2(pj, "key", "key_add", look));
-      const float2 pos = ignore && invertible(skin) ? skin.inverted().apply(shown) :
-                                                      p.setup_pos + key + added_here(p.pos_keys, look);
+      /* Same Place, already showing there (pasted on the frame it was copied on), stays as it is: worked back through
+       * its skin it came out a hair off, and recording took the hair for an edit (keys on what never moved). */
+      const float2 pos = ignore && invertible(skin) ?
+                             (distance(skin.apply(p.pos), shown) < SAME_PLACE_HAIR ? p.pos : skin.inverted().apply(shown)) :
+                             p.setup_pos + key + added_here(p.pos_keys, look);
       placed.push_back({t.layer, m->second, pos});
       const float radius = copied1(pj, "radius", "radius_add", look) + added_here(p.radius_keys, look);
       p.radius = p.radius + (radius - p.radius) * factor;
@@ -638,7 +650,9 @@ static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
       for (const bool in : {true, false}) {
         float2 handle;
         if (ignore && invertible(skin)) {
-          handle = skin.inverted().apply_vector(float2_of(cj[in ? "in_shown" : "out_shown"]));
+          const float2 shown = float2_of(cj[in ? "in_shown" : "out_shown"]);
+          const float2 now = in ? cp.handle_in : cp.handle_out;
+          handle = distance(skin.apply_vector(now), shown) < SAME_PLACE_HAIR ? now : skin.inverted().apply_vector(shown);
         }
         else {
           const Channel<float2> &ch = in ? cp.handle_in_keys : cp.handle_out_keys;
@@ -684,9 +698,27 @@ static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
   if (points_pasted > 0) {
     note += (note.empty() ? "" : ", ") + std::to_string(points_pasted) + (points_pasted == 1 ? " point" : " points");
   }
-  op_note("Pasted onto " + note + " as " + paste_as_name(g_paste_as));
-  report(ReportType::Info, "Pasted onto " + note + " as " + paste_as_name(g_paste_as));
+  if (!quiet) {
+    op_note("Pasted onto " + note + " as " + paste_as_name(g_paste_as));
+    report(ReportType::Info, "Pasted onto " + note + " as " + paste_as_name(g_paste_as));
+  }
   return OpStatus::Finished;
+}
+
+static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
+{
+  /* Same Look and Same Place take out of each value what the action bone actions add here, and the paste moves the
+   * bones that drive them (a knob): worked out again with what they add once it is pasted, one press gives the look
+   * (it took two). With a factor below 1 a second pass would blend twice: one, as before. */
+  const bool again = paste_as_take(C) != PasteAs::Keys && op_arg_float(C, "factor", 1.0f) >= 1.0f;
+  const OpStatus status = pose_paste_once(C, pose, flipped, again);
+  if (status != OpStatus::Finished || !again) {
+    return status;
+  }
+  Document &doc = *C.document;
+  animation_record(doc);
+  animation_evaluate(doc, doc.frame_current);
+  return pose_paste_once(C, pose, flipped, false);
 }
 
 /* The pose on the clipboard (null json if none). */

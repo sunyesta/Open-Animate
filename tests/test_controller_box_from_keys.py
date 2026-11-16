@@ -49,7 +49,8 @@ pupil = layers.active
 ops.layer.move_to_group(group=str(rig.id))
 pupil.add_curve([(0.0, 0.0), (0.2, 0.0)])
 assert ops.layer.parent_bone_set(bone="eye") == {'FINISHED'}
-for name, length, to in (("eye_r", 40, (0.3, 0.0)), ("eye_l", 60, (-0.3, 0.0)), ("eye_u", 30, (0.0, 0.3))):
+for name, length, to in (("eye_r", 40, (0.3, 0.0)), ("eye_l", 60, (-0.3, 0.0)), ("eye_u", 30, (0.0, 0.3)),
+                         ("eye_d", 20, (0.0, -0.3))):
     layers.active = pupil
     assert ops.anim.action_new(name=name) == {'FINISHED'}
     doc.frame_current = length
@@ -107,5 +108,49 @@ go(15)
 assert ops.anim.action_set(name="") == {'FINISHED'}
 go(0)
 assert close(box()[1][1], 30), ("a key at rest gives the side no length: not keyed", box())
+
+# Down, not keyed, across from Up keyed only at rest: no length to borrow, so its own action's.
+assert ops.armature.controller_side(side="DOWN", action="eye_d") == {'FINISHED'}
+go(0)
+assert close(box()[0][1], -20), ("its own action's 20 frames, not Up's key at rest", box())
+go(7)
+for y in (-5.0, -10.0):
+    rig.bone_set("eye", knob=(0.0, y))
+    go(7)
+    assert close(playing("eye_d"), -y), ("even along its own length", y, playing("eye_d"))
+
+# A controller whose only side is keyed at rest isn't keyed: its box still fits its action as that grows.
+go(0)
+layers.active = rig
+ops.armature.select_none()
+assert ops.armature.bone_add(name="brow", head_x="1", head_y="1", tail_x="1.1", tail_y="1") == {'FINISHED'}
+assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
+layers.active = pupil
+assert ops.anim.action_new(name="brow_u") == {'FINISHED'}
+doc.frame_current = 30
+pupil.set_point(0, (0.0, 0.2))
+go(30)
+doc.action = ""
+go(0)
+layers.active = rig
+ops.armature.select_none()
+rig.select_bone("brow")
+assert ops.armature.controller_side(side="UP", action="brow_u") == {'FINISHED'}
+assert ops.anim.action_set(name="brow_u") == {'FINISHED'}
+doc.frame_current = 15
+rig.bone_set("brow", knob=(0.0, 0.0))
+go(15)
+assert ops.anim.action_set(name="") == {'FINISHED'}
+go(0)
+brow = lambda: next(b for b in rig.bones if b["name"] == "brow")
+assert close(brow()["controller_box"][1][1], 30), brow()["controller_box"]
+layers.active = pupil
+assert ops.anim.action_set(name="brow_u") == {'FINISHED'}
+doc.frame_current = 50
+pupil.set_point(0, (0.0, 0.4))
+go(50)
+doc.action = ""
+go(0)
+assert close(brow()["controller_box"][1][1], 50), ("fitted to its longer action: a key at rest is no key", brow()["controller_box"])
 
 print("controller box from keys OK")

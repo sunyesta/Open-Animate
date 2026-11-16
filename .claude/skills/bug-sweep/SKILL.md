@@ -242,3 +242,10 @@ not a bug, check the times against the shutdown before shrinking.
   origin and turned (the practice file's Head_X points up), and compare with the channel's own frame 0
   (`channel_setup` in animation.cc).
 - **A field "missing before" can be a hair off its default.** The file leaves a point's width out at exactly 1.0; a fix playing a width can leave the stored 1.0 two rounding steps under it (0.9999999, settled, never growing) after some frames are visited, so the field appears. `SAVED_DEFAULTS` in harness.py and fuzz_timing.py compares a missing one as its default; add a key there when another such field shows up.
+- **References refuse point edits.** An operator that edits points (delete, dissolve, duplicate, peak, smooth) must
+  skip a reference without Edit Points and return CANCELLED with no undo step: its edit is put back on the next
+  capture, so it looks done and isn't. Check it after every point op that ran with a reference picked.
+- **A paste on the setup frame pastes changes.** Keys hold changes from the setup, so pasting them onto frame 0 moves
+  the setup and every later key with it: paste twice and the second press must change nothing.
+- **Known open (Nov 2026 sweep):** Twist with Dyntopo Collapse (fuzz seed 33, resolution 50) strays up to 0.018 at
+  strength 2 when Collapse refits after the twist; not fixed yet, don't report it again.

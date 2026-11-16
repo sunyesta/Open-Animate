@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <set>
@@ -3017,7 +3018,15 @@ void rig_operators_register()
                  }
                  float2 at = controller_knob(*knob);
                  if (op_has_arg(C, "x") || op_has_arg(C, "y")) {
-                   at = {std::strtof(op_arg(C, "x", "0").c_str(), nullptr), std::strtof(op_arg(C, "y", "0").c_str(), nullptr)};
+                   /* As every operator's numbers: nan, inf or past ten million is no place (Go to Spot put the knob at nan). */
+                   const auto coordinate = [&](const char *axis) {
+                     return op_has_arg(C, axis) ? op_arg_float(C, axis, std::numeric_limits<float>::quiet_NaN()) : 0.0f;
+                   };
+                   at = {coordinate("x"), coordinate("y")};
+                   if (!std::isfinite(at.x) || !std::isfinite(at.y)) {
+                     report(ReportType::Warning, "A spot's x and y are numbers of frames");
+                     return OpStatus::Cancelled;
+                   }
                  }
                  std::string name = op_arg(C, "name");
                  if (name.empty()) {

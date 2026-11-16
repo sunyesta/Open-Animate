@@ -24,43 +24,49 @@ def bone(rig, name):
     return next(b for b in rig.bones if b["name"] == name)
 
 
-ops.wm.read_homefile()
-assert doc.auto_freeze_keys, "on for new files"
-doc.auto_key = True
-doc.frame_current = 0
-doc.frame_end = 60
-ops.layer.new_bone()
-rig = layers.active
-for name, at in (("pupil", (0.5, 0.5)), ("ear", (0.0, -1.0)), ("arm", (-2.0, 0.0))):
-    assert ops.armature.bone_add(name=name, head_x=str(at[0]), head_y=str(at[1]), tail_x=str(at[0] + 0.2),
-                                 tail_y=str(at[1])) == {'FINISHED'}
+def scene():
+    """The rig: the pupil and the ear keyed on 0 and 47, the arm on 10, the head's knob on 28."""
+    global rig
+    ops.wm.read_homefile()
+    assert doc.auto_freeze_keys, "on for new files"
+    doc.auto_key = True
+    doc.frame_current = 0
+    doc.frame_end = 60
+    ops.layer.new_bone()
+    rig = layers.active
+    for name, at in (("pupil", (0.5, 0.5)), ("ear", (0.0, -1.0)), ("arm", (-2.0, 0.0))):
+        assert ops.armature.bone_add(name=name, head_x=str(at[0]), head_y=str(at[1]), tail_x=str(at[0] + 0.2),
+                                     tail_y=str(at[1])) == {'FINISHED'}
+        ops.armature.select_none()
+    assert ops.armature.bone_add(name="head", head_x="2", head_y="2", tail_x="2", tail_y="2.3") == {'FINISHED'}
+    # The turn holds the pupil where it is and carries the ear.
+    assert ops.anim.action_new(name="turn") == {'FINISHED'}
+    doc.frame_current = 10
+    rig.keyframe_insert('bones["pupil"].position')
+    rig.bone_set("ear", position=(0.3, -1.0))
+    go(10)
+    doc.action = ""
+    go(0)
+    layers.active = rig
     ops.armature.select_none()
-assert ops.armature.bone_add(name="head", head_x="2", head_y="2", tail_x="2", tail_y="2.3") == {'FINISHED'}
-# The turn holds the pupil where it is and carries the ear.
-assert ops.anim.action_new(name="turn") == {'FINISHED'}
-doc.frame_current = 10
-rig.keyframe_insert('bones["pupil"].position')
-rig.bone_set("ear", position=(0.3, -1.0))
-go(10)
-doc.action = ""
-go(0)
-layers.active = rig
-ops.armature.select_none()
-rig.select_bone("head")
-assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
-assert ops.armature.controller_side(side="RIGHT", action="turn") == {'FINISHED'}
-# The pupil and the ear move 0-47 (keyed first); the arm is keyed on 10; the head turns on 28.
-doc.frame_current = 47
-rig.bone_set("pupil", position=(1.5, 0.5))
-rig.bone_set("ear", position=(1.0, -1.0))
-go(47)
-doc.frame_current = 10
-rig.bone_set("arm", position=(-2.0, 1.0))
-go(10)
-doc.frame_current = 28
-rig.bone_set("head", knob=(20.0, 0.0))
-go(28)
-assert frames(rig, "pupil") == [0, 47] and frames(rig, "ear") == [0, 47], (frames(rig, "pupil"), frames(rig, "ear"))
+    rig.select_bone("head")
+    assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
+    assert ops.armature.controller_side(side="RIGHT", action="turn") == {'FINISHED'}
+    # The pupil and the ear move 0-47 (keyed first); the arm is keyed on 10; the head turns on 28.
+    doc.frame_current = 47
+    rig.bone_set("pupil", position=(1.5, 0.5))
+    rig.bone_set("ear", position=(1.0, -1.0))
+    go(47)
+    doc.frame_current = 10
+    rig.bone_set("arm", position=(-2.0, 1.0))
+    go(10)
+    doc.frame_current = 28
+    rig.bone_set("head", knob=(20.0, 0.0))
+    go(28)
+    assert frames(rig, "pupil") == [0, 47] and frames(rig, "ear") == [0, 47], (frames(rig, "pupil"), frames(rig, "ear"))
+
+
+scene()
 go(28)
 ear_on_28 = bone(rig, "ear")["position"]
 
@@ -92,5 +98,12 @@ go(20)
 rig.bone_set("head", knob=(5.0, 0.0))
 go(20)
 assert frames(rig, "head") == [0, 10, 20, 28, 47], frames(rig, "head")
+
+# --- The knob's other channels: turned on 20, its angle holds at its own key on 28, no other channel keyed there -------
+scene()
+go(20)
+rig.bone_set("head", angle=bone(rig, "head")["angle"] + 0.3)
+go(20)
+assert [k["frame"] for k in rig.keyframes('bones["head"].angle')] == [0, 10, 20, 28], "held at the knob's own key"
 
 print("auto freeze knob: ok")

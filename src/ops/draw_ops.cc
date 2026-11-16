@@ -145,7 +145,10 @@ static bool parse_pair(const std::string &text, float2 *r)
   std::stringstream row(text);
   char comma = 0;
   float x = 0.0f, y = 0.0f;
-  if (!(row >> x >> comma >> y) || comma != ',' || !std::isfinite(x) || !std::isfinite(y)) {
+  /* Within what op_arg_float takes: a shape miles across would make an outline of inf and nan. */
+  if (!(row >> x >> comma >> y) || comma != ',' || !std::isfinite(x) || !std::isfinite(y) || std::abs(x) > 1e7f ||
+      std::abs(y) > 1e7f)
+  {
     return false;
   }
   *r = {x, y};

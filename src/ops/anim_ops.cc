@@ -1241,9 +1241,11 @@ void anim_operators_register()
                       }
                       else {
                         /* The keys the rows show: with Only Selected (not locked) an unpicked bone's are on no row, and
-                         * picked there they went with the next Delete. */
+                         * picked there they went with the next Delete; so did the channels the filters take away (the
+                         * Summary's channels are the rows shown). */
                         KeyFilter filter;
                         filter.picked_bones_only = C.document->timeline_only_selected && !C.document->timeline_lock;
+                        filter.channels = timeline_summary_channels(C);
                         layers_select_keys(layers, 0, 1 << 30, true, filter);
                       }
                       return OpStatus::Finished;

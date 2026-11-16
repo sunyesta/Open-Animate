@@ -467,30 +467,37 @@ bool curve_point_align_keys(CurvePoint &cp, AlignFollow follow)
   changed = new_in != si || new_out != so;
   changed |= align_timeline(ci.keys, co.keys, follow, false);
   for (const std::string &name : names) {
-    std::vector<Key<float2>> in, out;
-    if (auto it = ci.actions.find(name); it != ci.actions.end()) {
-      in = it->second;
-    }
-    if (auto it = co.actions.find(name); it != co.actions.end()) {
-      out = it->second;
-    }
-    /* "" is the mainline, put away while an action is edited: it has its own frame 0. */
-    if (align_timeline(in, out, follow, !name.empty())) {
-      changed = true;
-      for (auto [ch, keys] : {std::pair{&ci, &in}, std::pair{&co, &out}}) {
-        if (keys->empty()) {
-          ch->actions.erase(name);
-        }
-        else {
-          ch->actions[name] = *keys;
-        }
-      }
-    }
+    changed |= curve_point_align_action_keys(cp, name, follow);
   }
   for (Channel<float2> *ch : {&ci, &co}) {
     ch->has_last = true;
   }
   return changed;
+}
+
+bool curve_point_align_action_keys(CurvePoint &cp, const std::string &name, AlignFollow follow)
+{
+  Channel<float2> &ci = cp.handle_in_keys, &co = cp.handle_out_keys;
+  std::vector<Key<float2>> in, out;
+  if (auto it = ci.actions.find(name); it != ci.actions.end()) {
+    in = it->second;
+  }
+  if (auto it = co.actions.find(name); it != co.actions.end()) {
+    out = it->second;
+  }
+  /* "" is the mainline, put away while an action is edited: it has its own frame 0. */
+  if (!align_timeline(in, out, follow, !name.empty())) {
+    return false;
+  }
+  for (auto [ch, keys] : {std::pair{&ci, &in}, std::pair{&co, &out}}) {
+    if (keys->empty()) {
+      ch->actions.erase(name);
+    }
+    else {
+      ch->actions[name] = *keys;
+    }
+  }
+  return true;
 }
 
 void curve_segment_points(const Curve &curve, int segment, int *r_from, int *r_to)
@@ -1588,7 +1595,13 @@ int drawing_split_segment(VectorDrawing &drawing, ShapeEdge edge, float t)
     for (int i = 1; i <= 32; i++) {
       const float2 p = bezier_eval(ctrl, float(i) / 32.0f);
       total += distance(last, p);
-      upto += float(i) / 32.0f <= t ? distance(last, p) : 0.0f;
+      if (float(i) / 32.0f <= t) {
+        upto += distance(last, p);
+      }
+      else if (float(i - 1) / 32.0f < t) {
+        /* The step the cut falls in: as far as the cut, not none of it. */
+        upto += distance(last, bezier_eval(ctrl, t));
+      }
       last = p;
     }
     int from = 0, to = 0;
@@ -2804,7 +2817,7 @@ float drawing_selected_mean_opacity(const VectorDrawing &drawing)
 void drawing_set_selected_mean_opacity(VectorDrawing &drawing, float mean)
 {
   const float current = drawing_selected_mean_opacity(drawing);
-  if (current < 0.0f) {
+  if (current < 0.0f || std::isnan(mean)) {
     return;
   }
   const float delta = std::clamp(mean, 0.0f, 1.0f) - current;
@@ -2818,7 +2831,7 @@ void drawing_set_selected_mean_opacity(VectorDrawing &drawing, float mean)
 void drawing_set_selected_mean_radius(VectorDrawing &drawing, float mean)
 {
   const float current = drawing_selected_mean_radius(drawing);
-  if (current < 0.0f) {
+  if (current < 0.0f || std::isnan(mean)) {
     return;
   }
   const float delta = std::clamp(mean, 0.0f, POINT_RADIUS_MAX) - current;

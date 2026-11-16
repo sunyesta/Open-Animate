@@ -1,6 +1,7 @@
 #include "assets/draw_presets.hh"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -175,29 +176,54 @@ static json preset_json(const DrawPreset &p)
           {"minOpacity", ink.min_opacity}};
 }
 
+/* A saved pen's value by key, or `fallback` where it is missing or not of its kind (a pen file edited by hand or
+ * damaged): one bad value costs that setting, not the pen, nor every pen beside it. A number must be finite (one too
+ * big for a float reads as inf). */
+static float number(const json &j, const char *key, float fallback)
+{
+  const auto it = j.find(key);
+  if (it == j.end() || !it->is_number()) {
+    return fallback;
+  }
+  const double v = it->get<double>();
+  return std::isfinite(v) && std::abs(v) <= 1e30 ? float(v) : fallback;
+}
+
+static bool flag(const json &j, const char *key, bool fallback)
+{
+  const auto it = j.find(key);
+  return it != j.end() && it->is_boolean() ? it->get<bool>() : fallback;
+}
+
+static std::string text(const json &j, const char *key, const std::string &fallback)
+{
+  const auto it = j.find(key);
+  return it != j.end() && it->is_string() ? it->get<std::string>() : fallback;
+}
+
 static DrawPreset preset_from_json(const json &j, const std::string &fallback_name)
 {
   const InkSettings none;
   DrawPreset p;
   InkSettings &ink = p.ink;
-  p.name = j.value("name", fallback_name);
-  const std::string mode = j.value("mode", "STROKE_PEN");
+  p.name = text(j, "name", fallback_name);
+  const std::string mode = text(j, "mode", "STROKE_PEN");
   for (const DrawMode kind : {DrawMode::FillPen, DrawMode::FillEraser, DrawMode::StrokeEraser, DrawMode::Trimmer}) {
     if (mode == mode_id(kind)) {
       p.mode = kind;
     }
   }
-  p.line_width = std::max(j.value("lineWidth", p.line_width), 0.0f);
-  const std::string stabilizer = j.value("stabilizer", "SMART");
+  p.line_width = std::max(number(j, "lineWidth", p.line_width), 0.0f);
+  const std::string stabilizer = text(j, "stabilizer", "SMART");
   ink.stabilizer = stabilizer == "OFF"             ? InkStabilizer::Off
                    : stabilizer == "PULLED_STRING" ? InkStabilizer::PulledString
                                                    : InkStabilizer::Smart;
-  const auto amount = [&](const char *key, float fallback) { return std::clamp(j.value(key, fallback), 0.0f, 1.0f); };
+  const auto amount = [&](const char *key, float fallback) { return std::clamp(number(j, key, fallback), 0.0f, 1.0f); };
   ink.smoothing = amount("smoothing", none.smoothing);
-  ink.string_length = std::max(j.value("stringLength", none.string_length), 0.0f);
-  ink.catch_up = j.value("catchUp", none.catch_up);
+  ink.string_length = std::max(number(j, "stringLength", none.string_length), 0.0f);
+  ink.catch_up = flag(j, "catchUp", none.catch_up);
   ink.fidelity = amount("fidelity", none.fidelity);
-  ink.use_pressure = j.value("usePressure", none.use_pressure);
+  ink.use_pressure = flag(j, "usePressure", none.use_pressure);
   ink.pressure_smoothing = amount("pressureSmoothing", none.pressure_smoothing);
   if (const auto it = j.find("pressureCurve"); it != j.end() && it->is_array() && it->size() == 4) {
     const auto at = [&](size_t i) { return std::clamp(it->at(i).is_number() ? it->at(i).get<float>() : 0.0f, 0.0f, 1.0f); };
@@ -207,14 +233,14 @@ static DrawPreset preset_from_json(const json &j, const std::string &fallback_na
   ink.min_size = amount("minSize", none.min_size);
   ink.speed_width = amount("speedWidth", none.speed_width);
   ink.tilt_width = amount("tiltWidth", none.tilt_width);
-  ink.taper_start = std::max(j.value("taperStart", none.taper_start), 0.0f);
-  ink.taper_end = std::max(j.value("taperEnd", none.taper_end), 0.0f);
-  ink.erase_whole = j.value("eraseWhole", none.erase_whole);
-  ink.size_view = j.value("sizeView", none.size_view);
-  ink.view_size = std::clamp(j.value("viewSize", none.view_size), 0.0f, 500.0f);
-  ink.nib_angle = std::fmod(j.value("nibAngle", none.nib_angle), 180.0f);
+  ink.taper_start = std::max(number(j, "taperStart", none.taper_start), 0.0f);
+  ink.taper_end = std::max(number(j, "taperEnd", none.taper_end), 0.0f);
+  ink.erase_whole = flag(j, "eraseWhole", none.erase_whole);
+  ink.size_view = flag(j, "sizeView", none.size_view);
+  ink.view_size = std::clamp(number(j, "viewSize", none.view_size), 0.0f, 500.0f);
+  ink.nib_angle = std::fmod(number(j, "nibAngle", none.nib_angle), 180.0f);
   ink.nib_direction = amount("nibDirection", none.nib_direction);
-  ink.opacity_pressure = j.value("opacityPressure", none.opacity_pressure);
+  ink.opacity_pressure = flag(j, "opacityPressure", none.opacity_pressure);
   ink.min_opacity = amount("minOpacity", none.min_opacity);
   p.category = DRAW_CATEGORY_MINE;
   return p;
@@ -234,7 +260,12 @@ void draw_presets_reload()
       std::ifstream in(entry.path(), std::ios::binary);
       const json j = json::parse(std::string(std::istreambuf_iterator<char>(in), {}), nullptr, false);
       if (!j.is_discarded() && j.is_object()) {
-        saved.push_back(preset_from_json(j, path_to_utf8(entry.path().stem())));
+        try {
+          saved.push_back(preset_from_json(j, path_to_utf8(entry.path().stem())));
+        }
+        catch (const json::exception &) {
+          /* Skipped: a pen that can't be read leaves the others. */
+        }
       }
     }
   }

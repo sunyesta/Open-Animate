@@ -261,7 +261,15 @@ static void ink_settings_read(const InkSettings &ink, py::dict &d)
 /* A Stroke Pen setting by name, as oanim.wm.set_draw takes it; false: no such setting. */
 static bool ink_setting(InkSettings &ink, const std::string &key, const py::handle value)
 {
-  const auto amount = [&]() { return std::clamp(value.cast<float>(), 0.0f, 1.0f); };
+  /* A number, refused unless finite (clamping lets nan through, and the next stroke would be nan). */
+  const auto finite = [&]() {
+    const float v = value.cast<float>();
+    if (!std::isfinite(v)) {
+      throw py::value_error(key + " takes a finite number");
+    }
+    return v;
+  };
+  const auto amount = [&]() { return std::clamp(finite(), 0.0f, 1.0f); };
   if (key == "stabilizer") {
     const std::string name = value.cast<std::string>();
     if (name != "OFF" && name != "SMART" && name != "PULLED_STRING") {
@@ -278,7 +286,7 @@ static bool ink_setting(InkSettings &ink, const std::string &key, const py::hand
     ink.smoothing = amount();
   }
   else if (key == "string_length") {
-    ink.string_length = std::max(value.cast<float>(), 0.0f);
+    ink.string_length = std::max(finite(), 0.0f);
   }
   else if (key == "catch_up") {
     ink.catch_up = value.cast<bool>();
@@ -304,10 +312,10 @@ static bool ink_setting(InkSettings &ink, const std::string &key, const py::hand
     ink.tilt_width = amount();
   }
   else if (key == "taper_start") {
-    ink.taper_start = std::max(value.cast<float>(), 0.0f);
+    ink.taper_start = std::max(finite(), 0.0f);
   }
   else if (key == "taper_end") {
-    ink.taper_end = std::max(value.cast<float>(), 0.0f);
+    ink.taper_end = std::max(finite(), 0.0f);
   }
   else if (key == "erase_whole") {
     ink.erase_whole = value.cast<bool>();
@@ -316,10 +324,10 @@ static bool ink_setting(InkSettings &ink, const std::string &key, const py::hand
     ink.size_view = value.cast<bool>();
   }
   else if (key == "view_size") {
-    ink.view_size = std::clamp(value.cast<float>(), 0.0f, 500.0f);
+    ink.view_size = std::clamp(finite(), 0.0f, 500.0f);
   }
   else if (key == "nib_angle") {
-    ink.nib_angle = std::fmod(value.cast<float>(), 180.0f);
+    ink.nib_angle = std::fmod(finite(), 180.0f);
   }
   else if (key == "nib_direction") {
     ink.nib_direction = amount();
@@ -3665,10 +3673,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
       else if (key == "name") {
         const std::string before = bone.name, to = value.cast<std::string>();
-        /* Never the name of a knob's side's action: it would become this bone's own. */
-        if (const std::string why = bone_is_controller(bone) || to == before
-                                        ? std::string()
-                                        : controller_side_named(*layer_find(*current_context().document, id), to);
+        if (const std::string why = bone_rename_refusal(*layer_find(*current_context().document, id), bone, to);
             !why.empty())
         {
           throw py::value_error(why);

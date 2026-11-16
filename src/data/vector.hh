@@ -429,6 +429,9 @@ enum class AlignFollow { In, Out, Both };
  * directions are lined up the same way. Keys that turned them apart (an action keying one handle, or the two by
  * different amounts) would otherwise still turn one by itself. Returns whether anything changed. */
 bool curve_point_align_keys(CurvePoint &cp, AlignFollow follow);
+/* The same for action `name`'s keys only, the point's setup handles already in line (an aligned point's): what puts
+ * new keys into one action (Mirror Controller Side) keeps them in line there. */
+bool curve_point_align_action_keys(CurvePoint &cp, const std::string &name, AlignFollow follow);
 /* The four Bezier control points of a segment. */
 void curve_segment_bezier(const VectorDrawing &drawing, const Curve &curve, int segment, float2 r_ctrl[4]);
 float2 bezier_eval(const float2 ctrl[4], float t);

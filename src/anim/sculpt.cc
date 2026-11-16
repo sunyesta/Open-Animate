@@ -1126,9 +1126,10 @@ Collapsed dyntopo_collapse(const VectorDrawing &drawing, const SculptStroke::Lay
     }
     return d;
   };
-  std::vector<float> width(static_cast<size_t>(n));
+  std::vector<float> width(static_cast<size_t>(n)), opacity(static_cast<size_t>(n));
   for (int i = 0; i < n; i++) {
     width[size_t(i)] = drawing.points[size_t(point_of(i))].radius;
+    opacity[size_t(i)] = drawing.points[size_t(point_of(i))].opacity;
   }
   std::vector<float2> d;
   /* Past this a span is known to stray too far and is looked at no further: Decimate Curve takes out a share of the
@@ -1146,6 +1147,9 @@ Collapsed dyntopo_collapse(const VectorDrawing &drawing, const SculptStroke::Lay
       const float fit = width[size_t(a)] + (width[size_t(b)] - width[size_t(a)]) * std::clamp(u, 0.0f, 1.0f);
       const float allowed = SCULPT_DYNTOPO_WIDTH_TOLERANCE * std::max(width[size_t(k)], fit) + 1e-5f;
       worst = std::max(worst, std::fabs(width[size_t(k)] - fit) / allowed);
+      /* Its opacity the same way (a faded line's solid stretch needs its point as much as a bump in width does). */
+      const float opacity_fit = opacity[size_t(a)] + (opacity[size_t(b)] - opacity[size_t(a)]) * std::clamp(u, 0.0f, 1.0f);
+      worst = std::max(worst, std::fabs(opacity[size_t(k)] - opacity_fit) / SCULPT_DYNTOPO_OPACITY_TOLERANCE);
       if (worst > cap) {
         return worst;
       }

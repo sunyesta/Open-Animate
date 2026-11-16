@@ -7116,23 +7116,6 @@ int keys_keep_place(Document &doc, const Document &before, const std::vector<uin
 
 namespace {
 
-struct ClipboardChannel {
-  uint64_t layer = 0;
-  std::string layer_name;
-  std::string path;
-  std::vector<Key<float>> scalar;
-  std::vector<Key<float2>> vector;
-  /* A point's or curve point's channel: the point's id, and the curve it was on (paths name points by their place,
-   * which changes as points are added or deleted). */
-  uint64_t point = 0;
-  int curve = -1;
-  /* A 2 Axis Controller's knob position copied in one of its sides' own actions: the action. Those keys are the
-   * side's timing there (how far out each frame plays), never a move of the knob, so they paste only into that
-   * action. Elsewhere they would play the action on top of the
-   * pose pasted with them. */
-  std::string knob_timing;
-};
-
 /* The number in `path` after `prefix` (which starts it, at `at`), up to a ']'; -1 if there isn't one. */
 static int path_index(const std::string &path, const std::string &prefix, size_t at = 0)
 {
@@ -7144,6 +7127,93 @@ static int path_index(const std::string &path, const std::string &prefix, size_t
   const auto [ptr, ec] = std::from_chars(begin, end, n);
   return ec == std::errc() && ptr < end && *ptr == ']' ? n : -1;
 }
+
+/* The setup a channel's keys are changes from, as Paste Keys on the setup frame takes them (see clipboard_paste): a
+ * point's place, a curve point's handle, a bone's place (and angle, its changes being along it) or angle. */
+struct ChangeSetup {
+  enum Kind { None, Point, HandleIn, HandleOut, BonePosition, BoneAngle } kind = None;
+  float2 place;
+  float angle = 0.0f;
+};
+
+static ChangeSetup change_setup(const Layer &layer, const std::string &path)
+{
+  ChangeSetup s;
+  const auto ends = [&](std::string_view tail) {
+    return path.size() > tail.size() && path.compare(path.size() - tail.size(), tail.size(), tail) == 0;
+  };
+  const VectorDrawing &d = layer.drawing;
+  if (path.rfind("bones[\"", 0) == 0) {
+    const size_t close = path.find("\"]");
+    const Bone *b = close == std::string::npos ? nullptr : bone_find_by_name(layer, path.substr(7, close - 7));
+    if (b && !bone_is_controller(*b) && (ends(".position") || ends(".angle"))) {
+      s.kind = ends(".position") ? ChangeSetup::BonePosition : ChangeSetup::BoneAngle;
+      s.place = b->setup_position;
+      s.angle = b->setup_angle;
+    }
+  }
+  else if (const int curve = path_index(path, "curves["); curve >= 0) {
+    const size_t dot = path.find("].points[");
+    const int index = dot == std::string::npos ? -1 : path_index(path, "points[", dot + 2);
+    if (size_t(curve) < d.curves.size() && index >= 0 && size_t(index) < d.curves[size_t(curve)].points.size()) {
+      const CurvePoint &cp = d.curves[size_t(curve)].points[size_t(index)];
+      if (d.points[cp.point].detail.level == 0 && (ends(".handle_in") || ends(".handle_out"))) {
+        s.kind = ends(".handle_in") ? ChangeSetup::HandleIn : ChangeSetup::HandleOut;
+        s.place = s.kind == ChangeSetup::HandleIn ? cp.setup_in : cp.setup_out;
+      }
+    }
+  }
+  else if (const int index = path_index(path, "points["); index >= 0 && size_t(index) < d.points.size() && ends(".pos")) {
+    if (d.points[size_t(index)].detail.level == 0) {
+      s.kind = ChangeSetup::Point;
+      s.place = d.points[size_t(index)].setup_pos;
+    }
+  }
+  return s;
+}
+
+/* A change from setup `from` as the change from setup `to` that shows the same. */
+static float2 change_rebased(const ChangeSetup &from, const ChangeSetup &to, float2 change)
+{
+  switch (to.kind) {
+    case ChangeSetup::Point:
+      return from.place + change - to.place;
+    case ChangeSetup::HandleIn:
+    case ChangeSetup::HandleOut: {
+      const bool in = to.kind == ChangeSetup::HandleIn;
+      return handle_change(to.place, handle_from_change(from.place, change, in), change.x, in);
+    }
+    case ChangeSetup::BonePosition:
+      return rotate(from.place + rotate(change, from.angle) - to.place, -to.angle);
+    default:
+      return change;
+  }
+}
+
+static float change_rebased(const ChangeSetup &from, const ChangeSetup &to, float change)
+{
+  return to.kind == ChangeSetup::BoneAngle ? from.angle + change - to.angle : change;
+}
+
+struct ClipboardChannel {
+  uint64_t layer = 0;
+  std::string layer_name;
+  std::string path;
+  std::vector<Key<float>> scalar;
+  std::vector<Key<float2>> vector;
+  /* Its setup when copied: pasted on its own layer's setup frame, the pose copied becomes the setup, so a second paste
+   * there changes nothing (taken as a change from the setup now, each paste moved it by as much again). */
+  ChangeSetup setup;
+  /* A point's or curve point's channel: the point's id, and the curve it was on (paths name points by their place,
+   * which changes as points are added or deleted). */
+  uint64_t point = 0;
+  int curve = -1;
+  /* A 2 Axis Controller's knob position copied in one of its sides' own actions: the action. Those keys are the
+   * side's timing there (how far out each frame plays), never a move of the knob, so they paste only into that
+   * action. Elsewhere they would play the action on top of the
+   * pose pasted with them. */
+  std::string knob_timing;
+};
 
 /* The point a drawing channel's path names (its id, and the curve for a curve point's), or none. */
 static void clipboard_point_of(const Layer &layer, ClipboardChannel &c)
@@ -7261,6 +7331,7 @@ static KeyClipboard clipboard_take(const Document &doc, const std::vector<Layer 
       }
       if (!c.scalar.empty() || !c.vector.empty()) {
         clipboard_point_of(*layer, c);
+        c.setup = change_setup(*layer, ref.path);
         copied.channels.push_back(std::move(c));
       }
     }
@@ -7417,11 +7488,15 @@ static int clipboard_paste(const KeyClipboard &clipboard, const Document &doc, c
           continue;
         }
         if (at == 0 && change && owner && value) {
+          const ChangeSetup now = found->id == c.layer ? change_setup(*found, ref.path) : ChangeSetup{};
+          const auto pose = now.kind != ChangeSetup::None && now.kind == c.setup.kind ?
+                                change_rebased(c.setup, now, key.value) :
+                                key.value;
           if constexpr (std::is_same_v<std::decay_t<decltype(*value)>, float>) {
-            setup_scalars.push_back({value, key.value});
+            setup_scalars.push_back({value, pose});
           }
           else {
-            setup_vectors.push_back({value, key.value});
+            setup_vectors.push_back({value, pose});
           }
           posed_setup.insert(owner);
           /* Its frame 0 key (if it has one) is picked, as a pasted key would be. */
