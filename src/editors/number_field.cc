@@ -30,7 +30,10 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 
+#include "editors/number_pen.hh"
 #include "editors/ui.hh"
+#include "ops/undo.hh"
+#include "wm/pen_input.hh"
 
 namespace oanim {
 
@@ -227,6 +230,10 @@ struct Drag {
   ImVec2 press;
   ImVec2 last;
   bool dragging = false;
+  /* Pressed with the pen (editors/number_pen.hh): followed with the cursor shown, finer off the row; and carrying on
+   * the drag it was lifted from. */
+  bool pen = false;
+  bool resumed = false;
   /* Soft limits as this drag goes: widened to take in where it began. */
   double lo = 0.0, hi = 0.0;
 };
@@ -253,6 +260,7 @@ struct Grab {
 Drag g_drag;
 Multi g_multi;
 Grab g_grab;
+NumberClutch g_clutch;
 int g_hover_frame = -100;
 }  // namespace
 
@@ -425,6 +433,9 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
       g_drag.id = id;
       g_drag.start = g_drag.raw = *value;
       g_drag.press = io.MousePos;
+      g_drag.pen = tablet_state().touching;
+      g_drag.resumed = g_drag.pen && number_clutch_resumes(g_clutch, id, ImGui::GetTime());
+      g_clutch = {};
       g_drag.lo = limited ? std::min(f.soft_min, *value) : -DBL_MAX;
       g_drag.hi = limited ? std::max(f.soft_max, *value) : DBL_MAX;
       ImGui::SetActiveID(id, window);
@@ -449,11 +460,12 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
       g_multi.frame = ImGui::GetFrameCount();
       g_multi.picking = false;
       g_drag = {};
+      g_clutch = {};
       ImGui::ClearActiveID();
     }
     else if (io.MouseDown[0]) {
       const ImVec2 d = io.MousePos - g_drag.press;
-      const float threshold = 3.0f;
+      const float threshold = g_drag.pen ? number_pen_threshold(h) : 3.0f;
       if (!g_drag.dragging && !g_multi.picking && (std::fabs(d.x) > threshold || std::fabs(d.y) > threshold)) {
         if (std::fabs(d.y) > std::fabs(d.x)) {
           /* Up or down first: pick the fields passed over, then drag across to change them all. */
@@ -466,7 +478,9 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
         else {
           g_drag.dragging = true;
           g_drag.last = io.MousePos;
-          grab_cursor(g_drag.press);
+          if (!g_drag.pen) {
+            grab_cursor(g_drag.press);
+          }
         }
       }
       else if (g_multi.picking && g_multi.origin == id) {
@@ -477,21 +491,28 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
           g_drag.dragging = true;
           g_drag.press = ImVec2(g_multi.column, io.MousePos.y);
           g_drag.last = io.MousePos;
-          grab_cursor(g_drag.press);
+          if (!g_drag.pen) {
+            grab_cursor(g_drag.press);
+          }
         }
       }
       else if (g_drag.dragging) {
-        ImGui::SetMouseCursor(ImGuiMouseCursor_None);
         /* Grabbed: the motion the window reports; until then (or a script's simulated mouse) the mouse's
-         * own moves. */
+         * own moves. A pen's are where it is, the cursor shown, finer the further off the row it goes. */
         float dx = io.MousePos.x - g_drag.last.x;
-        if (g_grab.active) {
-          dx = g_grab.dx;
-          g_grab.dx = 0.0f;
+        double precise = io.KeyShift ? 0.1 : 1.0;
+        if (g_drag.pen) {
+          precise *= number_pen_fineness(io.MousePos.y - g_drag.press.y, h);
+        }
+        else {
+          ImGui::SetMouseCursor(ImGuiMouseCursor_None);
+          if (g_grab.active) {
+            dx = g_grab.dx;
+            g_grab.dx = 0.0f;
+          }
+          grab_cursor(g_drag.press);
         }
         g_drag.last = io.MousePos;
-        grab_cursor(g_drag.press);
-        const double precise = io.KeyShift ? 0.1 : 1.0;
         double per_pixel;
         if (factor) {
           per_pixel = (f.soft_max - f.soft_min) / double(std::max(frame_bb.GetWidth(), 1.0f));
@@ -519,7 +540,16 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
     }
     else {
       /* Let go. */
-      if (g_drag.dragging) {
+      if (g_drag.dragging && g_drag.pen) {
+        /* The pen put back on it at once carries on this drag, one undo step with it. */
+        if (!g_multi.editing) {
+          g_clutch = {id, ImGui::GetTime()};
+        }
+        if (g_drag.resumed) {
+          undo_join_next();
+        }
+      }
+      else if (g_drag.dragging) {
         /* The cursor shows again where it was (a factor's, at the value's place on its bar). */
         ImVec2 back = g_drag.press;
         if (factor) {

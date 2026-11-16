@@ -840,6 +840,8 @@ add_test(NAME draw_live_brush
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_draw_live_brush.py)
 add_test(NAME pointer_track
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pointer_track.py)
+add_test(NAME number_pen
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_number_pen.py)
 add_test(NAME timeline_sweep_fixes
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_timeline_sweep_fixes.py)
 add_test(NAME rig_sweep_fixes

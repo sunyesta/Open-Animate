@@ -43,6 +43,7 @@
 #include "ops/media_ops.hh"
 #include "ops/text_ops.hh"
 #include "ops/operator.hh"
+#include "ops/undo.hh"
 #include "python/py_runtime.hh"
 #include "text/text_layer.hh"
 #include "ui/theme.hh"
@@ -556,6 +557,7 @@ void App::main_loop()
     brush_editor_frame_end(ctx_);
     record_selection();
     update_number_grab();
+    undo_join_frame_end();
     ImGui::Render();
 
     int width = 0, height = 0;

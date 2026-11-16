@@ -62,6 +62,7 @@
 #include "wm/context.hh"
 #include "wm/pen_input.hh"
 #include "wm/pointer_track.hh"
+#include "editors/number_pen.hh"
 #include "wm/event_system.hh"
 #include "wm/file_drop.hh"
 #include "wm/keymap.hh"
@@ -1132,6 +1133,17 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
     }
   });
+  /* A number field scrubbed with a pen (editors/number_pen.hh): how far it goes before a press is a drag, how much of
+   * each pixel across counts at `dy` off the row, and whether a press `after` seconds from lifting off the same field
+   * (or another) carries on the drag. */
+  m.def("number_pen", [](float field_height, float dy, double after, bool same) {
+    const NumberClutch clutch{7, 10.0};
+    return py::make_tuple(number_pen_threshold(field_height), number_pen_fineness(dy, field_height),
+                          number_clutch_resumes(clutch, same ? 7u : 8u, 10.0 + after));
+  });
+  /* The next push named as the last step replaces it (ops/undo.hh), as a pen carrying on a field's drag asks. */
+  m.def("undo_join_next", []() { undo_join_next(); });
+  m.def("undo_join_frame_end", []() { undo_join_frame_end(); });
   /* Which of the pen and the mouse is the pointer (wm/pointer_track.hh), through a list of moves: ("pen", x, y,
    * cursor_x, cursor_y) with where the system cursor is then, or ("mouse", x, y). For each mouse move, whether it is
    * taken (False: the cursor the pen left behind, dropped); and where ImGui's own read of the cursor at (x, y) ends up

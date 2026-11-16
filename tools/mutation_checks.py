@@ -43,6 +43,14 @@ PENDING = [
      'Lifting the pen does not flash the cursor where the mouse was', 'tests/test_pointer_track.py'),
     ('src/wm/pointer_track.hh', '  if (t.touching) {', '  if (false && t.touching) {',
      'A pen stroke with the mouse last over another program is not a dot', 'tests/test_pointer_track.py'),
+    ('src/editors/number_pen.hh', '  const float off = std::max(std::fabs(dy) - h * 0.5f, 0.0f);', '  const float off = 0.0f * dy;',
+     'A pen scrubbing a number field off its row goes finer', 'tests/test_number_pen.py'),
+    ('src/editors/number_pen.hh', '  return std::max(6.0f, field_height * 0.3f);', '  return 3.0f + 0.0f * field_height;',
+     'A pen tap on a number field goes further before it is a drag', 'tests/test_number_pen.py'),
+    ('src/editors/number_pen.hh', 'c.id != 0 && c.id == id && now', 'c.id != 0 && now',
+     'Only the same number field carries on a pen drag', 'tests/test_number_pen.py'),
+    ('src/ops/undo.cc', '  if (join && active_ > 0', '  if (false && join && active_ > 0',
+     'A pen drag carried on is one undo step', 'tests/test_number_pen.py'),
 ]
 
 def build(root):

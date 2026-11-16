@@ -91,4 +91,10 @@ class UndoStack {
   uint64_t selection_changes_ = 0;
 };
 
+/* The next push named as the last step replaces that step, so two pushes are one step to undo: a pen lifted off a
+ * number field and put back on it mid-drag (editors/number_pen.hh). Asked for over `frames` frames (the field's push
+ * comes the frame after it lets go); undo_join_frame_end, once a frame, lets it lapse. */
+void undo_join_next(int frames = 2);
+void undo_join_frame_end();
+
 }  // namespace oanim

@@ -1,5 +1,6 @@
 #include "ops/undo.hh"
 
+#include <algorithm>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -167,9 +168,32 @@ static bool unchanged_since(Document &before, const Document &doc)
   return before == doc;
 }
 
+static int g_join_frames = 0;
+
+void undo_join_next(int frames)
+{
+  g_join_frames = frames;
+}
+
+void undo_join_frame_end()
+{
+  g_join_frames = std::max(g_join_frames - 1, 0);
+}
+
 void UndoStack::push(const std::string &name, Document &doc)
 {
   OANIM_PROFILE("undo_push");
+  /* Joined to the last step: it goes, and this push is made against the step before it (nothing redone since). */
+  const bool join = g_join_frames > 0;
+  g_join_frames = 0;
+  if (join && active_ > 0 && active_ + 1 == steps_.size() && steps_[active_].name == name) {
+    std::vector<Step> joined;
+    joined.push_back(std::move(steps_.back()));
+    steps_.pop_back();
+    active_--;
+    changes_++;
+    free_later(std::move(joined));
+  }
   /* A text changed has its letters made again, before the step holds them. */
   document_sync_text(doc);
   /* A linked shape's look changed changes its material, and the step holds every shape using it. */
