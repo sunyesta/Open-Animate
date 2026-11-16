@@ -1171,7 +1171,24 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return labels;
   });
-  m.def("properties_tab", [](int tab) { current_context().wm->properties_tab_request = std::clamp(tab, 0, 11); });
+  /* The Layer tab's Bone Group panel: None where it isn't shown, else the drawings it edits (the active one first) and
+   * whether its Bone Color is lit (the active drawing is Editable in Bone Group). */
+  m.def("layer_bone_group_panel", []() -> py::object {
+    const std::vector<Layer *> drawings = layer_tab_bone_group_drawings(*current_context().document);
+    if (drawings.empty()) {
+      return py::none();
+    }
+    py::dict d;
+    py::list names;
+    for (const Layer *l : drawings) {
+      names.append(l->name);
+    }
+    d["drawings"] = names;
+    d["color_active"] = drawings.front()->edit_with_bones;
+    return d;
+  });
+  m.def("properties_tab", [](int tab) {
+ current_context().wm->properties_tab_request = std::clamp(tab, 0, 11); });
   /* How long frames take (ms, ImGui's running average), for checking the app's speed. */
   /* The left/right name rule bone Symmetrize and mirror editing pair by (bone_mirror_name). */
   m.def("flip_name", [](const std::string &name) { return bone_mirror_name(name); });

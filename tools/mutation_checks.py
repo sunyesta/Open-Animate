@@ -169,6 +169,12 @@ PENDING = [
     ('src/ops/rig_ops.cc', '                       copy.constraints.clear();',
      '',
      "Symmetrize gives a new bone the first side's Follow Point keys", 'follow_point_stress'),
+    ('src/ops/vector_ops.cc', '    if (l != active && l->selected && inside_bones(l)) {',
+     '    if (l != active && inside_bones(l)) {',
+     "The Bone Group panel edits drawings that aren't picked", 'tests/test_layer_bone_group_panel.py'),
+    ('src/ops/vector_ops.cc', '    return l && l->type == LayerType::Vector && layer_armature(doc, l->id) != nullptr;',
+     '    return l && l->type == LayerType::Vector;',
+     'The Bone Group panel shows on drawings outside a bone layer', 'tests/test_layer_bone_group_panel.py'),
 ]
 
 def build(root):

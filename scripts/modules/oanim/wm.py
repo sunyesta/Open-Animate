@@ -229,6 +229,13 @@ def properties_tab(tab):
                          "MASKING", "CAMERA", "MEDIA", "TEXT", "SHAPE", "BONE"].index(name))
 
 
+def layer_bone_group_panel():
+    """The Layer tab's Bone Group panel: None where it isn't shown (the active layer isn't a drawing inside a bone
+    layer), else {"drawings": the names of the drawings it edits, the active one first, "color_active": whether its
+    Bone Color is lit (the active drawing is Editable in Bone Group)}."""
+    return _oanim.layer_bone_group_panel()
+
+
 def properties_tabs():
     """The Properties editor's tabs for what is active, in order, as labelled ("Document", "Layer", ...)."""
     return list(_oanim.properties_tabs())

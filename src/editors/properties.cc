@@ -2325,25 +2325,32 @@ static void bone_color_rows(Context &C, Bone &bone)
   }
 }
 
-/* The Bone tab as Drawing: with a bone layer worked in and only points of the drawings edited with its bones picked, those
- * drawings' colour with the bones and their collections (the first's shown; edits go to them all). */
-static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &drawings)
+/* A drawing's colour with its bones (Color, and Custom's shades), set on every one of `drawings` (the first's shown):
+ * the Bone tab's Drawing panel and the Layer tab's Bone Group panel. `where` ends its tooltip, saying which drawings
+ * it goes to; `copy_button`: Copy Color to Selected beside it. */
+static void drawing_color_rows(Context &C, const std::vector<Layer *> &drawings, const char *label, const char *where,
+                               bool copy_button, bool layer_tab = false)
 {
+  /* The Layer tab's rows, as its properties': the label right-aligned (ui_row); the Bone tab's, left. */
+  const auto row = [&](const char *text, const std::function<void(float)> &body) {
+    if (layer_tab) {
+      ui_row(text, body);
+    }
+    else {
+      props_label(text);
+      body(ImGui::GetContentRegionAvail().x);
+    }
+  };
   Document &doc = *C.document;
   Layer &first = *drawings.front();
-  std::string ids, others;
+  std::string ids;
   for (const Layer *l : drawings) {
     ids += (ids.empty() ? "" : ",") + std::to_string(l->id);
-    if (l != &first) {
-      others += (others.empty() ? "" : ",") + std::to_string(l->id);
-    }
   }
-  const std::string header = drawings.size() > 1 ? first.name + " +" + std::to_string(drawings.size() - 1) : first.name;
-  if (ui_panel_begin("Drawing", header, 0u)) {
-    const ImGuiStyle &style = ImGui::GetStyle();
-    const float sw = ImGui::GetFrameHeight() * 0.42f;
-    props_label("Color");
-    ImGui::SetNextItemWidth(-(ImGui::GetFrameHeight() + style.ItemInnerSpacing.x));
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float sw = ImGui::GetFrameHeight() * 0.42f;
+  row(label, [&](float width) {
+    ImGui::SetNextItemWidth(copy_button ? width - (ImGui::GetFrameHeight() + style.ItemInnerSpacing.x) : width);
     if (ImGui::BeginCombo("##drawing_color", "", ImGuiComboFlags_CustomPreview)) {
       for (int set = 0; set <= BONE_COLOR_CUSTOM; set++) {
         ImGui::PushID(set);
@@ -2376,20 +2383,23 @@ static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &draw
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip("The colours its wires and points are drawn in, as a bone's: its\n"
                         "regular shade, and its selected shade where picked. Default Colors: the overlays' own.\n"
-                        "Set on every drawing with points picked");
+                        "%s", where);
     }
-    ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
-    if (copy_icon_button("##copy_drawing_color",
-                         "Copy Color to Selected: give the selected bones, and the other drawings with points picked,\n"
-                         "this drawing's colours"))
-    {
-      operator_call(C, "layer.copy_color_to_selected", {{"layer", std::to_string(first.id)}});
+    if (copy_button) {
+      ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+      if (copy_icon_button("##copy_drawing_color",
+                           "Copy Color to Selected: give the selected bones, and the other drawings with points picked,\n"
+                           "this drawing's colours"))
+      {
+        operator_call(C, "layer.copy_color_to_selected", {{"layer", std::to_string(first.id)}});
+      }
     }
-    if (first.color_set == BONE_COLOR_CUSTOM) {
-      props_label("Custom Colors");
+  });
+  if (first.color_set == BONE_COLOR_CUSTOM) {
+    row("Custom Colors", [&](float width) {
       static const char *const shade_names[] = {"Regular", "Select", "Active"};
       const float gap = 1.0f;
-      const float w = (ImGui::GetContentRegionAvail().x - 2.0f * gap) / 3.0f;
+      const float w = (width - 2.0f * gap) / 3.0f;
       for (int k = 0; k < 3; k++) {
         if (k > 0) {
           ImGui::SameLine(0.0f, gap);
@@ -2414,7 +2424,24 @@ static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &draw
           C.undo->push("Drawing Custom Color", doc);
         }
       }
+    });
+  }
+}
+
+/* The Bone tab as Drawing: with a bone layer worked in and only points of the drawings edited with its bones picked, those
+ * drawings' colour with the bones and their collections (the first's shown; edits go to them all). */
+static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &drawings)
+{
+  Layer &first = *drawings.front();
+  std::string others;
+  for (const Layer *l : drawings) {
+    if (l != &first) {
+      others += (others.empty() ? "" : ",") + std::to_string(l->id);
     }
+  }
+  const std::string header = drawings.size() > 1 ? first.name + " +" + std::to_string(drawings.size() - 1) : first.name;
+  if (ui_panel_begin("Drawing", header, 0u)) {
+    drawing_color_rows(C, drawings, "Color", "Set on every drawing with points picked", true);
     ui_panel_end();
   }
   if (ui_collapsing_header("Collections", true)) {
@@ -8556,6 +8583,47 @@ static void masking_tab(Context &C)
   used_as_mask_panel(C, *layer);
 }
 
+/* The Layer tab's Bone Group panel, on a drawing inside a bone layer: Editable in Bone Group (edited along with its
+ * bone layer's bones, and so in its All collection, shown or hidden by its collections there) and Bone Color, what its
+ * wires and points are drawn in then: greyed while it is off, as Blender greys a setting that does nothing, but still
+ * set, and kept. Both go to the active drawing and the others inside a bone layer picked in the Layers editor. */
+static void layer_bone_group_panel(Context &C)
+{
+  const std::vector<Layer *> drawings = layer_tab_bone_group_drawings(*C.document);
+  if (drawings.empty() || !ui_panel_begin("Bone Group")) {
+    return;
+  }
+  std::string ids;
+  for (const Layer *l : drawings) {
+    ids += (ids.empty() ? "" : ",") + std::to_string(l->id);
+  }
+  bool on = drawings.front()->edit_with_bones;
+  bool hovered = false;
+  ui_row("Editable in Bone Group", [&](float) {
+    if (ImGui::Checkbox("##edit_with_bones", &on)) {
+      operator_call(C, "layer.edit_with_bones_set", {{"on", on ? "1" : "0"}, {"layers", ids}});
+    }
+    hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal);
+  });
+  if (hovered) {
+    ImGui::SetTooltip("Pick and move this drawing's points along with the bones while the bone group is the active\n"
+                      "layer. It is then in the bone group's All collection; Assign or M put it in others.\n"
+                      "Set on this drawing and the others inside a bone group picked in the Layers editor");
+  }
+  if (!on) {
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * ImGui::GetStyle().DisabledAlpha);
+  }
+  drawing_color_rows(C, drawings, "Bone Color",
+                     on ? "Set on this drawing and the others inside a bone group picked in the Layers editor"
+                        : "Shown while Editable in Bone Group is on; kept while it is off.\n"
+                          "Set on this drawing and the others inside a bone group picked in the Layers editor",
+                     false, true);
+  if (!on) {
+    ImGui::PopStyleVar();
+  }
+  ui_panel_end();
+}
+
 static void layer_tab(Context &C)
 {
   Document &doc = *C.document;
@@ -8573,11 +8641,6 @@ static void layer_tab(Context &C)
     draw_order_row(C, *layer);
     ui_prop(C, ptr, "render_visible", path);
     ui_prop(C, ptr, "locked", path);
-    if (layer->type == LayerType::Vector && layer_armature(doc, layer->id)) {
-      /* Edited along with its bone layer's bones (and so in its All collection, and shown or hidden by
-       * its collections there). */
-      ui_prop(C, ptr, "edit_with_bones", path);
-    }
     if (layer->type == LayerType::Vector && (layer->ignore_group_deforms || layer_has_group_deforms(doc, *layer, false))) {
       ui_prop(C, ptr, "ignore_group_deforms", path);
     }
@@ -8598,6 +8661,7 @@ static void layer_tab(Context &C)
     ui_prop(C, ptr, "label_color", path);
     ui_panel_end();
   }
+  layer_bone_group_panel(C);
   /* On a reference, a channel it took over from its original shows teal. */
   const auto own = [&](const char *name) { return layer->is_reference() && layer->reference.own_channels.count(name) > 0; };
   const auto channel_args = [](const char *name) { return std::vector<OpArgs>{{{"kind", "CHANNEL"}, {"path", name}}}; };

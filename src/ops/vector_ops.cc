@@ -89,8 +89,27 @@ std::vector<Layer *> bone_tab_drawings(Document &doc)
   return out;
 }
 
+std::vector<Layer *> layer_tab_bone_group_drawings(Document &doc)
+{
+  const auto inside_bones = [&](const Layer *l) {
+    return l && l->type == LayerType::Vector && layer_armature(doc, l->id) != nullptr;
+  };
+  Layer *active = document_active_layer(doc);
+  if (!inside_bones(active)) {
+    return {};
+  }
+  std::vector<Layer *> out = {active};
+  for (const Layer *l : document_layers_flat(doc)) {
+    if (l != active && l->selected && inside_bones(l)) {
+      out.push_back(layer_find(doc, l->id));
+    }
+  }
+  return out;
+}
+
 std::vector<Layer *> document_weight_layers(Document &doc)
 {
+
   std::vector<Layer *> layers;
   Layer *active = document_active_layer(doc);
   if (!active || active->locked) {

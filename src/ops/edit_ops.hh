@@ -128,6 +128,9 @@ std::vector<Layer *> drawings_points_picked(Document &doc);
 /* What a bone layer's Bone tab shows as Drawing: those drawings, the one clicked last first (Document::picked_drawing)
  * while it has points picked, bones picked beside them or not; else only while none of its family's bones are picked. */
 std::vector<Layer *> bone_tab_drawings(Document &doc);
+/* What the Layer tab's Bone Group panel edits: the active layer when it is a drawing inside a bone layer (none
+ * otherwise: no panel), then every other drawing inside a bone layer picked in the Layers editor. */
+std::vector<Layer *> layer_tab_bone_group_drawings(Document &doc);
 /* The motion paths shown now (anim/motion_path.hh), with the Motion Path tool's Edit Layer: what the tool, its
  * operators and the timeline work on. One, the active path (motion_path_active), unless Show All Paths is on. */
 std::vector<struct MotionPathTarget> motion_path_targets(Context &C);

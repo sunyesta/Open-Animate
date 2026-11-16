@@ -4631,7 +4631,34 @@ void rig_operators_register()
     };
     operators().add(std::move(ot));
   }
+  /* Editable in Bone Group (the Layer tab's Bone Group panel). */
+  {
+    OperatorType ot;
+    ot.idname = "layer.edit_with_bones_set";
+    ot.name = "Editable in Bone Group";
+    ot.description = "Turn Editable in Bone Group on (`on` 1) or off (0) for drawings inside a bone layer: the drawings "
+                     "`layers` (ids, comma-separated), by default those the Layer tab's Bone Group panel edits (the "
+                     "active drawing and the others picked in the Layers editor)";
+    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+    ot.poll = [](Context &C) { return C.document != nullptr; };
+    ot.exec = [layers_named](Context &C) {
+      Document &doc = *C.document;
+      const bool on = !op_has_arg(C, "on") || op_arg_bool(C, "on");
+      std::vector<Layer *> layers = op_arg(C, "layers").empty() ? layer_tab_bone_group_drawings(doc)
+                                                                 : layers_named(doc, op_arg(C, "layers"));
+      bool changed = false;
+      for (Layer *l : layers) {
+        if (l->type == LayerType::Vector && layer_armature(doc, l->id) && l->edit_with_bones != on) {
+          l->edit_with_bones = on;
+          changed = true;
+        }
+      }
+      return changed ? OpStatus::Finished : OpStatus::Cancelled;
+    };
+    operators().add(std::move(ot));
+  }
   /* A layer joins or leaves a collection (its Layer tab's Collections panel). */
+
   for (const char *idname : {"layer.collection_link", "layer.bone_collection_toggle"}) {
     OperatorType ot;
     ot.idname = idname;
