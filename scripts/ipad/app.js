@@ -36,6 +36,8 @@ function connect() {
   ws.onclose = () => {
     connected = false;
     penCancel(false);
+    strokes = [];
+    dirty();
     $('connect-screen').hidden = false;
     $('connect-text').textContent = 'Not connected: is Draw on iPad still on in Open Animate?';
     setTimeout(connect, retry);
@@ -84,11 +86,25 @@ function applyView() {
  * Drawing what isn't the canvas's SVG: onion skins, the line being drawn, the pen's tip, the width circle. */
 
 let onion = [];
-const live = { kind: '', color: [0, 0, 0, 1], pts: [], own: false, dabs: new Map(), n: 0 };
-let awaitingCanvas = false;
-/* The Pencil lifted and Open Animate not yet done with the stroke: the line and its tip stay drawn as they were. */
-let lifted = false;
-let raw = [];            // the stroke's samples so far, canvas pixels: [x, y, pressure]
+/* The lines drawn here that the canvas doesn't show yet, oldest first: the one being drawn and those lifted whose
+ * canvas hasn't come (Open Animate sends none while a line is being drawn, so lines drawn fast one after another wait
+ * for it together). Each is the line as Open Animate has made it so far, and raw, the samples sent: those it hasn't
+ * answered yet are drawn as the pen's tip until it is done with the line. done is the count of strokes the canvas
+ * must have made to show it. */
+let strokes = [];
+let strokeSeq = 0;
+let live = null;         // the line being drawn
+function newStroke(erasing) {
+  return { id: ++strokeSeq, kind: '', color: [0, 0, 0, 1], pts: [], own: false, dabs: new Map(), n: 0, raw: [], erasing, done: null };
+}
+function strokeById(id) {
+  return strokes.find((s) => s.id === id);
+}
+function strokeDrop(s) {
+  strokes = strokes.filter((x) => x !== s);
+  if (live === s) live = null;
+  dirty();
+}
 let hover = null;        // the Pencil hovering: [x, y] on the screen
 let drawQueued = false;
 
@@ -186,21 +202,21 @@ function redraw() {
     }
     ctx.stroke();
   }
-  /* The line being drawn, as Open Animate makes it. */
-  if (live.kind === 'line') drawVarLine(ctx, live.pts, live.color, V);
-  drawDabs(dabRenderer, live.kind === 'dabs' ? live.dabs : null, live.own, V, innerWidth, innerHeight);
+  /* The lines drawn, as Open Animate makes them. */
+  for (const s of strokes) if (s.kind === 'line') drawVarLine(ctx, s.pts, s.color, V);
+  drawDabs(dabRenderer, strokes.filter((s) => s.kind === 'dabs'), V, innerWidth, innerHeight);
   /* What the pen has drawn since: the samples Open Animate hasn't answered yet, at the line's width. */
-  if (raw.length > 0 && (penDown || lifted || awaitingCanvas)) {
-    const from = Math.max(0, live.n - 1);
-    const half = penHalfWidth();
-    const usePressure = state && state.settings.use_pressure;
-    const minSize = state ? state.settings.min_size : 0;
+  const half = penHalfWidth();
+  const usePressure = state && state.settings.use_pressure;
+  const minSize = state ? state.settings.min_size : 0;
+  for (const s of strokes) {
+    if (s.done !== null || s.raw.length === 0) continue;
     const tip = [];
-    for (let i = from; i < raw.length; i++) {
-      const p = raw[i];
+    for (let i = Math.max(0, s.n - 1); i < s.raw.length; i++) {
+      const p = s.raw[i];
       tip.push(p[0], p[1], half * (usePressure ? Math.max(p[2], minSize) : 1), 1);
     }
-    const c = state ? (state.mode === 'FILL_PEN' ? state.settings.fill_color : penErasing ? [0.9, 0.3, 0.3, 0.4] : state.settings.line_color) : [0, 0, 0, 1];
+    const c = state ? (state.mode === 'FILL_PEN' ? state.settings.fill_color : s.erasing ? [0.9, 0.3, 0.3, 0.4] : state.settings.line_color) : [0, 0, 0, 1];
     drawVarLine(ctx, tip, c, V);
   }
   /* The width circle round the hovering Pencil. */
@@ -269,13 +285,14 @@ class DabRenderer {
   }
 }
 
-function drawDabs(r, sets, own, m, cssW, cssH) {
+/* Lines' stamps ([{dabs, own}], oldest first), over each other in that order. */
+function drawDabs(r, lines, m, cssW, cssH) {
   if (!r || !r.gl) return;
   const gl = r.gl;
   gl.viewport(0, 0, r.canvas.width, r.canvas.height);
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
-  if (!sets) return;
+  if (lines.length === 0) return;
   gl.useProgram(r.prog);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -285,9 +302,10 @@ function drawDabs(r, sets, own, m, cssW, cssH) {
     m.a * sx, m.b * sy, 0,
     m.c * sx, m.d * sy, 0,
     m.e * sx - 1, m.f * sy + 1, 1]));
-  gl.uniform1f(r.loc.own, own ? 1 : 0);
   gl.bindBuffer(gl.ARRAY_BUFFER, r.buffer);
-  for (const [id, verts] of sets) {
+  for (const line of lines) {
+  gl.uniform1f(r.loc.own, line.own ? 1 : 0);
+  for (const [id, verts] of line.dabs) {
     const t = r.texture(id);
     if (!t || verts.length < 48) continue;
     gl.bindTexture(gl.TEXTURE_2D, t);
@@ -299,6 +317,7 @@ function drawDabs(r, sets, own, m, cssW, cssH) {
     gl.enableVertexAttribArray(r.loc.col);
     gl.vertexAttribPointer(r.loc.col, 4, gl.FLOAT, false, 32, 16);
     gl.drawArrays(gl.TRIANGLES, 0, Math.floor(verts.length / 8));
+  }
   }
 }
 
@@ -332,14 +351,6 @@ function liveUpdate(into, m) {
   }
 }
 
-function liveClear() {
-  live.kind = '';
-  live.pts = [];
-  live.dabs = new Map();
-  live.n = 0;
-  raw = [];
-  dirty();
-}
 
 /* ---------------------------------------------------------------------------------------------------------------
  * The Pencil: it draws, and only it. This iPad's own pressure curve (Options > Pencil) goes first. */
@@ -393,19 +404,18 @@ function penStart(e) {
   penRefused = false;
   penId = e.pointerId;
   penErasing = e.button === 5 || (e.buttons & 32) !== 0;
-  liveClear();
-  awaitingCanvas = false;
-  lifted = false;
+  live = newStroke(penErasing);
+  strokes.push(live);
   const s = coalesced(e).map(sampleOf);
-  raw.push(...s);
-  send({ t: 'down', eraser: penErasing, zoom: zoomOf(V), s });
+  live.raw.push(...s);
+  send({ t: 'down', id: live.id, eraser: penErasing, zoom: zoomOf(V), s });
   dirty();
 }
 
 function penMove(e) {
   if (!penDown || e.pointerId !== penId) return;
   const s = coalesced(e).map(sampleOf);
-  raw.push(...s);
+  if (live) live.raw.push(...s);
   send({ t: 'move', s });
   dirty();
 }
@@ -413,18 +423,17 @@ function penMove(e) {
 function penEnd(e) {
   if (!penDown || e.pointerId !== penId) return;
   penDown = false;
-  lifted = true;
+  live = null;
   /* Lifting isn't a sample (its pressure is 0): the line ends where the last one was, as the viewport's does. */
   send({ t: 'up', s: [] });
   dirty();
 }
 
 function penCancel(tell = true) {
-  lifted = false;
   if (!penDown) return;
   penDown = false;
   if (tell) send({ t: 'cancel' });
-  liveClear();
+  if (live) strokeDrop(live);
 }
 
 /* ---------------------------------------------------------------------------------------------------------------
@@ -561,26 +570,33 @@ function receive(m) {
       art.innerHTML = m.svg.replace(/^<\?xml[^>]*>\s*/, '');
       onion = m.onion || [];
       if (changed || !fitted) { fitted = true; fitView(); }
-      if (awaitingCanvas && !penDown && !lifted) { awaitingCanvas = false; liveClear(); }
+      /* The lines it has made show in it now. */
+      if (m.strokes !== undefined) strokes = strokes.filter((s) => s.done === null || s.done > m.strokes);
       dirty();
       break;
     }
-    case 'live':
-      if (!penDown && !lifted && !awaitingCanvas) break;
-      liveUpdate(live, m);
-      live.n = m.n || live.n;
+    case 'live': {
+      const s = strokeById(m.id);
+      if (!s) break;
+      liveUpdate(s, m);
+      s.n = m.n || s.n;
       dirty();
       break;
-    case 'done':
-      lifted = false;
-      if (m.undo) awaitingCanvas = true;
-      else liveClear();
+    }
+    case 'done': {
+      const s = strokeById(m.id);
+      if (!s) break;
+      if (m.undo) { s.done = m.count; dirty(); }
+      else strokeDrop(s);
       break;
-    case 'refused':
-      penCancel(false);
-      liveClear();
+    }
+    case 'refused': {
+      const s = strokeById(m.id);
+      if (s && s === live) penCancel(false);
+      else if (s) strokeDrop(s);
       flashBanner(m.why);
       break;
+    }
   }
 }
 
@@ -981,7 +997,7 @@ function renderBrushButton() {
     if (!brushRenderer || brushRenderer.canvas !== brushCanvas) brushRenderer = new DabRenderer(brushCanvas);
     const sets = new Map();
     for (const im of brushPreview.images) sets.set(String(im.id), im.add);
-    drawDabs(brushRenderer, sets, brushPreview.own, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }, w, h);
+    drawDabs(brushRenderer, [{ dabs: sets, own: brushPreview.own }], { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }, w, h);
   }
   else {
     const ctx = brushCanvas.getContext('2d');

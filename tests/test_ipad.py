@@ -343,4 +343,24 @@ st = of("state", messages())
 doc.onion_skin = False
 assert json.loads(_oanim.ipad_canvas(W, H))["onion"] == []
 
+
+# --- Lines drawn fast one after another: each answered by its id, the canvas saying how many strokes it shows -----------
+# (The page keeps a lifted line drawn until a canvas shows it; none is sent while another line is being drawn.)
+doc, got = fresh()
+made = of("canvas", got)[0]["strokes"]
+rows = wave()
+got = messages({"t": "down", "id": 11, "zoom": 1, "s": rows[:20]}, {"t": "move", "s": rows[20:]},
+               {"t": "up", "s": []}, {"t": "down", "id": 12, "zoom": 1, "s": rows[:20]})
+assert [(m["t"], m.get("id")) for m in got] == [("live", 11), ("live", 11), ("done", 11), ("live", 12)], \
+    [(m["t"], m.get("id")) for m in got]
+assert of("done", got)[0]["count"] == made + 1
+got = messages({"t": "move", "s": rows[20:]}, {"t": "up", "s": []})
+assert of("live", got)[0]["id"] == 12 and of("done", got)[0]["id"] == 12 and of("done", got)[0]["count"] == made + 2
+canvas = of("canvas", got)
+assert len(canvas) == 1 and canvas[0]["strokes"] == made + 2 and shapes() == 2, "the canvas shows both lines"
+# A refused stroke says which.
+ops.wm.tool_select()
+assert of("refused", messages({"t": "down", "id": 13, "zoom": 1, "s": rows[:3]}))[0]["id"] == 13
+ops.wm.tool_draw(mode="FREEHAND")
+
 print("ipad: ok")

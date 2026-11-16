@@ -68,6 +68,10 @@ PENDING = [
      '    return layer.shown_in_render() && layer.render_visible;', "Guides show on the iPad's canvas", 'tests/test_ipad.py'),
     ('scripts/modules/oanim/ipad.py', '    if _drawing is not None:\n        # The header', '    if False:\n        # The header',
      "Undo waits for the stroke being drawn on the iPad", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py', '            if name:\n                _strokes_done += 1', '            if name:\n                pass',
+     "Each iPad canvas says how many strokes it shows", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py', "json.dumps(_stroke_id)))", "'null'))",
+     "Each line drawn fast on the iPad is answered by its id", 'tests/test_ipad.py'),
 ]
 
 def build(root):

@@ -5,7 +5,7 @@ code; the iPad's camera opens the page, which connects back over a WebSocket. Ea
 which handles the page's messages and sends what changed.
 
 The page sends (JSON, "t" naming each):
-  down {eraser, zoom, s}   a Pencil stroke begins: its first samples s, [[x, y, pressure, tilt_x, tilt_y, seconds]]
+  down {id, eraser, zoom, s}   a Pencil stroke begins (id, the page's for it): its first samples s, [[x, y, pressure, tilt_x, tilt_y, seconds]]
                            in canvas pixels; zoom, the page's screen pixels per canvas pixel
   move {s}, up {s}         more samples; up ends the stroke, drawn as the viewport draws it (one undo step)
   cancel                   the stroke is dropped (a finger came down to pan)
@@ -19,10 +19,11 @@ Open Animate sends:
   state                    the header's settings, the shelf's pens, why drawing is refused ("" when it isn't), the
                            frame and layer
   tiles {tiles}            the shelf's pictures; brush {preview} the brush button's
-  canvas {w, h, svg, frame, onion}   the frame as Render Frame draws it, with the onion skins
-  live {kind, ...}         the line being drawn, as it now stands (only what changed since the last)
-  done {undo}              the stroke ended: the undo step it made ("" none)
-  refused {why}            a stroke that couldn't begin
+  canvas {w, h, svg, frame, onion, strokes}   the frame as Render Frame draws it, with the onion skins; strokes, how
+                           many strokes had been made when it was
+  live {id, kind, ...}     the line being drawn, as it now stands (only what changed since the last)
+  done {id, undo, count}   the stroke ended: the undo step it made ("" none), and the strokes made with it
+  refused {id, why}        a stroke that couldn't begin
 """
 
 import json
@@ -43,8 +44,11 @@ _last_brush = {}
 _last_canvas_key = None
 _last_canvas_time = 0.0
 _clients = set()
-# The connection whose stroke is being drawn.
+# The connection whose stroke is being drawn, and the page's id for that stroke (sent back with what is sent of it).
 _drawing = None
+_stroke_id = None
+# Strokes made so far: each canvas says how many it shows, so the page keeps a line lifted until one does.
+_strokes_done = 0
 
 
 def _send(client, text):
@@ -83,13 +87,14 @@ def clients():
 
 
 def _reset():
-    global _last_canvas_key, _drawing
+    global _last_canvas_key, _drawing, _stroke_id
     _last_state.clear()
     _last_tiles.clear()
     _last_brush.clear()
     _clients.clear()
     _last_canvas_key = None
     _drawing = None
+    _stroke_id = None
 
 
 def canvas_size():
@@ -172,7 +177,7 @@ def _set(values):
 
 def _handle(client, message):
     """One message from a page. True when it changed something besides a stroke."""
-    global _drawing
+    global _drawing, _stroke_id, _strokes_done
     import oanim
 
     t = message.get("t")
@@ -183,8 +188,10 @@ def _handle(client, message):
         _last_state.clear()
         _last_tiles.clear()
         _last_brush.clear()
-        global _last_canvas_key
+        global _last_canvas_key, _last_canvas_time
         _last_canvas_key = None
+        # Sent at once, however lately the last was.
+        _last_canvas_time = 0.0
         return False
     if t == "_close":
         _clients.discard(client)
@@ -194,12 +201,14 @@ def _handle(client, message):
         return False
     if t == "down":
         w, h = canvas_size()
+        stroke_id = message.get("id")
         why = _oanim.ipad_stroke_begin(w, h, float(message.get("zoom", 1.0)), bool(message.get("eraser", False)))
         if why:
             _drawing = None
-            _send_json(client, {"t": "refused", "why": why})
+            _send_json(client, {"t": "refused", "id": stroke_id, "why": why})
             return False
         _drawing = client
+        _stroke_id = stroke_id
         _live.count = 0
         _live(client, message.get("s", []))
         return False
@@ -210,7 +219,9 @@ def _handle(client, message):
         if t == "up":
             _drawing = None
             name = _oanim.ipad_stroke_end()
-            _send_json(client, {"t": "done", "undo": name})
+            if name:
+                _strokes_done += 1
+            _send_json(client, {"t": "done", "id": _stroke_id, "undo": name, "count": _strokes_done})
             return bool(name)
         return False
     if t == "cancel":
@@ -271,7 +282,7 @@ def _live(client, rows):
     text = _oanim.ipad_stroke_add(samples)
     if text:
         text = text.decode("utf-8")
-        _send(client, text[:-1] + ',"n":%d}' % _live.count)
+        _send(client, text[:-1] + ',"n":%d,"id":%s}' % (_live.count, json.dumps(_stroke_id)))
 
 
 def _send_changes(force_canvas=False):
@@ -294,7 +305,10 @@ def _send_changes(force_canvas=False):
         _last_canvas_key = canvas_key
         _last_canvas_time = now
         w, h = canvas_size()
-        _send(0, _oanim.ipad_canvas(w, h))
+        text = _oanim.ipad_canvas(w, h)
+        if isinstance(text, bytes):
+            text = text.decode("utf-8")
+        _send(0, text[:-1] + ',"strokes":%d}' % _strokes_done)
 
 
 # When what changed was last looked for, seconds.
