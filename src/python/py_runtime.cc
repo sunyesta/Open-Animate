@@ -1135,12 +1135,21 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   /* Which of the pen and the mouse is the pointer (wm/pointer_track.hh), through a list of moves: ("pen", x, y,
    * cursor_x, cursor_y) with where the system cursor is then, or ("mouse", x, y). For each mouse move, whether it is
    * taken (False: the cursor the pen left behind, dropped); and where ImGui's own read of the cursor at (x, y) ends up
-   * for a ("read", x, y). */
+   * for a ("read", x, y). The pen put down or lifted, ("touch", down): whether a release held back goes then; a
+   * button released, ("up",): whether it is taken (False: held back while the pen is down). */
   m.def("pointer_track", [](const std::vector<py::tuple> &moves) {
     PointerTrack t;
     py::list result;
     for (const py::tuple &move : moves) {
       const std::string kind = move[0].cast<std::string>();
+      if (kind == "touch") {
+        result.append(pointer_pen_touch(t, move[1].cast<bool>()));
+        continue;
+      }
+      if (kind == "up") {
+        result.append(pointer_button_up(t));
+        continue;
+      }
       const float x = move[1].cast<float>(), y = move[2].cast<float>();
       if (kind == "pen") {
         pointer_pen_moved(t, x, y, move[3].cast<float>(), move[4].cast<float>());

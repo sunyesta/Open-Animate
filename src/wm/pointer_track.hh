@@ -19,6 +19,9 @@ struct PointerTrack {
   /* Where the system cursor was at the pen's last move: what a stray report gives (the mouse's old place, or the
    * pen's own where the cursor follows it). */
   float left_x = 0.0f, left_y = 0.0f;
+  /* The pen is on the tablet, and a button release came while it was (held back until it lifts). */
+  bool touching = false;
+  bool release_held = false;
 };
 
 /* How near a report must be to where the cursor was left (window units): a mouse moved less is still. */
@@ -48,6 +51,33 @@ inline bool pointer_mouse_moved(PointerTrack &t, float x, float y)
   }
   t.pen = false;
   return true;
+}
+
+/* A mouse button let go. False while the pen is on the tablet: SDL, finding no mouse button down when it checks
+ * Windows' (on the first mouse message after the mouse left the window, or on the window gaining focus), lets go of
+ * the pen's, which a pen never presses there; every stroke with the mouse last over another program was a dot. Held
+ * back, and sent as the pen lifts (pointer_pen_touch). */
+inline bool pointer_button_up(PointerTrack &t)
+{
+  if (t.touching) {
+    t.release_held = true;
+    return false;
+  }
+  return true;
+}
+
+/* The pen put down or lifted: true when a release held back goes now (SDL's own is lost, the button already up in it). */
+inline bool pointer_pen_touch(PointerTrack &t, bool down)
+{
+  t.touching = down;
+  if (!down && t.release_held) {
+    t.release_held = false;
+    return true;
+  }
+  if (down) {
+    t.release_held = false;
+  }
+  return false;
 }
 
 }  // namespace oanim

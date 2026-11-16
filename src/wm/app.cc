@@ -380,6 +380,28 @@ void App::main_loop()
       else if (event.type == SDL_EVENT_MOUSE_MOTION && !pointer_mouse_moved(pointer_, event.motion.x, event.motion.y)) {
         continue;
       }
+      /* A release while the pen is down is SDL's check of the mouse's buttons letting go of the pen's: held back
+       * until the pen lifts (wm/pointer_track.hh). */
+      if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && !pointer_button_up(pointer_)) {
+        release_held_ = event;
+        continue;
+      }
+      /* Leaving or the window losing focus lifts it too, so a lost lift never holds every release after it. */
+      if ((event.type == SDL_EVENT_PEN_DOWN || event.type == SDL_EVENT_PEN_UP ||
+           event.type == SDL_EVENT_PEN_PROXIMITY_OUT || event.type == SDL_EVENT_WINDOW_FOCUS_LOST) &&
+          pointer_pen_touch(pointer_, event.type == SDL_EVENT_PEN_DOWN))
+      {
+        SDL_Event release = release_held_;
+        if (event.type == SDL_EVENT_PEN_UP) {
+          release.button.x = event.ptouch.x;
+          release.button.y = event.ptouch.y;
+        }
+        ImGui_ImplSDL3_ProcessEvent(&event);
+        handle_event(event);
+        ImGui_ImplSDL3_ProcessEvent(&release);
+        handle_event(release);
+        continue;
+      }
       ImGui_ImplSDL3_ProcessEvent(&event);
       if (event.type == SDL_EVENT_MOUSE_MOTION && !wm_.mouse_simulated_held && wm_.mouse_simulated.empty()) {
         wm_.mouse_simulating = false;

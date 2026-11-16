@@ -41,6 +41,8 @@ PENDING = [
      '  if (line.size() < 2) {', 'A brushed line drawn live has its tapers', 'tests/test_draw_live_brush.py'),
     ('src/wm/pointer_track.hh', '  return t.pen && std::fabs(x - t.left_x)', '  return false && t.pen && std::fabs(x - t.left_x)',
      'Lifting the pen does not flash the cursor where the mouse was', 'tests/test_pointer_track.py'),
+    ('src/wm/pointer_track.hh', '  if (t.touching) {', '  if (false && t.touching) {',
+     'A pen stroke with the mouse last over another program is not a dot', 'tests/test_pointer_track.py'),
 ]
 
 def build(root):

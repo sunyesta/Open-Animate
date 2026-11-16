@@ -105,6 +105,8 @@ class App {
   bool number_grab_ = false;
   /* Whether the pen or the mouse is the pointer: a pen's lift doesn't flash the cursor where the mouse was. */
   PointerTrack pointer_;
+  /* The button release held back while the pen is on the tablet, sent as it lifts. */
+  SDL_Event release_held_ = {};
   /* Keys pressed while a click is still on its way to the tools (ImGui hands a click's press and release over one
    * frame each), held until it has arrived: G right after clicking a point moves that point, as its selection is
    * there by then. */

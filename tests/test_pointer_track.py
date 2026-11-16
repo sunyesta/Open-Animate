@@ -36,4 +36,15 @@ assert track([("mouse", 10.0, 10.0), ("mouse", 10.0, 10.0), ("read", 10.0, 10.0)
 got = track([("pen", 50.0, 60.0, 50.0, 60.0), ("mouse", 50.0, 60.0), ("mouse", 90.0, 60.0)])
 assert got == [False, True], got
 
+# --- A release while the pen is down is held back, and sent as it lifts: the stroke goes on ------------------------------
+got = track([("touch", True), ("up",), ("up",), ("touch", False)])
+assert got == [False, False, False, True], got
+# Once only: the next stroke with no stray release has nothing to send as it lifts.
+got = track([("touch", True), ("up",), ("touch", False), ("touch", True), ("touch", False)])
+assert got == [False, False, True, False, False], got
+
+# --- With the pen up, every release is taken, and nothing waits for the next stroke --------------------------------------
+got = track([("up",), ("touch", True), ("touch", False), ("up",)])
+assert got == [True, False, False, True], got
+
 print("pointer track: ok")
