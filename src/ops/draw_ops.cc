@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "assets/brushes.hh"
 #include "assets/draw_presets.hh"
 #include "core/log.hh"
 #include "data/document.hh"
@@ -137,6 +138,50 @@ static bool stroke_line(Context &C, VectorDrawing &drawing, const InkStroke &ink
   C.wm->draw_last_closed = closes;
   /* The width it was drawn at: with Size Unit View, what it was on screen. */
   return line_add(C, drawing, knots, closes, true, ink.view().half_width * 2.0f, pixel);
+}
+
+bool draw_live_line(const ToolSettings &ts, const InkStroke &ink, float2 tip, int shapes_before,
+                    VectorDrawing &r_drawing)
+{
+  const Brush *brush = brush_find(ts.style.brush.name);
+  if (ink.empty() || !brush || brush_tip_images(*brush, ts.style.brush).empty()) {
+    return false;
+  }
+  std::vector<InkPoint> line = ink.points();
+  const std::vector<InkPoint> tail = ink.tail(tip);
+  line.insert(line.end(), tail.begin(), tail.end());
+  ink_taper(line, ink.settings(), ink.view());
+  if (line.size() < 2) {
+    return false;
+  }
+  r_drawing = VectorDrawing();
+  /* Placeholders: the seed is the shape's place in its drawing. */
+  r_drawing.shapes.resize(size_t(std::max(shapes_before, 0)));
+  /* Every sample a point, smooth through its neighbours (not fitted: a fit of a growing line would move the dabs
+   * already down each time it changes). */
+  Curve curve;
+  const int n = int(line.size());
+  for (int i = 0; i < n; i++) {
+    const int p = drawing_add_point(r_drawing, line[size_t(i)].pos);
+    r_drawing.points[size_t(p)].radius = line[size_t(i)].radius;
+    r_drawing.points[size_t(p)].opacity = std::clamp(line[size_t(i)].opacity, 0.0f, 1.0f);
+    const float2 before = line[size_t(std::max(i - 1, 0))].pos, after = line[size_t(std::min(i + 1, n - 1))].pos;
+    const float2 handle = (after - before) / (i == 0 || i == n - 1 ? 3.0f : 6.0f);
+    CurvePoint cp{p};
+    cp.curvature = CURVATURE_SMOOTH;
+    cp.aligned = true;
+    curve_point_set_handles(cp, handle * -1.0f, handle);
+    curve.points.push_back(cp);
+  }
+  r_drawing.curves.push_back(std::move(curve));
+  Shape shape;
+  shape.style = ts.style;
+  shape.style.line_width = ink.view().half_width * 2.0f;
+  for (int s = 0; s < r_drawing.curves.back().segment_count(); s++) {
+    shape.edges.push_back({0, s});
+  }
+  r_drawing.shapes.push_back(std::move(shape));
+  return true;
 }
 
 /* "x,y" as a place; false when it isn't one. */

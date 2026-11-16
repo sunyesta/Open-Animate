@@ -9239,6 +9239,47 @@ static void premultiplied_blend(const ImDrawList *, const ImDrawCmd *)
   glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 }
 
+/* Each area's renderer for a brushed line still being drawn. */
+static std::map<int, std::unique_ptr<SceneRenderer>> g_live_renderers;
+
+/* A brushed line still being drawn, with its brush as it goes (as Toon Boom paints): `line` (draw_live_line's) rendered
+ * alone, by the renderer the canvas uses, at the layer's opacity, and laid over the canvas. The layer's own id and the
+ * frame seed its dabs as the finished line's. */
+static void draw_live_brushed(ImDrawList *dl, int area_id, const Document &doc, const Layer &layer, VectorDrawing &&line,
+                              const Transform2D &layer_to_pixels, int width, int height, ImVec2 origin, ImVec2 size)
+{
+  OANIM_PROFILE("draw_live_brushed");
+  Document live;
+  live.width = doc.width;
+  live.height = doc.height;
+  live.frame_current = doc.frame_current;
+  live.shading = doc.shading;
+  Layer drawn;
+  drawn.id = layer.id;
+  drawn.name = layer.name;
+  drawn.opacity = 1.0f;
+  for (const Layer *l = &layer; l; l = layer_parent(const_cast<Document &>(doc), l->id)) {
+    drawn.opacity *= l->opacity;
+  }
+  drawn.drawing = std::move(line);
+  live.layers.push_back(std::move(drawn));
+  std::unique_ptr<SceneRenderer> &renderer = g_live_renderers[area_id];
+  if (!renderer) {
+    renderer = std::make_unique<SceneRenderer>();
+  }
+  renderer->set_interactive(false);
+  renderer->set_overscan(false);
+  renderer->set_layer_runs(false);
+  const unsigned int texture = renderer->render(live, width, height, layer_to_pixels, doc.viewport_quality,
+                                                doc.viewport_samples);
+  if (texture == 0) {
+    return;
+  }
+  dl->AddCallback(premultiplied_blend, nullptr);
+  dl->AddImage(ImTextureRef(ImTextureID(intptr_t(texture))), origin, origin + size, ImVec2(0, 1), ImVec2(1, 0));
+  dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+}
+
 /* ---------------------------------------------------------------------------------
  * The viewport
  */
@@ -18543,12 +18584,22 @@ static void viewport_draw_contents(Area &area, Context &C)
               tip = to_layer.apply(view.to_document(ImVec2(ahead.x, ahead.y)));
             }
           }
-          /* An eraser shows where it has been; it cuts on lifting. */
-          draw_tool_preview(dl, view, to_document,
-                            draw_mode_cuts(g_drag.ink_mode)        ? Color{0.9f, 0.3f, 0.3f, 0.4f}
-                            : g_drag.ink_mode == DrawMode::FillPen ? ts.style.fill
-                                                                   : ts.style.line,
-                            tip);
+          /* A brushed line paints with its brush as it goes; a solid one, a fill and an eraser are drawn by the
+           * preview (an eraser shows where it has been; it cuts on lifting). */
+          VectorDrawing live;
+          if (g_drag.ink_mode == DrawMode::Freehand && layer &&
+              draw_live_line(ts, g_drag.ink, tip, int(layer->drawing.shapes.size()), live))
+          {
+            draw_live_brushed(dl, area.id, doc, *layer, std::move(live), document_to_pixels * to_document, width_px,
+                              height_px, origin, size);
+          }
+          else {
+            draw_tool_preview(dl, view, to_document,
+                              draw_mode_cuts(g_drag.ink_mode)        ? Color{0.9f, 0.3f, 0.3f, 0.4f}
+                              : g_drag.ink_mode == DrawMode::FillPen ? ts.style.fill
+                                                                     : ts.style.line,
+                              tip);
+          }
         }
         break;
       case Tool::Cursor:

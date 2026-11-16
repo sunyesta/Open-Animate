@@ -836,6 +836,8 @@ add_test(NAME point_opacity
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_point_opacity.py)
 add_test(NAME draw_sweep_fixes
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_draw_sweep_fixes.py)
+add_test(NAME draw_live_brush
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_draw_live_brush.py)
 add_test(NAME timeline_sweep_fixes
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_timeline_sweep_fixes.py)
 add_test(NAME rig_sweep_fixes

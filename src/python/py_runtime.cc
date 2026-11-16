@@ -3042,6 +3042,42 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return result;
   });
+  /* A Stroke Pen stroke on the active drawing still being drawn, its first `upto` samples (x, y, pressure, seconds; layer
+   * space) in, as the viewport draws it with its brush (draw_live_line): its dabs [(x, y, alpha), ...], layer space, or
+   * None when it is drawn solid. */
+  m.def("draw_live_dabs", [](const std::vector<std::tuple<float, float, float, double>> &samples, float pixel,
+                             int upto) -> py::object {
+    Context &C = current_context();
+    Document &doc = *C.document;
+    ToolSettings &ts = C.wm->tool_settings;
+    const Layer *layer = document_active_layer(doc);
+    if (!layer) {
+      throw py::value_error("no active layer");
+    }
+    InkStroke ink;
+    ink.begin(ts.ink, {pixel, draw_half_width(ts, ts.draw_mode, pixel), 2.0f / std::max(float(doc.height), 1.0f)});
+    const int n = std::clamp(upto, 0, int(samples.size()));
+    for (int i = 0; i < n; i++) {
+      const auto &[x, y, pressure, time] = samples[size_t(i)];
+      ink.add({{x, y}, pressure, {}, time});
+    }
+    VectorDrawing live;
+    if (n == 0 || !draw_live_line(ts, ink, ink.last_sample(), int(layer->drawing.shapes.size()), live)) {
+      return py::none();
+    }
+    const Shape &shape = live.shapes.back();
+    const Brush *brush = brush_find(shape.style.brush.name);
+    const BrushPath path = brush_path(live, shape, 0.0f);
+    BrushDabs dabs;
+    brush_stroke(path, path, shape.style.brush, shape.style.line,
+                 std::vector<float>(std::max<size_t>(brush->files.size(), 1), 1.0f), 0.0f,
+                 brush_seed(shape.style.brush, layer->id, int(live.shapes.size()) - 1, doc.frame_current), dabs);
+    py::list result;
+    for (int i = 0; i < dabs.count; i++) {
+      result.append(py::make_tuple(dabs.centers[i].x, dabs.centers[i].y, dabs.alphas[i]));
+    }
+    return result;
+  });
   /* A solid line's triangles as the renderer makes them (its points' opacity included, no soft edge): [(x, y, alpha),
    * ...], layer space, alpha premultiplied by the line colour's. */
   m.def("layer_shape_stroke", [layer_or_raise](uint64_t id, int index) {

@@ -35,6 +35,10 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    ('src/ops/draw_ops.cc', '  r_drawing.shapes.resize(size_t(std::max(shapes_before, 0)));', '  (void)shapes_before;',
+     'A brushed line drawn live is seeded as its finished shape', 'tests/test_draw_live_brush.py'),
+    ('src/ops/draw_ops.cc', '  ink_taper(line, ink.settings(), ink.view());\n  if (line.size() < 2) {',
+     '  if (line.size() < 2) {', 'A brushed line drawn live has its tapers', 'tests/test_draw_live_brush.py'),
 ]
 
 def build(root):
