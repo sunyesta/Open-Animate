@@ -1643,14 +1643,18 @@ std::vector<MotionPath> motion_paths_make(const Document &doc, const std::vector
       own_at[i][k] = place(q, q.own_position);
       own_found[i][k] = 1;
     }
-    /* Its slopes (motion_paths_slide): the head goes with the position through what its parents are as shown, the
-     * same on every frame; a knob kept in its box doesn't. */
+    /* Its slopes (motion_paths_slide), per step of its keys' value (its Transform, which the position is turned from by
+     * the setup angle): the head goes with it through what its parents are as shown, the same on every frame; a knob
+     * kept in its box doesn't. */
     const Bone &kb = rig->bones[size_t(b)];
+    const float2 zero = bone_position_from_transform(kb, float2{0.0f, 0.0f});
+    const float2 ex = bone_position_from_transform(kb, float2{1.0f, 0.0f}) - zero;
+    const float2 ey = bone_position_from_transform(kb, float2{0.0f, 1.0f}) - zero;
     for (size_t k = 0; k < frames && !(bone_is_controller(kb) && kb.controller_contain_knob); k++) {
       if (own_found[i][k]) {
         const Place &q = found[k][i];
-        paths[i].own_dx = place(q, q.own_position + float2{1.0f, 0.0f}) - own_at[i][k];
-        paths[i].own_dy = place(q, q.own_position + float2{0.0f, 1.0f}) - own_at[i][k];
+        paths[i].own_dx = place(q, q.own_position + ex) - own_at[i][k];
+        paths[i].own_dy = place(q, q.own_position + ey) - own_at[i][k];
         paths[i].own_linear = true;
         break;
       }

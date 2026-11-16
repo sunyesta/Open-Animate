@@ -177,16 +177,24 @@ static bool path_shown_in(const std::vector<MotionPathTarget> &shown, const Moti
   return std::any_of(shown.begin(), shown.end(), [&](const MotionPathTarget &s) { return s.same(t); });
 }
 
+/* Whether `t`'s timing is one a path of `shown` is timed by: its own, the one it is timed by (a whole drawing's, a folded
+ * group's), or with a layer's origin shown its drawing's. */
+static bool path_timed_in(const Document &doc, const std::vector<MotionPathTarget> &shown, const MotionPathTarget &t)
+{
+  return std::any_of(shown.begin(), shown.end(), [&](const MotionPathTarget &s) {
+    const bool origin = !s.bone && !s.point && !s.drawing;
+    return t.same(s) || t.same(motion_path_timing_owner(doc, s)) || (origin && t.drawing && t.layer == s.layer);
+  });
+}
+
 static void path_picks_prune(Context &C, const std::vector<MotionPathTarget> &shown)
 {
   WindowManager &wm = *C.wm;
-  std::erase_if(wm.path_dots, [&](const auto &d) { return !path_shown_in(shown, d.first); });
+  const Document &doc = *C.document;
+  /* (A dot picked on a whole drawing's or a folded group's row is on the timing its paths share.) */
+  std::erase_if(wm.path_dots, [&](const auto &d) { return !path_timed_in(doc, shown, d.first); });
   std::erase_if(wm.path_handle_picks, [&](const MotionPathHandlePick &p) { return !path_shown_in(shown, p.target); });
-  const MotionPathTarget &g = wm.path_timing_point_target;
-  const bool graph_shown = std::any_of(shown.begin(), shown.end(), [&](const MotionPathTarget &s) {
-    const bool origin = !s.bone && !s.point && !s.drawing;
-    return g.same(s) || g.same(motion_path_timing_owner(*C.document, s)) || (origin && g.drawing && g.layer == s.layer);
-  });
+  const bool graph_shown = path_timed_in(doc, shown, wm.path_timing_point_target);
   if ((wm.path_timing_point >= 0 || !wm.path_timing_picks.empty()) && !graph_shown) {
     wm.path_timing_point = -1;
     wm.path_timing_picks.clear();
@@ -198,6 +206,11 @@ std::vector<MotionPathTarget> motion_path_targets(Context &C)
   std::vector<MotionPathTarget> all = motion_path_targets_all(C);
   MotionPathTarget active;
   if (C.document->path_show_all || all.size() < 2 || !motion_path_active(C, all, active)) {
+    /* Every path traced shown: picks on one no longer traced (its bone let go) are let go too. */
+    if (C.wm) {
+      C.wm->path_also_shown.clear();
+      path_picks_prune(C, all);
+    }
     return all;
   }
   std::vector<MotionPathTarget> shown = {active};
@@ -237,12 +250,7 @@ std::vector<MotionPathTarget> motion_path_timing_targets(Context &C)
   if (shown.empty()) {
     return out;
   }
-  std::erase_if(out, [&](const MotionPathTarget &t) {
-    return std::none_of(shown.begin(), shown.end(), [&](const MotionPathTarget &a) {
-      const bool origin = !a.bone && !a.point && !a.drawing;
-      return t.same(a) || t.same(motion_path_timing_owner(doc, a)) || (origin && t.drawing && t.layer == a.layer);
-    });
-  });
+  std::erase_if(out, [&](const MotionPathTarget &t) { return !path_timed_in(doc, shown, t); });
   return out;
 }
 

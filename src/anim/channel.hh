@@ -377,6 +377,31 @@ bool key_curve_join(std::vector<Key<float2>> &keys, size_t i);
  * timing is the caller's. */
 size_t key_control_to_key(std::vector<Key<float2>> &keys, size_t i, size_t j, int frame);
 
+/* A position key's shape on its path taken through `f` (an affine map of the keys' space, changing a float2 in place)
+ * as its value is: its control points where they are, its path handles and their handles as offsets (the map's turn
+ * and scale alone). For a change of what the keys are measured from (a setup moved, a rest applied), so the path
+ * keeps its shape. */
+template<typename F> void key_path_shape_map(Key<float2> &k, F &&f)
+{
+  float2 zero{0.0f, 0.0f};
+  f(zero);
+  const auto offset = [&](float2 &o) {
+    if (o.x != 0.0f || o.y != 0.0f) {
+      f(o);
+      o = o - zero;
+    }
+  };
+  offset(k.path_in);
+  offset(k.path_out);
+  for (float2 &c : k.path_controls) {
+    f(c);
+  }
+  for (PathControlHandles &h : k.path_control_handles) {
+    offset(h.in);
+    offset(h.out);
+  }
+}
+
 /* A control point of the stretch from `a` to `b` as stored (Key::path_controls) as a value, and back: stored where it
  * is, so these are the same (a file before format 6 kept them relative to the keys; see oanim_file.cc). */
 float2 path_control_value(float2 a, float2 b, float2 stored);

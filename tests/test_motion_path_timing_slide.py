@@ -123,6 +123,24 @@ check("a bone's stretch eased out")
 assert ops.anim.motion_path_slide(frame="16", progress="0.8", **bargs) == {'FINISHED'}
 check("a bone's dot slid")
 
+# A bone turned in its setup pose: its keys hold its change turned by that, which its slopes are measured by.
+doc.frame_current = 0
+assert ops.armature.bone_add(name="Arm", head_x="-2", head_y="0", tail_x="-1", tail_y="1", parent="") == {'FINISHED'}
+doc.auto_key = True
+for f, x, y in ((10, -2.0, 0.0), (20, 0.0, 3.0), (30, 3.0, 1.0)):
+    doc.frame_current = f
+    rig().bone_set("Arm", position=(x, y))
+doc.auto_key = False
+rig().select_bone("Arm")
+doc.frame_current = 15
+assert [p["label"] for p in wm.motion_paths(kept=False)] == ["Arm tip"]
+aargs = dict(bone="Arm", layer=str(rig_id))
+assert wm.motion_paths_hold() == 1
+assert ops.anim.motion_path_stretch_shape(shape="EASE_IN", frame="15", **aargs) == {'FINISHED'}
+check("a bone turned 45 degrees in its setup pose")
+assert ops.anim.motion_path_slide(frame="13", progress="0.6", **aargs) == {'FINISHED'}
+check("a turned bone's dot slid")
+
 # A knob kept in its box goes with its value only inside it: never slid.
 doc.frame_current = 0
 rig().select_bone("Hand")

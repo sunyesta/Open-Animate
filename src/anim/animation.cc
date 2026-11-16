@@ -4578,6 +4578,26 @@ template<typename C> static void bone_fix_lines_drop(const Layer &owner, const B
   }
 }
 
+/* A bone's position keys scaled by `k` (a knob's frames as moves, or back), their paths' shapes with them: the
+ * mainline's with `mainline`, and always every ordinary action's (an action that isn't a side's or a fix's line: those
+ * are dropped). */
+static void position_keys_scale(Bone &bone, float k, bool mainline)
+{
+  const auto scale = [&](float2 &v) { v = v * k; };
+  const auto each = [&](std::vector<Key<float2>> &keys) {
+    for (Key<float2> &key : keys) {
+      key.value = key.value * k;
+      key_path_shape_map(key, scale);
+    }
+  };
+  if (mainline) {
+    each(bone.position_keys.keys);
+  }
+  for (auto &[action, keys] : bone.position_keys.actions) {
+    each(keys);
+  }
+}
+
 std::string bone_convert_to_controller(Document &doc, uint64_t owner_id, uint64_t bone_id)
 {
   Layer *owner = layer_find(doc, owner_id);
@@ -4637,14 +4657,17 @@ std::string bone_convert_to_controller(Document &doc, uint64_t owner_id, uint64_
       const float right = frame_of(own[0], turn);
       return float2(right > 0.0f ? right : -frame_of(own[1], turn), 0.0f);
     });
+    /* Its moves in other actions are the knob's frames now. */
+    position_keys_scale(*bone, 1.0f / bone->controller_frame_size, false);
   }
   else {
-    /* Moves it was keyed with stay, as frames, and come back the same: its size stays as it is for that. */
+    /* Moves it was keyed with stay, as frames (in every action too), and come back the same: its size stays as it is
+     * for that. */
     bone->angle_keys.keys = std::move(angle_keys);
-    bone->controller_size_auto = bone->position_keys.keys.empty();
-    for (Key<float2> &k : bone->position_keys.keys) {
-      k.value = k.value / bone->controller_frame_size;
-    }
+    bone->controller_size_auto = bone->position_keys.keys.empty() &&
+                                 std::all_of(bone->position_keys.actions.begin(), bone->position_keys.actions.end(),
+                                             [](const auto &a) { return a.second.empty(); });
+    position_keys_scale(*bone, 1.0f / bone->controller_frame_size, true);
   }
   bone->angle = bone->setup_angle;
   bone->turn = 0.0f;
@@ -4682,12 +4705,6 @@ std::string bone_convert_to_regular(Document &doc, uint64_t owner_id, uint64_t b
     });
     bone->position_keys.keys.clear();
   }
-  else {
-    /* The knob's frames stay, as moves. */
-    for (Key<float2> &k : bone->position_keys.keys) {
-      k.value = k.value * bone->controller_frame_size;
-    }
-  }
   /* Its keys in its sides' actions were their timing, never a move: as a bone they'd move it. So were its keys in the
    * fixes that follow it (their line). */
   for (const std::string &action : bone->controller_actions) {
@@ -4696,6 +4713,8 @@ std::string bone_convert_to_regular(Document &doc, uint64_t owner_id, uint64_t b
     }
   }
   bone_fix_lines_drop(*owner, *bone, bone->position_keys);
+  /* The knob's frames stay, as moves: the mainline's where it had no sides of its own, every other action's always. */
+  position_keys_scale(*bone, bone->controller_frame_size, !(own_right || own_left));
   bone->type = BoneType::Regular;
   bone->controller_actions = {};
   bone->controller_keys = {};

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <type_traits>
 #include <string>
 
 #include "anim/animation.hh"
@@ -101,6 +102,10 @@ static int each_posed_key(Channel<T> &ch, const std::set<std::string> &action_bo
         f(k.value);
         n++;
       }
+      /* A position key's control points and handles are in the keys' space too (the setup key's handles as well). */
+      if constexpr (std::is_same_v<T, float2>) {
+        key_path_shape_map(k, f);
+      }
     }
   };
   run(ch.keys);
@@ -116,13 +121,31 @@ int keep_poses(Document &doc, const SetupSnapshot &before)
 {
   int changed = 0;
   std::set<std::string> action_bone_actions;
+  /* With them every fix: it plays its keys as their change from the setup, as an action bone action adds its keys, so
+   * they stay as they are (but a fix's line, its keys on a bone it follows, which are where that bone is). */
+  std::set<std::string> fixes;
   for (const Layer *l : document_layers_flat(doc)) {
     for (const std::string &name : l->actions) {
       if (l->is_bone_layer() && action_adds(*l, name)) {
         action_bone_actions.insert(name);
       }
     }
+    for (const BoneFix &f : l->bone_fixes) {
+      fixes.insert(f.name);
+    }
   }
+  std::set<std::string> adding = action_bone_actions;
+  adding.insert(fixes.begin(), fixes.end());
+  /* What a bone's channel `ch` leaves alone: the actions that add, but the fixes whose line it holds. */
+  const auto adding_to = [&](const Layer &layer, const Bone &b, const void *ch) {
+    std::set<std::string> out = adding;
+    for (const std::string &name : fixes) {
+      if (bone_fix_line_of(layer, name, b, ch)) {
+        out.erase(name);
+      }
+    }
+    return out;
+  };
   for (const SetupSnapshot::LayerSetup &s : before.layers) {
     Layer *layer = layer_find(doc, s.layer);
     if (!layer) {
@@ -136,7 +159,7 @@ int keep_poses(Document &doc, const SetupSnapshot &before)
       }
       const float2 moved = p.setup_pos - it->second;
       if (length(moved) > 1e-9f) {
-        changed += each_posed_key(p.pos_keys, action_bone_actions, [&](float2 &v) { v -= moved; });
+        changed += each_posed_key(p.pos_keys, adding, [&](float2 &v) { v -= moved; });
       }
     }
     /* Handles: a key holds the turn and the length added to the setup handle; the handle it made is
@@ -152,7 +175,7 @@ int keep_poses(Document &doc, const SetupSnapshot &before)
           if (length(now - was) <= 1e-9f) {
             continue;
           }
-          changed += each_posed_key(in ? cp.handle_in_keys : cp.handle_out_keys, action_bone_actions, [&](float2 &v) {
+          changed += each_posed_key(in ? cp.handle_in_keys : cp.handle_out_keys, adding, [&](float2 &v) {
             v = handle_change(now, handle_from_change(was, v, in), v.x, in);
           });
         }
@@ -179,18 +202,18 @@ int keep_poses(Document &doc, const SetupSnapshot &before)
         }
       }
       if (moved) {
-        changed += each_posed_key(b.position_keys, action_bone_actions, [&](float2 &t) {
+        changed += each_posed_key(b.position_keys, adding_to(*layer, b, &b.position_keys), [&](float2 &t) {
           const float2 where = was.position + rotate(t, was.angle) + copied.position;
           t = rotate(where - b.setup_position, -b.setup_angle);
         });
         changed += each_posed_key(
-            b.angle_keys, action_bone_actions, [&](float &u) { u += was.angle - b.setup_angle + copied.angle; },
-            own_action_bones);
+            b.angle_keys, adding_to(*layer, b, &b.angle_keys),
+            [&](float &u) { u += was.angle - b.setup_angle + copied.angle; }, own_action_bones);
       }
       /* Lengthened on the setup frame: its keyed scale along it shrinks to keep its posed length. */
       if (std::fabs(b.length - was.length) > 1e-9f && b.length > 1e-9f) {
         const float k = was.length / b.length;
-        changed += each_posed_key(b.scale_keys, action_bone_actions, [&](float2 &v) { v.y *= k; });
+        changed += each_posed_key(b.scale_keys, adding_to(*layer, b, &b.scale_keys), [&](float2 &v) { v.y *= k; });
       }
     }
   }

@@ -3350,11 +3350,24 @@ void rig_operators_register()
                 b.setup_position = it->second.first;
                 b.setup_angle = it->second.second;
               }
-              else if (moved.count(b.parent) && !action_bones.count(b.id)) {
+              else if (moved.count(b.parent) && !action_bones.count(b.id) && !bone_is_controller(b)) {
                 const Transform2D local = bone_pose_find(now, b.parent)->setup.inverted() *
                                           bone_pose_find(old_poses, b.id)->setup;
                 b.setup_position = {local.tx, local.ty};
                 b.setup_angle = std::atan2(local.b, local.a);
+              }
+              else if (moved.count(b.parent) && bone_is_controller(b)) {
+                /* A controller keeps its place on its parent: its keys are its knob's frames in its box, which no key
+                 * could hold where it was, so its box goes on where its parent shows on every frame (and rests where
+                 * its parent now rests). Its box, set in the setup's space, turns and sizes with its rest's change, so
+                 * the knob's frames still put it where it showed. */
+                const Transform2D change = bone_pose_find(now, b.parent)->setup *
+                                           bone_pose_find(old_poses, b.parent)->setup.inverted();
+                b.controller_box_angle += std::atan2(change.b, change.a);
+                const float size = std::sqrt(std::abs(change.a * change.d - change.b * change.c));
+                if (size > 1e-6f) {
+                  b.controller_frame_size *= size;
+                }
               }
               else if (!moved.count(b.parent)) {
                 continue;
@@ -3404,6 +3417,16 @@ void rig_operators_register()
                 }
               };
               each(layer->position_keys, [&](float2 &v) { v = m.apply(v); });
+              /* (Its path's control points and handles with them.) */
+              const auto map = [&](float2 &v) { v = m.apply(v); };
+              for (Key<float2> &k : layer->position_keys.keys) {
+                key_path_shape_map(k, map);
+              }
+              for (auto &[action, keys] : layer->position_keys.actions) {
+                for (Key<float2> &k : keys) {
+                  key_path_shape_map(k, map);
+                }
+              }
               each(layer->rotation_keys, [&](float &v) { v += turn; });
               continue;
             }
@@ -3453,7 +3476,8 @@ void rig_operators_register()
                 ch.set_key(1, value);
               }
               for (const std::string &action : armature->actions) {
-                if (action_adds(*armature, action)) {
+                /* (Nor a fix: it adds its keys as their change from the setup, nothing where it has none.) */
+                if (action_adds(*armature, action) || bone_fix_find(*armature, action)) {
                   continue;
                 }
                 auto &keys = ch.actions[action];

@@ -72,6 +72,9 @@ assert ops.anim.motion_path_handle_select(frame="20", out="1", **args) == {'FINI
 assert ops.anim.timeline_stretch_pick(frame="25", layers=str(box.id)) == {'FINISHED'}
 assert len(wm.motion_path_dots()) == 1 and picks() == [], ("Alt click in a timeline row drops them", picks())
 doc.frame_current = 20
+# (The point picked above let go: the layer's own path traced again, its handles pickable.)
+ops.mesh.select_none()
+assert wm.motion_paths_traced() == [box.name], wm.motion_paths_traced()
 
 # --- G R S on a picked handle: it alone, about its key -----------------------------------------------------------------
 assert ops.anim.motion_path_handle_select(frame="20", out="1", **args) == {'FINISHED'}
