@@ -31,7 +31,7 @@ frames, auto-key, undo and redo; bone moves, turns, scales and lengths (Python a
 Bones), knobs inside and past their box, add/delete/duplicate/extrude/subdivide/parent/convert/clear bones; actions
 entered, left and made; points moved, deleted, dissolved, subdivided, split, added, extruded; weights assigned,
 removed, automatic, cleaned; Parent Bone with its deform modes; new drawings in the rig; insert/delete keys; Sculpt strokes with every brush (Dyntopo 40% of the time, at Resolution
-8-400 and each Refine Method) and Simplify; curvature, width, smooth, slide, merge, mirror, symmetrize, clear handles,
+8-400, Decimate half the time) and Simplify; curvature, width, smooth, slide, merge, mirror, symmetrize, clear handles,
 unalign and handle moves; Auto-Freeze Keys on and off (on by default: `OA_FUZZ_FREEZE=0` leaves the file's setting), folding timeline rows (Key Together), Key Whole Drawing, layer move/turn/size/opacity; fix actions that follow bones (`fix_new`, `fix_follow`, `fix_set`,
 `fix_mute`, `fix_enter`, `fix_key`, `fix_peek`, `fix_still`, with `check_fixes` after every op), `freeze_check` (an edit between a layer's poses must leave them as they were), and `mpath` (motion paths drawn on a frame: the shortcuts, from keys and kept copies, must match working every frame out on copies, each dot must sit where that frame's pose puts it, and drawing them changes nothing; `OA_FUZZ_MPATH_W` weights it) `mpath_edit` (moves and handle drags on a path, checked against working each frame out afresh), `ref_op` and `ref_check` (references of drawings and groups, each shown where its original is; `OA_FUZZ_X_W` weights the three, `OA_FUZZ_NO_PEEK=1` leaves `fix_peek` out, `OA_FUZZ_SAVE_FAIL=<path>` saves the document as it failed) (`OA_FUZZ_ONLY` limits a run to a list of op names; `OA_FUZZ_SAVE_END=<path>` saves the document at the end, to write a repro from a long log without shrinking). It checks
 every op (no exception, finite numbers, a change only with an undo step, CANCELLED changes nothing, entering an action
@@ -247,5 +247,7 @@ not a bug, check the times against the shutdown before shrinking.
   capture, so it looks done and isn't. Check it after every point op that ran with a reference picked.
 - **A paste on the setup frame pastes changes.** Keys hold changes from the setup, so pasting them onto frame 0 moves
   the setup and every later key with it: paste twice and the second press must change nothing.
-- **Known open (Nov 2026 sweep):** Twist with Dyntopo Collapse (fuzz seed 33, resolution 50) strays up to 0.018 at
-  strength 2 when Collapse refits after the twist; not fixed yet, don't report it again.
+- **An operator ignores a setting it doesn't read.** Dyntopo's refine= became decimate= (off by default), and the
+  fuzzer kept sending refine=: its "Collapse" strokes only added points, then were checked against strokes without
+  Dyntopo (seed 33's Twist "0.018 off"). When a check fails on a setting, first see that the operator reads it
+  (`op_arg` / `op_has_arg` in its exec).

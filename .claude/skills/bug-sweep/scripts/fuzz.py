@@ -364,7 +364,7 @@ def dyntopo_ready(ds):
 @op("sculpt", 7)
 def _(rng):
     """A stroke centred near one of a drawing's shown points (worked out when applied, so a shrunk replay still hits
-    the drawing): Grab and Push drag, the others dab in place. Sometimes Dyntopo (resolution=, refine=), sometimes
+    the drawing): Grab and Push drag, the others dab in place. Sometimes Dyntopo (resolution=, and half of those decimate=), sometimes
     the drawing's group active instead (several layers), keep_poses on frame 0, X mirror, Selected Only."""
     ds = drawings()
     if not ds:
@@ -386,12 +386,12 @@ def _(rng):
         out["sensitivity"] = rng.choice([0.05, 0.25, 1.0, 4.0])
     if rng.random() < 0.4:
         out["resolution"] = rng.choice([8.0, 25.0, 50.0, 120.0, 400.0])
-        out["refine"] = rng.choice(["SUBDIVIDE", "COLLAPSE", "SUBDIVIDE_COLLAPSE"])
+        out["decimate"] = rng.random() < 0.5
     if rng.random() < 0.12:   # exactly on the point, Grab at full strength: the point must land where the mouse took it
         out.update(brush="GRAB", off=[0.0, 0.0], falloff="CONSTANT", strength=1.0, invert=False, mirror=False,
                    group=False, selected=None, amount=1.0)
         out.pop("resolution", None)
-        out.pop("refine", None)
+        out.pop("decimate", None)
     return out
 
 
@@ -511,18 +511,21 @@ def apply_sculpt(op):
         kw["keep_poses"] = "1"
     if "resolution" in op:
         kw["resolution"] = str(op["resolution"])
-        kw["refine"] = op["refine"]
+        # (older logs' refine=, which the operator no longer reads: one with a collapse in it replays as decimate on)
+        decimate = op.get("decimate", "COLLAPSE" in op.get("refine", ""))
+        kw["decimate"] = "1" if decimate else "0"
     dyn_free = "resolution" in op and not op["mirror"] and _oanim_blocked(layer.id) == ""
     exact = op["brush"] == "GRAB" and op["off"] == [0.0, 0.0] and op["falloff"] == "CONSTANT" and \
         op["strength"] == 1.0 and "resolution" not in op and not op["mirror"] and not op.get("group") and \
         not op.get("selected") and (os.environ.get("OA_FUZZ_SKIP_FIXED") != "1" or not known_deform(layer))
     # (a Cage Deform's layer is known: Sculpt doesn't settle the points under the mouse there, G does)
     p0 = layer.shown()[0][op["i"]] if exact else None
-    # Collapse alone only takes out points the line keeps its shape without: on the setup frame, on a plain drawing,
-    # the stroke with it lands within a tenth of a step of the same stroke without it.
+    # Decimate only takes out points the line keeps its shape without: on the setup frame, on a plain drawing, the
+    # stroke with it lands within a tenth of a step of the same Dyntopo stroke without it (points added, none taken
+    # out; never a stroke without Dyntopo, which bends only the points the line had).
     collapse_ref = None
-    if dyn_free and op["refine"] == "COLLAPSE" and doc.frame_current == 0 and not op.get("group") and             [m["type"] for m in layer.modifiers] in ([], ["ARMATURE"]) and layer.shape_count > 0:
-        plain_kw = {k: v for k, v in kw.items() if k not in ("resolution", "refine")}
+    if dyn_free and kw.get("decimate") == "1" and doc.frame_current == 0 and not op.get("group") and             [m["type"] for m in layer.modifiers] in ([], ["ARMATURE"]) and layer.shape_count > 0:
+        plain_kw = dict(kw, decimate="0")
         if ops.sculpt.stroke(**plain_kw) == {'FINISHED'}:
             collapse_ref = outlines(layer)
             ops.ed.undo()
@@ -533,7 +536,7 @@ def apply_sculpt(op):
         for k, ((pa, _), (pb, _)) in enumerate(zip(collapse_ref, got)):
             gap = outline_gap(pa, pb)
             if gap > tol:
-                raise Failure(f"collapse-shape: a {op['brush']} stroke with Dyntopo Collapse at resolution "
+                raise Failure(f"collapse-shape: a {op['brush']} stroke with Dyntopo Decimate at resolution "
                               f"{op['resolution']} left {layer.name!r}'s shape {k} {gap:.5f} off the same stroke "
                               f"without it (allowed {tol:.5f})")
     if dyn_free and r == {'FINISHED'}:
