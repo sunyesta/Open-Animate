@@ -72,6 +72,8 @@ PENDING = [
      "Each iPad canvas says how many strokes it shows", 'tests/test_ipad.py'),
     ('scripts/modules/oanim/ipad.py', "json.dumps(_stroke_id)))", "'null'))",
      "Each line drawn fast on the iPad is answered by its id", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py', '                before.setdefault(text, i)', '                pass',
+     "An undo on the iPad sends only what it changed of the canvas", 'tests/test_ipad.py'),
 ]
 
 def build(root):

@@ -131,10 +131,33 @@ ipad._send = lambda client, text: sent.append((client, json.loads(text if isinst
 CLIENT = 7
 
 
+# The canvas as the page puts it together from the pieces each canvas sends (app.js canvasApply).
+page = {"seq": 0, "head": "", "defs": [], "body": [], "svg": ""}
+
+
+def page_canvas(m):
+    assert m["base"] == 0 or m["base"] == page["seq"], ("sent against a canvas the page has", m["base"], page["seq"])
+    if m["base"] == 0:
+        page.update(head=m["head"], defs=[], body=[])
+    for key in ("defs", "body"):
+        page[key] = [v if isinstance(v, str) else page[key][v] for v in m[key]]
+    page["seq"] = m["seq"]
+    page["svg"] = page["head"] + "<defs>" + "".join(page["defs"]) + "</defs>" + "".join(page["body"]) + "</svg>"
+
+
+def whole(svg):
+    """An SVG as the page's pieces put back together, to compare with one the page made."""
+    head, defs, body = ipad.svg_pieces(svg)
+    return head + "<defs>" + "".join(defs) + "</defs>" + "".join(body) + "</svg>"
+
+
 def messages(*items):
     sent.clear()
     changed = ipad._tick([(CLIENT, json.dumps(m)) for m in items])
     ipad._flush(changed)
+    for _, m in sent:
+        if m["t"] == "canvas":
+            page_canvas(m)
     return [m for _, m in sent]
 
 
@@ -166,7 +189,8 @@ assert set(tiles) == {p["name"] for p in st["presets"]}
 assert len(tiles["Ink"]["strokes"]) == 1 and len(tiles["Ink"]["strokes"][0]["p"]) > 20, "Ink's sample line"
 canvas = of("canvas", got)[0]
 W, H = ipad.canvas_size()
-assert (canvas["w"], canvas["h"]) == (W, H) and "<svg" in canvas["svg"] and canvas["onion"] == []
+assert (canvas["w"], canvas["h"]) == (W, H) and "<svg" in canvas["head"] and canvas["onion"] == []
+assert canvas["base"] == 0 and page["svg"] == whole(json.loads(_oanim.ipad_canvas(W, H))["svg"]), "a new page's canvas whole"
 assert messages() == [], "nothing again until something changes"
 
 
@@ -210,7 +234,8 @@ end_px = line[-4:-2]
 to_doc = lambda x, y: ((x - W / 2) / (H / 2), (H / 2 - y) / (H / 2))
 last = to_doc(*end_px)
 assert min(math.hypot(last[0] - p[0], last[1] - p[1]) for p in drawn) < 2.0 / H, (last, drawn[-3:])
-assert of("canvas", got) and "<path" in of("canvas", got)[-1]["svg"], "the canvas sent again with the line in it"
+assert of("canvas", got) and any(isinstance(v, str) and "<path" in v for v in of("canvas", got)[-1]["body"]), \
+    "the canvas sent again with the line in it"
 
 # The same samples through draw.stroke, in the layer's space with the iPad's pixel: the same points. With Size Unit
 # View the width follows the iPad's zoom, so a pen sized on screen is that size on the iPad.
@@ -362,5 +387,31 @@ assert len(canvas) == 1 and canvas[0]["strokes"] == made + 2 and shapes() == 2, 
 ops.wm.tool_select()
 assert of("refused", messages({"t": "down", "id": 13, "zoom": 1, "s": rows[:3]}))[0]["id"] == 13
 ops.wm.tool_draw(mode="FREEHAND")
+
+
+# --- An undo sends only what it changed: the canvas in pieces, those the last canvas had sent as their places ---------------
+doc, got = fresh()
+for k in range(6):
+    stroke([[x, y + (k + 1) * H * 0.06, p, a, b, t] for x, y, p, a, b, t in wave()])
+assert shapes() == 6
+stroke(wave())
+assert page["svg"] == whole(json.loads(_oanim.ipad_canvas(W, H))["svg"])
+full_size = len(json.dumps(json.loads(_oanim.ipad_canvas(W, H))))
+got = messages({"t": "undo"})
+undo_canvas = of("canvas", got)[0]
+assert undo_canvas["base"] != 0 and not any(isinstance(v, str) for v in undo_canvas["body"] + undo_canvas["defs"]),     ("an undo sends the shapes left as their places", undo_canvas["body"])
+assert len(json.dumps(undo_canvas)) < full_size / 4, (len(json.dumps(undo_canvas)), full_size)
+assert page["svg"] == whole(json.loads(_oanim.ipad_canvas(W, H))["svg"]), "the page's canvas is the frame's"
+got = messages({"t": "redo"})
+assert sum(isinstance(v, str) for v in of("canvas", got)[0]["body"]) == 1, "the line drawn again, alone"
+assert page["svg"] == whole(json.loads(_oanim.ipad_canvas(W, H))["svg"])
+# A page that lost track asks for the canvas whole.
+got = messages({"t": "canvas_full"})
+assert of("canvas", got)[0]["base"] == 0 and page["svg"] == whole(json.loads(_oanim.ipad_canvas(W, H))["svg"])
+# Pieces that are alike are each kept (the page clones a node used twice).
+head, defs, body = ipad.svg_pieces('<?xml version="1.0"?>\n<svg a="1"><defs><mask id="m0"><path d="M0 0"/></mask></defs>'
+                                   '<path d="M1 1"/><g mask="url(#m0)"><path d="M2 2"/></g><path d="M1 1"/></svg>')
+assert head.endswith('<svg a="1">') and defs == ['<mask id="m0"><path d="M0 0"/></mask>'], (head, defs)
+assert body == ['<path d="M1 1"/>', '<g mask="url(#m0)"><path d="M2 2"/></g>', '<path d="M1 1"/>'], body
 
 print("ipad: ok")

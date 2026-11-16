@@ -14,19 +14,24 @@ The page sends (JSON, "t" naming each):
                            opacity (the line's, or the Fill Pen's fill)
   preset {name}            a shelf tile picked; preset_save {name} the + tile
   brush {name}             the line brush's shape ("" plain); brush_recent {index}
+  canvas_full              the page lost track of the canvases: the next comes whole
 
 Open Animate sends:
   state                    the header's settings, the shelf's pens, why drawing is refused ("" when it isn't), the
                            frame and layer
   tiles {tiles}            the shelf's pictures; brush {preview} the brush button's
-  canvas {w, h, svg, frame, onion, strokes}   the frame as Render Frame draws it, with the onion skins; strokes, how
-                           many strokes had been made when it was
+  canvas {w, h, head, defs, body, seq, base, frame, onion, strokes}   the frame as Render Frame draws it, with the
+                           onion skins; strokes, how many strokes had been made when it was. Its SVG comes in pieces
+                           (the root's tag, the elements in its defs and those after): a piece the last canvas (seq
+                           base) had is sent as its place in that one, so an undo sends only what it changed; base 0,
+                           every piece's text
   live {id, kind, ...}     the line being drawn, as it now stands (only what changed since the last)
   done {id, undo, count}   the stroke ended: the undo step it made ("" none), and the strokes made with it
   refused {id, why}        a stroke that couldn't begin
 """
 
 import json
+import re
 import time
 
 import _oanim
@@ -43,6 +48,8 @@ _last_tiles = {}
 _last_brush = {}
 _last_canvas_key = None
 _last_canvas_time = 0.0
+# The last canvas's SVG in pieces, what the next is sent against (head None: send it whole).
+_last_pieces = {"seq": 0, "head": None, "defs": [], "body": []}
 _clients = set()
 # The connection whose stroke is being drawn, and the page's id for that stroke (sent back with what is sent of it).
 _drawing = None
@@ -93,6 +100,7 @@ def _reset():
     _last_brush.clear()
     _clients.clear()
     _last_canvas_key = None
+    _last_pieces["head"] = None
     _drawing = None
     _stroke_id = None
 
@@ -177,7 +185,7 @@ def _set(values):
 
 def _handle(client, message):
     """One message from a page. True when it changed something besides a stroke."""
-    global _drawing, _stroke_id, _strokes_done
+    global _drawing, _stroke_id, _strokes_done, _last_canvas_key, _last_canvas_time
     import oanim
 
     t = message.get("t")
@@ -188,9 +196,14 @@ def _handle(client, message):
         _last_state.clear()
         _last_tiles.clear()
         _last_brush.clear()
-        global _last_canvas_key, _last_canvas_time
         _last_canvas_key = None
+        _last_pieces["head"] = None
         # Sent at once, however lately the last was.
+        _last_canvas_time = 0.0
+        return False
+    if t == "canvas_full":
+        _last_canvas_key = None
+        _last_pieces["head"] = None
         _last_canvas_time = 0.0
         return False
     if t == "_close":
@@ -305,10 +318,76 @@ def _send_changes(force_canvas=False):
         _last_canvas_key = canvas_key
         _last_canvas_time = now
         w, h = canvas_size()
-        text = _oanim.ipad_canvas(w, h)
-        if isinstance(text, bytes):
-            text = text.decode("utf-8")
-        _send(0, text[:-1] + ',"strokes":%d}' % _strokes_done)
+        message = json.loads(_oanim.ipad_canvas(w, h))
+        message["strokes"] = _strokes_done
+        _send(0, json.dumps(_canvas_pieces(message), separators=(",", ":")))
+
+
+_TAG = re.compile(r"<(/?)([A-Za-z][\w:.-]*)(?:[^>\"']|\"[^\"]*\"|'[^']*')*?(/?)>|<\?.*?\?>|<!--.*?-->|<!\[CDATA\[.*?\]\]>", re.S)
+
+
+def svg_pieces(svg):
+    """An SVG's text cut where the page swaps it: (the root's opening tag, the elements in its defs, the elements after
+    them), each the exact text of one element. The text between them is left out (an SVG draws none)."""
+    head = None
+    defs, body = [], []
+    depth = 0
+    in_defs = False
+    start = None
+    piece_depth = 0
+    piece_in_defs = False
+    for m in _TAG.finditer(svg):
+        name = m.group(2)
+        if not name:
+            continue
+        if m.group(1):
+            depth -= 1
+            if start is not None and depth == piece_depth:
+                (defs if piece_in_defs else body).append(svg[start:m.end()])
+                start = None
+            elif start is None and depth == 1 and name == "defs":
+                in_defs = False
+            continue
+        closed = bool(m.group(3))
+        if head is None:
+            head = svg[:m.end()]
+            depth = 1
+            continue
+        if start is None:
+            if depth == 1 and name == "defs" and not in_defs:
+                if not closed:
+                    in_defs = True
+                    depth = 2
+                continue
+            if depth == (2 if in_defs else 1):
+                if closed:
+                    (defs if in_defs else body).append(m.group(0))
+                    continue
+                start = m.start()
+                piece_depth = depth
+                piece_in_defs = in_defs
+        if not closed:
+            depth += 1
+    return head or "", defs, body
+
+
+def _canvas_pieces(message):
+    """The canvas message with its SVG in pieces, those the last canvas had sent as their place in it."""
+    head, defs, body = svg_pieces(message.pop("svg"))
+    last = _last_pieces
+    whole = last["head"] != head
+    message["head"] = head
+    for key, now in (("defs", defs), ("body", body)):
+        before = {}
+        if not whole:
+            for i, text in enumerate(last[key]):
+                before.setdefault(text, i)
+        message[key] = [before.get(text, text) for text in now]
+    message["base"] = 0 if whole else last["seq"]
+    last["seq"] += 1
+    message["seq"] = last["seq"]
+    last.update(head=head, defs=defs, body=body)
+    return message
 
 
 # When what changed was last looked for, seconds.

@@ -15,6 +15,7 @@
 #include "anim/draw_order.hh"
 #include "anim/layer_pick.hh"
 #include "assets/brushes.hh"
+#include "core/profile.hh"
 #include "data/bones.hh"
 #include "data/camera.hh"
 #include "data/document.hh"
@@ -257,6 +258,7 @@ class SceneWalker {
     Transform2D rigid;
     const VectorDrawing *drawing = &layer_drawing(doc_, layer);
     if (layer_has_modifier_effect(doc_, layer, true)) {
+      OANIM_PROFILE("vector_evaluate");
       evaluated = layer_evaluated_drawing(doc_, layer, true, &rigid);
       drawing = &evaluated;
     }
@@ -463,6 +465,7 @@ class SceneWalker {
     if (drawing.shapes.empty()) {
       return;
     }
+    OANIM_PROFILE("vector_colour");
     const Transform2D to_px = to_px_ * transform;
     const float pixel = 1.0f / std::max(to_px.scale(), 1e-6f);
     const LineCutter cutter = line_cutter(doc_, layer, true);
@@ -922,6 +925,7 @@ class SceneWalker {
     VectorDrawing evaluated;
     Transform2D transform;
     const VectorDrawing &drawing = drawing_of(layer, evaluated, &transform);
+    OANIM_PROFILE("vector_coverage");
     const Transform2D to_px = to_px_ * transform;
     const float pixel = 1.0f / std::max(to_px.scale(), 1e-6f);
     /* The bands that shrinking clears are painted black. */
@@ -1055,6 +1059,7 @@ VectorScene vector_scene(const Document &doc, const VectorSceneOptions &options)
   VectorScene scene;
   scene.width = options.width > 0 ? options.width : std::max(doc.width, 1);
   scene.height = options.height > 0 ? options.height : std::max(doc.height, 1);
+  OANIM_PROFILE("vector_scene");
   SceneWalker(doc, options, scene).walk();
   return scene;
 }

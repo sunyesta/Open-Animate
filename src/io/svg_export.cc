@@ -7,6 +7,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "core/profile.hh"
 #include "io/vector_export.hh"
 
 namespace oanim {
@@ -173,6 +174,7 @@ std::string svg_frame(const Document &doc, const SvgExport &options, SvgExportRe
   scene_options.transparent = options.transparent;
   scene_options.guides = options.guides;
   const VectorScene scene = vector_scene(doc, scene_options);
+  OANIM_PROFILE("svg_write");
   const std::string w = std::to_string(scene.width), h = std::to_string(scene.height);
   std::string defs;
   for (size_t i = 0; i < scene.masks.size(); i++) {

@@ -540,6 +540,64 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 document.addEventListener('touchmove', (e) => { if (e.target.closest && !e.target.closest('#shelf-tiles, .popover')) e.preventDefault(); }, { passive: false });
 
 /* ---------------------------------------------------------------------------------------------------------------
+ * The canvas's SVG, kept as elements: a canvas sends the pieces the last one didn't have and the places of those it
+ * did, and only what differs is put in, taken out or moved, so an undo doesn't lay out the whole drawing again. */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+let canvasSeq = 0, canvasHead = '', svgRoot = null, defsEl = null, defsNodes = [], bodyNodes = [];
+
+function parsePieces(texts) {
+  if (texts.length === 0) return [];
+  const doc = new DOMParser().parseFromString(canvasHead + texts.join('') + '</svg>', 'image/svg+xml');
+  return [...doc.documentElement.children].map((n) => document.importNode(n, true));
+}
+
+/* `parent`'s children from `start` on made `nodes`, in order, touching only those out of place. */
+function syncChildren(parent, nodes, start) {
+  for (let i = 0; i < nodes.length; i++) {
+    const at = parent.childNodes[start + i];
+    if (at !== nodes[i]) parent.insertBefore(nodes[i], at || null);
+  }
+  while (parent.childNodes.length > start + nodes.length) parent.removeChild(parent.lastChild);
+}
+
+/* False when it was sent against a canvas this page doesn't have (the whole one is asked for). */
+function canvasApply(m) {
+  if (m.base !== 0 && m.base !== canvasSeq) {
+    send({ t: 'canvas_full' });
+    return false;
+  }
+  if (m.base === 0 || !svgRoot) {
+    canvasHead = m.head;
+    art.innerHTML = m.head.replace(/^<\?xml[^>]*>\s*/, '') + '</svg>';
+    svgRoot = art.firstElementChild;
+    defsEl = document.createElementNS(SVG_NS, 'defs');
+    svgRoot.appendChild(defsEl);
+    defsNodes = [];
+    bodyNodes = [];
+  }
+  const build = (list, before) => {
+    const fresh = parsePieces(list.filter((v) => typeof v === 'string'));
+    const used = new Set();
+    let k = 0;
+    return list.map((v) => {
+      if (typeof v === 'string') return fresh[k++];
+      const n = before[v];
+      if (used.has(n)) return n.cloneNode(true);
+      used.add(n);
+      return n;
+    });
+  };
+  defsNodes = build(m.defs, defsNodes);
+  bodyNodes = build(m.body, bodyNodes);
+  syncChildren(defsEl, defsNodes, 0);
+  if (svgRoot.firstChild !== defsEl) svgRoot.insertBefore(defsEl, svgRoot.firstChild);
+  syncChildren(svgRoot, bodyNodes, 1);
+  canvasSeq = m.seq;
+  return true;
+}
+
+/* ---------------------------------------------------------------------------------------------------------------
  * Messages from Open Animate. */
 
 function receive(m) {
@@ -567,7 +625,7 @@ function receive(m) {
       canvasH = m.h;
       art.style.width = m.w + 'px';
       art.style.height = m.h + 'px';
-      art.innerHTML = m.svg.replace(/^<\?xml[^>]*>\s*/, '');
+      if (!canvasApply(m)) break;
       onion = m.onion || [];
       if (changed || !fitted) { fitted = true; fitView(); }
       /* The lines it has made show in it now. */
