@@ -117,6 +117,7 @@ def draw_settings():
     weld (a stroke's ends join points they finish on), cursor_circle, hold_shape (Hold to Shape), line_width (document units), prediction (how far ahead of a pen's last sample the line is drawn while drawing, ms, 0 off: a preference),
     brush_recent (the line brushes drawn with lately, latest first, each {name, preset}), size_view and view_size
     (Size Unit View: the line view_size screen pixels across at any zoom), nib_angle (degrees) and nib_direction (0-1),
+    opacity_pressure and min_opacity (pressure sets each point's opacity, from min_opacity, 0-1),
     stabilizer (OFF, SMART or PULLED_STRING), smoothing (Smart's amount, 0-1), string_length (screen pixels),
     catch_up, fidelity (how closely the Bezier points follow the line, 0-1), pressure_smoothing (0-1),
     pressure_curve (the two handles
@@ -148,7 +149,8 @@ def ink_stroke(samples, pixel=1.0, line_width=10.0, closed=False, **settings):
     """Runs the Stroke Pen's engine on samples [(x, y, pressure, tilt_x, tilt_y, seconds)], with settings by name
     as in draw_settings (a document pixel counting as 1 for tapers). A dict: live and tail (the line while the
     pen is still down, and the rest to its last sample), points (the finished line), each (x, y, radius, speed),
-    and knots (its Bezier points, each (x, y, radius, handle_in, handle_out, corner))."""
+    and knots (its Bezier points, each (x, y, radius, handle_in, handle_out, corner)); opacity and knot_opacity, each
+    point's and knot's opacity (1 unless opacity_pressure)."""
     return dict(_oanim.ink_stroke([tuple(s) for s in samples], settings, float(pixel), float(line_width) * 0.5,
                                   bool(closed)))
 

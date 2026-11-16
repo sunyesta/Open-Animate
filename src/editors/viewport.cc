@@ -366,7 +366,7 @@ struct ToolDrag {
   bool quick = false;
   QuickShape quick_snapped, quick_now;
   float2 quick_from;
-  float quick_radius = 1.0f;
+  float quick_radius = 1.0f, quick_opacity = 1.0f;
 };
 
 
@@ -5997,6 +5997,12 @@ static void draw_advanced_dropdown(WindowManager &wm)
     pressure_curve_edit(ink);
     dropdown_bar("##min_size", &ink.min_size, 0.0f, 1.0f, "Min Size %.2f",
                  "The thinnest the line gets from pressure, speed, tilt and the nib, as a part of its width");
+    if (wm.tool_settings.draw_mode == DrawMode::Freehand) {
+      ImGui::BeginDisabled(!ink.opacity_pressure);
+      dropdown_bar("##min_opacity", &ink.min_opacity, 0.0f, 1.0f, "Min Opacity %.2f",
+                   "The faintest a light press draws, with Opacity's pressure on, as a part of the line's opacity");
+      ImGui::EndDisabled();
+    }
     dropdown_bar("##pressure_smoothing", &ink.pressure_smoothing, 0.0f, 1.0f, "Smoothing %.2f",
                  "Evens out pressure's jitter, which is what makes a slow line's width wobble");
     ImGui::TreePop();
@@ -6127,8 +6133,17 @@ static void draw_header(Context &C)
   draw_size_field(doc, ts, mode, !bezier);
   ImGui::SameLine();
   if (!eraser) {
-    ImGui::SetNextItemWidth(h * 4.6f);
-    ui_slider_float("##opacity", fill_pen ? &ts.style.fill.a : &ts.style.line.a, 0.0f, 1.0f, "Opacity %.2f");
+    /* A freehand line's opacity can follow pressure too, point by point (MeshPoint::opacity), under the line's
+     * own: the field is still the line's as a whole. */
+    const bool line_pressure = mode == DrawMode::Freehand;
+    ImGui::SetNextItemWidth(h * (line_pressure ? 5.6f : 4.6f));
+    if (line_pressure) {
+      pressure_field("##opacity", &ts.style.line.a, 0.01f, 0.0f, 1.0f, "Opacity %.2f", &ts.ink.opacity_pressure,
+                     "Pen pressure sets the opacity", true, 0.0f, 1.0f);
+    }
+    else {
+      ui_slider_float("##opacity", fill_pen ? &ts.style.fill.a : &ts.style.line.a, 0.0f, 1.0f, "Opacity %.2f");
+    }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip(fill_pen ? "How solid the fill is (Shift F)" : "How solid the line is (Shift F)");
     }
@@ -8394,14 +8409,15 @@ static void draw_tool_preview(ImDrawList *dl, const ViewMapping &view, const Tra
   ink_taper(line, g_drag.ink.settings(), g_drag.ink.view());
   const float half = g_drag.ink.view().half_width * view.zoom * to_document.scale();
   std::vector<float2> points;
-  std::vector<float> widths;
+  std::vector<float> widths, opacity;
   for (const InkPoint &p : line) {
     const ImVec2 at = view.to_screen(to_document.apply(p.pos));
     points.push_back({at.x, at.y});
     widths.push_back(std::max(p.radius * half, 0.0f));
+    opacity.push_back(p.opacity);
   }
   if (points.size() >= 2) {
-    ink_line_draw(dl, points, widths, color);
+    ink_line_draw(dl, points, widths, color, &opacity);
   }
 }
 
@@ -8413,7 +8429,7 @@ struct QuickEdit {
   int area = 0;
   QuickShape shape;
   /* What it was drawn with: its width (a fraction of the line's), the line's width, and a screen pixel then. */
-  float radius = 1.0f, line_width = 0.0f, pixel = 1.0f;
+  float radius = 1.0f, line_width = 0.0f, pixel = 1.0f, opacity = 1.0f;
   /* The handle being dragged (quick_shape_handles' order; -1: none), and the shape as it was pressed. */
   int dragging = -1;
   QuickShape pressed;
@@ -8422,7 +8438,8 @@ static QuickEdit g_quick_edit;
 /* Within this many pixels a press takes a handle. */
 static constexpr float QUICK_HANDLE_PICK = 10.0f;
 
-static OpArgs quick_shape_op_args(const QuickShape &shape, float radius, float line_width, float pixel)
+static OpArgs quick_shape_op_args(const QuickShape &shape, float radius, float line_width, float pixel,
+                                  float opacity)
 {
   std::vector<std::pair<std::string, std::string>> list;
   quick_shape_args(shape, list);
@@ -8433,6 +8450,9 @@ static OpArgs quick_shape_op_args(const QuickShape &shape, float radius, float l
     return std::string(text);
   };
   args["radius"] = number(radius);
+  if (opacity < 1.0f) {
+    args["opacity"] = number(opacity);
+  }
   args["line_width"] = number(line_width);
   args["pixel"] = number(pixel);
   return args;
@@ -8480,7 +8500,7 @@ static bool in_box(ImVec2 p, ImVec2 a, ImVec2 b)
 static bool quick_edit_apply(Context &C, const QuickShape &shape)
 {
   QuickEdit &q = g_quick_edit;
-  if (operator_redo_last(C, quick_shape_op_args(shape, q.radius, q.line_width, q.pixel)) != OpStatus::Finished) {
+  if (operator_redo_last(C, quick_shape_op_args(shape, q.radius, q.line_width, q.pixel, q.opacity)) != OpStatus::Finished) {
     return false;
   }
   q.shape = shape;
@@ -18357,8 +18377,11 @@ static void viewport_draw_contents(Area &area, Context &C)
             g_drag.ink_mode = erase && ts.draw_mode == DrawMode::FillPen    ? DrawMode::FillEraser
                               : erase && ts.draw_mode == DrawMode::Freehand ? DrawMode::StrokeEraser
                                                                             : ts.draw_mode;
-            g_drag.ink.begin(ts.ink, {pixel, draw_half_width(ts, g_drag.ink_mode, pixel),
-                                      2.0f / std::max(float(doc.height), 1.0f)});
+            /* Only a line's points take opacity: a fill or an eraser is as solid as ever. */
+            InkSettings ink_settings = ts.ink;
+            ink_settings.opacity_pressure = ink_settings.opacity_pressure && g_drag.ink_mode == DrawMode::Freehand;
+            g_drag.ink.begin(ink_settings, {pixel, draw_half_width(ts, g_drag.ink_mode, pixel),
+                                            2.0f / std::max(float(doc.height), 1.0f)});
             if ((g_drag.pen_stroke = pen_touch_pressed())) {
               draw_take_pen(view, to_layer);
             }
@@ -18487,10 +18510,11 @@ static void viewport_draw_contents(Area &area, Context &C)
           }
           else if (now - g_drag.still_since >= QUICK_SHAPE_HOLD_SECONDS) {
             std::vector<float2> line;
-            std::vector<float> radii;
+            std::vector<float> radii, opacities;
             for (const InkPoint &p : g_drag.ink.points()) {
               line.push_back(p.pos);
               radii.push_back(p.radius);
+              opacities.push_back(p.opacity);
             }
             QuickShape shape;
             if (!radii.empty() && quick_shape_fit(line, mouse_layer, pixel, &shape)) {
@@ -18499,6 +18523,9 @@ static void viewport_draw_contents(Area &area, Context &C)
               g_drag.quick_snapped = g_drag.quick_now = shape;
               g_drag.quick_from = mouse_layer;
               g_drag.quick_radius = radii[radii.size() / 2];
+              /* As solid as it mostly was. */
+              std::nth_element(opacities.begin(), opacities.begin() + opacities.size() / 2, opacities.end());
+              g_drag.quick_opacity = opacities[opacities.size() / 2];
             }
             /* Too short to be one: held another moment, it tries again. */
             g_drag.still_since = now;
@@ -18559,13 +18586,14 @@ static void viewport_draw_contents(Area &area, Context &C)
             const InkView &ink_view = g_drag.ink.view();
             if (operator_call(C, "draw.quick_shape",
                               quick_shape_op_args(g_drag.quick_now, g_drag.quick_radius, ink_view.half_width * 2.0f,
-                                                  ink_view.pixel)) == OpStatus::Finished)
+                                                  ink_view.pixel, g_drag.quick_opacity)) == OpStatus::Finished)
             {
               g_quick_edit = {};
               g_quick_edit.active = true;
               g_quick_edit.area = area.id;
               g_quick_edit.shape = g_drag.quick_now;
               g_quick_edit.radius = g_drag.quick_radius;
+              g_quick_edit.opacity = g_drag.quick_opacity;
               g_quick_edit.line_width = ink_view.half_width * 2.0f;
               g_quick_edit.pixel = ink_view.pixel;
             }

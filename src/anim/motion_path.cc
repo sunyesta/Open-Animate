@@ -488,6 +488,7 @@ static bool offsets_inputs_make(Document &doc)
     r.built_ids.clear();
     r.built_pos.clear();
     r.built_radius.clear();
+    r.built_point_opacity.clear();
     r.built_weights.clear();
     r.built_shapes.clear();
     r.built_curves.clear();

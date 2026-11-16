@@ -130,6 +130,21 @@ class _Layer:
         return _oanim.layer_radii(self._id)
 
     @property
+    def opacities(self):
+        """Each point's opacity, 0-1, multiplying its shape's line colour (set from pen pressure)."""
+        return _oanim.layer_opacities(self._id)
+
+    @property
+    def mean_opacity(self):
+        """Mean opacity of the selected points (None if none are selected). Setting it moves each selected
+        point's opacity by the same amount, as mean_radius does."""
+        return _oanim.layer_mean_opacity(self._id)
+
+    @mean_opacity.setter
+    def mean_opacity(self, value):
+        _oanim.layer_set_mean_opacity(self._id, value)
+
+    @property
     def mean_radius(self):
         """Mean radius of the selected points (None if none are selected). Setting it moves each
         selected point's radius by the same amount, like Blender's Mean Radius field."""
@@ -839,7 +854,7 @@ class _Layer:
 
     def __dir__(self):
         return sorted(set(dir(_oanim.layer_pointer(self._id))) | {"id", "children", "parent", "reference_source",
-                                                                 "points", "radii", "mean_radius", "shapes", "point_count", "curve_count", "shape_count",
+                                                                 "points", "radii", "mean_radius", "opacities", "mean_opacity", "shapes", "point_count", "curve_count", "shape_count",
                                                                  "add_curve", "add_primitive", "shape_outline", "select_points", "grids", "extrude_selected", "shape_runs",
                                                                  "grid_map"})
 

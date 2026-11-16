@@ -78,10 +78,10 @@ static void reserve_more(std::vector<Vertex> &out, size_t extra)
 }
 
 static void dedupe(std::vector<float2> &points, std::vector<float> *widths, bool closed, float epsilon,
-                   std::vector<StrokeJoin> *joins = nullptr)
+                   std::vector<StrokeJoin> *joins = nullptr, std::vector<float> *opacity = nullptr)
 {
   std::vector<float2> p;
-  std::vector<float> w;
+  std::vector<float> w, o;
   std::vector<StrokeJoin> j;
   for (size_t i = 0; i < points.size(); i++) {
     if (!p.empty() && distance(p.back(), points[i]) <= epsilon) {
@@ -94,6 +94,9 @@ static void dedupe(std::vector<float2> &points, std::vector<float> *widths, bool
     if (widths) {
       w.push_back((*widths)[i]);
     }
+    if (opacity) {
+      o.push_back((*opacity)[i]);
+    }
     if (joins) {
       j.push_back((*joins)[i]);
     }
@@ -103,6 +106,9 @@ static void dedupe(std::vector<float2> &points, std::vector<float> *widths, bool
     if (widths) {
       w.pop_back();
     }
+    if (opacity) {
+      o.pop_back();
+    }
     if (joins) {
       j.front() = std::max(j.front(), j.back());
       j.pop_back();
@@ -111,6 +117,9 @@ static void dedupe(std::vector<float2> &points, std::vector<float> *widths, bool
   points = std::move(p);
   if (widths) {
     *widths = std::move(w);
+  }
+  if (opacity) {
+    *opacity = std::move(o);
   }
   if (joins) {
     *joins = std::move(j);
@@ -332,7 +341,7 @@ static constexpr float MITER_LIMIT = 4.0f;
 
 void tessellate_stroke(const std::vector<float2> &input_points, const std::vector<float> &input_half_widths,
                        bool closed, Color color, float aa, std::vector<Vertex> &r_out,
-                       const std::vector<StrokeJoin> *input_joins)
+                       const std::vector<StrokeJoin> *input_joins, const std::vector<float> *input_opacity)
 {
   const size_t first_vertex = r_out.size();
   std::vector<float2> points = input_points;
@@ -344,11 +353,25 @@ void tessellate_stroke(const std::vector<float2> &input_points, const std::vecto
   for (const float hw : half_widths) {
     widest = std::max(widest, hw);
   }
-  dedupe(points, &half_widths, closed, std::max(aa * 0.01f, widest * 1e-3f), &joins);
+  /* Each point's opacity, when any is under 1 (most lines have none, and draw as they did). */
+  std::vector<float> opacity;
+  if (input_opacity && input_opacity->size() == points.size() &&
+      std::any_of(input_opacity->begin(), input_opacity->end(), [](float o) { return o < 1.0f; }))
+  {
+    opacity = *input_opacity;
+  }
+  dedupe(points, &half_widths, closed, std::max(aa * 0.01f, widest * 1e-3f), &joins, opacity.empty() ? nullptr : &opacity);
   const size_t n = points.size();
   if (n == 0) {
     return;
   }
+  const auto fade = [&](size_t i) { return opacity.empty() ? 1.0f : std::clamp(opacity[i], 0.0f, 1.0f); };
+  /* The colour at point i: a round join's, a cap's or a dot's disc. */
+  const auto faded = [&](size_t i) {
+    Color c = color;
+    c.a *= fade(i);
+    return c;
+  };
   /* Every vertex made below with the stroke's widest half width (Vertex). */
   struct Widest {
     std::vector<Vertex> &out;
@@ -362,7 +385,7 @@ void tessellate_stroke(const std::vector<float2> &input_points, const std::vecto
     }
   } mark_widest{r_out, first_vertex, widest};
   if (n == 1) {
-    disc(points[0], std::max(half_widths[0], aa * 0.5f), color, aa, r_out);
+    disc(points[0], std::max(half_widths[0], aa * 0.5f), faded(0), aa, r_out);
     offsets_from(r_out, first_vertex, points[0]);
     return;
   }
@@ -400,7 +423,7 @@ void tessellate_stroke(const std::vector<float2> &input_points, const std::vecto
     const float hw = half_widths[i];
     const float core = core_radius(i), outer = core + aa;
     /* Lines thinner than the soft edge fade instead of vanishing. */
-    const float core_alpha = hw < aa * 0.5f ? std::max(hw * 2.0f / aa, 0.05f) : 1.0f;
+    const float core_alpha = (hw < aa * 0.5f ? std::max(hw * 2.0f / aa, 0.05f) : 1.0f) * fade(i);
     const float2 p = points[i];
     return Side{p + left * outer, p + left * core, p + right * core, p + right * outer, core_alpha, p};
   };
@@ -442,7 +465,7 @@ void tessellate_stroke(const std::vector<float2> &input_points, const std::vecto
       const float2 left = mitre(normal_left[prev_seg], normal_left[next_seg], &too_sharp);
       const float2 right = mitre(normal_right[prev_seg], normal_right[next_seg], &too_sharp);
       if (too_sharp) {
-        stroke_disc(points[i], half_widths[i], color, aa, r_out);
+        stroke_disc(points[i], half_widths[i], faded(i), aa, r_out);
       }
       seg_start[next_seg] = seg_end[prev_seg] = make_side(i, left, right);
       continue;
@@ -450,7 +473,7 @@ void tessellate_stroke(const std::vector<float2> &input_points, const std::vecto
     seg_end[prev_seg] = make_side(i, normal_left[prev_seg], normal_right[prev_seg]);
     seg_start[next_seg] = make_side(i, normal_left[next_seg], normal_right[next_seg]);
     if (joins[i] == StrokeJoin::Round) {
-      stroke_disc(points[i], half_widths[i], color, aa, r_out);
+      stroke_disc(points[i], half_widths[i], faded(i), aa, r_out);
       continue;
     }
     /* Sharp: fill the outside of the turn out to where the two outside edges meet, or bevel it
@@ -556,7 +579,7 @@ void tessellate_stroke(const std::vector<float2> &input_points, const std::vecto
    * Sharp point, with a soft edge across the end. */
   const auto cap = [&](size_t i, const Side &side, float2 outward) {
     if (joins[i] != StrokeJoin::Sharp) {
-      stroke_disc(points[i], half_widths[i], color, aa, r_out);
+      stroke_disc(points[i], half_widths[i], faded(i), aa, r_out);
       return;
     }
     if (aa <= 0.0f) {

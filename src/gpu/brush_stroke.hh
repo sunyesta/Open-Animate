@@ -45,6 +45,8 @@ struct BrushPath {
   struct Edge {
     float2 ctrl[4];
     float half0 = 0.0f, half1 = 0.0f;
+    /* The points' opacity at either end, fading the dabs between them. */
+    float opacity0 = 1.0f, opacity1 = 1.0f;
     bool visible = true;
   };
   std::vector<Edge> edges;

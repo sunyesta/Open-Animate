@@ -98,11 +98,11 @@ struct ReferenceSettings {
   std::map<uint64_t, std::vector<BoneWeight>> weights;
 
   /* Runtime: the drawing as last built from the original (before any edit since), to tell what
-   * was edited: each point's place, radius and weights, and each shape's look. */
+   * was edited: each point's place, radius, opacity and weights, and each shape's look. */
   bool built = false;
   std::vector<uint64_t> built_ids;
   std::vector<float2> built_pos;
-  std::vector<float> built_radius;
+  std::vector<float> built_radius, built_point_opacity;
   std::vector<std::vector<BoneWeight>> built_weights;
   std::vector<Shape> built_shapes;
   std::vector<Curve> built_curves;

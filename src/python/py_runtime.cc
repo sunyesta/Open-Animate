@@ -254,6 +254,8 @@ static void ink_settings_read(const InkSettings &ink, py::dict &d)
   d["view_size"] = ink.view_size;
   d["nib_angle"] = ink.nib_angle;
   d["nib_direction"] = ink.nib_direction;
+  d["opacity_pressure"] = ink.opacity_pressure;
+  d["min_opacity"] = ink.min_opacity;
 }
 
 /* A Stroke Pen setting by name, as oanim.wm.set_draw takes it; false: no such setting. */
@@ -321,6 +323,12 @@ static bool ink_setting(InkSettings &ink, const std::string &key, const py::hand
   }
   else if (key == "nib_direction") {
     ink.nib_direction = amount();
+  }
+  else if (key == "opacity_pressure") {
+    ink.opacity_pressure = value.cast<bool>();
+  }
+  else if (key == "min_opacity") {
+    ink.min_opacity = amount();
   }
   else {
     return false;
@@ -1143,12 +1151,19 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     d["tail"] = listed(ink.tail(ink.last_sample()));
     ink.finish();
     d["points"] = listed(ink.points());
+    py::list point_opacity, knot_opacity;
+    for (const InkPoint &p : ink.points()) {
+      point_opacity.append(p.opacity);
+    }
+    d["opacity"] = point_opacity;
     py::list knots;
     for (const InkKnot &k : ink_fit(ink.points(), settings, ink.view(), closed)) {
       knots.append(py::make_tuple(k.pos.x, k.pos.y, k.radius, py::make_tuple(k.handle_in.x, k.handle_in.y),
                                   py::make_tuple(k.handle_out.x, k.handle_out.y), k.corner));
+      knot_opacity.append(k.opacity);
     }
     d["knots"] = knots;
+    d["knot_opacity"] = knot_opacity;
     return d;
   });
   /* Hold to Shape's fit (data/quick_shape.hh): what a line of points held at `end` becomes, as draw.quick_shape's
@@ -3016,6 +3031,38 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     py::list result;
     for (int i = 0; i < dabs.count; i++) {
       result.append(py::make_tuple(dabs.centers[i].x, dabs.centers[i].y, dabs.alphas[i]));
+    }
+    return result;
+  });
+  /* A solid line's triangles as the renderer makes them (its points' opacity included, no soft edge): [(x, y, alpha),
+   * ...], layer space, alpha premultiplied by the line colour's. */
+  m.def("layer_shape_stroke", [layer_or_raise](uint64_t id, int index) {
+    const Document &doc = *current_context().document;
+    const VectorDrawing &drawing = layer_drawing(doc, layer_or_raise(id));
+    if (index < 0 || index >= int(drawing.shapes.size())) {
+      throw py::index_error("no shape " + std::to_string(index));
+    }
+    const Shape &shape = drawing.shapes[index];
+    std::vector<float2> outline;
+    std::vector<float> radii, opacity;
+    std::vector<bool> visible;
+    std::vector<StrokeJoin> joins;
+    bool closed = false;
+    shape_outline(drawing, shape, 12, outline, &radii, &closed, &visible, &joins, 0.0f, &opacity);
+    for (float &r : radii) {
+      r = std::max(r * shape.style.line_width * 0.5f, 0.0f);
+    }
+    std::vector<Vertex> vertices;
+    line_runs(outline, radii, visible, joins, closed, nullptr, Transform2D(),
+              [&](const std::vector<float2> &pts, const std::vector<float> &half, bool is_closed,
+                  const std::vector<StrokeJoin> &run_joins, const std::vector<float> &run_opacity) {
+                tessellate_stroke(pts, half, is_closed, shape.style.line, 0.0f, vertices, &run_joins,
+                                  run_opacity.empty() ? nullptr : &run_opacity);
+              },
+              &opacity);
+    py::list result;
+    for (const Vertex &v : vertices) {
+      result.append(py::make_tuple(v.x, v.y, float(v.rgba >> 24) / 255.0f));
     }
     return result;
   });
@@ -5813,6 +5860,25 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       result.append(p.radius);
     }
     return result;
+  });
+  m.def("layer_opacities", [layer_or_raise](uint64_t id) {
+    py::list result;
+    for (const MeshPoint &p : layer_drawing(*current_context().document, layer_or_raise(id)).points) {
+      result.append(p.opacity);
+    }
+    return result;
+  });
+  m.def("layer_mean_opacity", [layer_or_raise](uint64_t id) {
+    const float mean = drawing_selected_mean_opacity(layer_drawing(*current_context().document, layer_or_raise(id)));
+    return mean < 0.0f ? py::object(py::none()) : py::object(py::float_(mean));
+  });
+  m.def("layer_set_mean_opacity", [layer_or_raise](uint64_t id, float mean) {
+    Layer &layer = layer_or_raise(id);
+    if (layer.is_reference()) {
+      throw py::value_error("A reference's points are edited through its original");
+    }
+    drawing_set_selected_mean_opacity(layer.drawing, mean);
+    current_context().undo->mark_changed();
   });
   m.def("layer_mean_radius", [layer_or_raise](uint64_t id) {
     const float mean = drawing_selected_mean_radius(layer_drawing(*current_context().document, layer_or_raise(id)));

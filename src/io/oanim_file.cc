@@ -347,6 +347,9 @@ static json drawing_to_json(const VectorDrawing &drawing)
     if (p.radius != 1.0f) {
       point["radius"] = num(p.radius);
     }
+    if (p.opacity != 1.0f) {
+      point["opacity"] = num(p.opacity);
+    }
     if (p.selected) {
       point["selected"] = true;
     }
@@ -2114,6 +2117,7 @@ static VectorDrawing drawing_from_json(const json &j)
       drawing.points.push_back({get_float2(p, "pos", {}), std::clamp(get_float(p, "radius", 1.0f), 0.0f, POINT_RADIUS_MAX),
                                 get_bool(p, "selected", false)});
       drawing.points.back().id = get_id(p, "id");
+      drawing.points.back().opacity = std::clamp(get_float(p, "opacity", 1.0f), 0.0f, 1.0f);
       for (const json &w : get_array(p, "weights")) {
         if (w.is_array() && w.size() == 2 && w[0].is_number_unsigned() && w[1].is_number()) {
           drawing.points.back().weights.push_back({w[0].get<uint64_t>(), std::clamp(w[1].get<float>(), 0.0f, 1.0f)});

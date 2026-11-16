@@ -296,6 +296,7 @@ static VectorDrawing split_at(const VectorDrawing &source, const Cuts &all_cuts,
           const MeshPoint &pb = own(b);
           p.pos = part[0];
           p.radius = own(a).radius + (pb.radius - own(a).radius) * t;
+          p.opacity = own(a).opacity + (pb.opacity - own(a).opacity) * t;
           p.transform = own(a).transform + (pb.transform - own(a).transform) * t;
           p.setup_pos = p.pos - p.transform;
           p.weights = blend(own(a).weights, pb.weights, t);

@@ -35,10 +35,11 @@ static constexpr float SAMPLE_DOCUMENT_HEIGHT = 1080.0f;
 
 enum { TAB_ALL, TAB_PENS, TAB_ERASERS, TAB_TRIM, TAB_MINE };
 
-void ink_line_draw(ImDrawList *dl, const std::vector<float2> &points, const std::vector<float> &half_widths, Color color)
+void ink_line_draw(ImDrawList *dl, const std::vector<float2> &points, const std::vector<float> &half_widths, Color color,
+                   const std::vector<float> *opacity)
 {
   std::vector<Vertex> vertices;
-  tessellate_stroke(points, half_widths, false, color, 1.0f, vertices);
+  tessellate_stroke(points, half_widths, false, color, 1.0f, vertices, nullptr, opacity);
   /* Triangles, a few at a time (a draw list's indices may be 16-bit). The tessellator's colours are
    * premultiplied, ImGui's not. */
   const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
@@ -171,11 +172,12 @@ static void tile_picture(ImDrawList *dl, const ToolSettings &ts, const DrawPrese
   const float scale = size * 0.8f / SAMPLE_PIXELS;
   const float half = line_width * SAMPLE_DOCUMENT_HEIGHT * 0.25f * scale * SAMPLE_WIDEN;
   std::vector<float2> points;
-  std::vector<float> widths;
+  std::vector<float> widths, opacity;
   for (const InkPoint &point : sample_line(p.name, ink, line_width)) {
     const ImVec2 at = c + ImVec2(point.pos.x - SAMPLE_PIXELS * 0.5f, -point.pos.y) * scale;
     points.push_back({at.x, at.y});
     widths.push_back(std::min(point.radius * half, size * 0.1f));
+    opacity.push_back(point.opacity);
   }
   if (points.size() < 2) {
     return;
@@ -186,7 +188,8 @@ static void tile_picture(ImDrawList *dl, const ToolSettings &ts, const DrawPrese
     ink_line_draw(dl, points, widths, Color{0.95f, 0.95f, 0.95f, 1.0f});
     return;
   }
-  ink_line_draw(dl, points, widths, p.mode == DrawMode::FillPen ? Color{0.85f, 0.6f, 0.36f, 1.0f} : Color{0.12f, 0.12f, 0.12f, 1.0f});
+  ink_line_draw(dl, points, widths, p.mode == DrawMode::FillPen ? Color{0.85f, 0.6f, 0.36f, 1.0f} : Color{0.12f, 0.12f, 0.12f, 1.0f},
+                p.mode == DrawMode::Freehand ? &opacity : nullptr);
 }
 
 static bool in_tab(const DrawPreset &p, int tab)

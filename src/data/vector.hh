@@ -88,6 +88,9 @@ struct MeshPoint {
   uint64_t made_by_layer = 0;
   /* Detail levels: a detail point's level and offsets. */
   PointDetail detail;
+  /* How solid the line is here (0-1), multiplying its shape's line colour: the draw tool sets it from pen pressure
+   * (Opacity's pressure toggle). Not animated: the same on every frame. */
+  float opacity = 1.0f;
   bool operator==(const MeshPoint &) const = default;
 };
 
@@ -515,7 +518,7 @@ VectorDrawing drawing_setup_pose(const VectorDrawing &drawing);
 bool shape_outline(const VectorDrawing &drawing, const Shape &shape, int steps_per_segment,
                    std::vector<float2> &r_points, std::vector<float> *r_radii, bool *r_closed,
                    std::vector<bool> *r_visible = nullptr, std::vector<StrokeJoin> *r_joins = nullptr,
-                   float tolerance = 0.0f);
+                   float tolerance = 0.0f, std::vector<float> *r_opacity = nullptr);
 
 /* A shape split into its connected runs of edges, each as a shape of its own (the same look): just
  * the shape when its edges join up. A Moho stroke shape can be loose edges across many curves (a
@@ -636,6 +639,10 @@ void drawing_set_edges_hidden(VectorDrawing &drawing, const std::vector<ShapeEdg
 
 /* Mean radius of the selected points, or -1 if none are selected. */
 float drawing_selected_mean_radius(const VectorDrawing &drawing);
+/* Mean opacity of the selected points, or -1 if none are selected; setting it moves each by the same amount
+ * (clamped to 0-1), as Mean Radius does. */
+float drawing_selected_mean_opacity(const VectorDrawing &drawing);
+void drawing_set_selected_mean_opacity(VectorDrawing &drawing, float mean);
 /* Sets the mean radius of the selected points as Blender's Mean Radius field does: each point
  * moves by the same amount (clamped to 0-1), so their differences are kept. */
 void drawing_set_selected_mean_radius(VectorDrawing &drawing, float mean);

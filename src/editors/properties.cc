@@ -10305,8 +10305,8 @@ static void edge_panel(Context &C, VectorDrawing &drawing)
   ui_panel_end();
 }
 
-/* The selected points. Mean Radius shows their average radius; changing it moves every
- * selected point's radius by the same amount, as Blender's Mean Radius field does. */
+/* The selected points. Mean Radius and Mean Opacity show their average radius and opacity; changing one moves every
+ * selected point's by the same amount, as Blender's Mean Radius field does. */
 static void point_panel(Context &C, VectorDrawing &drawing)
 {
   const float mean = drawing_selected_mean_radius(drawing);
@@ -10339,6 +10339,23 @@ static void point_panel(Context &C, VectorDrawing &drawing)
   }
   if (ImGui::IsItemDeactivatedAfterEdit()) {
     C.undo->push("Point Radius", *C.document);
+  }
+  ImGui::TableNextRow();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted("Mean Opacity");
+  ImGui::TableSetColumnIndex(1);
+  ImGui::SetNextItemWidth(-1);
+  float opacity = drawing_selected_mean_opacity(drawing);
+  if (ui_drag_float("##mean_opacity", &opacity, 0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp)) {
+    drawing_set_selected_mean_opacity(drawing, opacity);
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("How solid the line is at the selected points, under the shape's line opacity (pen pressure "
+                      "sets it with Opacity's pressure on); the same on every frame");
+  }
+  if (ImGui::IsItemDeactivatedAfterEdit()) {
+    C.undo->push("Point Opacity", *C.document);
   }
 
 

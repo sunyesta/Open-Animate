@@ -1366,6 +1366,7 @@ static uint64_t drawing_geometry_hash(const VectorDrawing &d, float unit = 0.0f)
       h = hash_float(hash_float(hash_float(h, p.pos.x), p.pos.y), p.radius);
     }
     h = hash_mix(h, uint64_t(p.detail.level));
+    h = hash_float(h, p.opacity);
   }
   h = hash_mix(h, d.curves.size());
   for (const Curve &c : d.curves) {
@@ -1632,6 +1633,8 @@ std::vector<SceneRenderer::PaintStep> SceneRenderer::make_steps(const MakeArgs &
   std::vector<Vertex> vertices;
   std::vector<float2> outline;
   std::vector<float> radii;
+  /* Each sample's opacity (its points'), for lines drawn solid. */
+  std::vector<float> opacity;
   std::vector<bool> visible;
   std::vector<StrokeJoin> joins;
 
@@ -1689,7 +1692,8 @@ std::vector<SceneRenderer::PaintStep> SceneRenderer::make_steps(const MakeArgs &
   bool setup_made = false;
   /* One stroke (the whole outline, or a run between hidden edges). */
   const auto stroke = [&](const Shape &shape, const std::vector<float2> &pts, const std::vector<float> &half,
-                          bool is_closed, const std::vector<StrokeJoin> &stroke_joins) {
+                          bool is_closed, const std::vector<StrokeJoin> &stroke_joins,
+                          const std::vector<float> &stroke_opacity) {
     const StatTimer stat_stroke(STAT_STROKE);
     batch(!args.coverage);
     /* A line thinner than a pixel is drawn a pixel wide and as much fainter, so its weight stays true however far
@@ -1697,7 +1701,9 @@ std::vector<SceneRenderer::PaintStep> SceneRenderer::make_steps(const MakeArgs &
      * offset from the line (Vertex), so the triangles serve every zoom. A mask takes it as it is (its widths kept
      * a pixel wide where it's made). */
     const size_t first = vertices.size();
-    tessellate_stroke(pts, half, is_closed, shape.style.line, feather, vertices, &stroke_joins);
+    /* A mask's coverage is the line's whole width, however faint the points make it. */
+    tessellate_stroke(pts, half, is_closed, shape.style.line, feather, vertices, &stroke_joins,
+                      args.coverage || stroke_opacity.empty() ? nullptr : &stroke_opacity);
     if (args.coverage) {
       for (size_t i = first; i < vertices.size(); i++) {
         vertices[i].w = 0;
@@ -1829,7 +1835,7 @@ std::vector<SceneRenderer::PaintStep> SceneRenderer::make_steps(const MakeArgs &
       {
         const StatTimer stat_outline(STAT_OUTLINE);
         shape_outline(drawing, shape, quality_, outline, &radii, &closed, &visible, &joins,
-                      pixel_nearest * 3.0f / float(quality_));
+                      pixel_nearest * 3.0f / float(quality_), &opacity);
       }
       if (outline.size() < 2) {
         continue;
@@ -2023,10 +2029,12 @@ std::vector<SceneRenderer::PaintStep> SceneRenderer::make_steps(const MakeArgs &
         }
         /* Hidden edges (and End Lines at Edge) break the outline into open runs, each stroked. */
         line_runs(outline, radii, visible, joins, closed, cutter.empty() || args.coverage ? nullptr : &cutter,
-                  transform, [&](const std::vector<float2> &pts, const std::vector<float> &half, bool is_closed,
-                                 const std::vector<StrokeJoin> &stroke_joins) {
-                    stroke(shape, pts, half, is_closed, stroke_joins);
-                  });
+                  transform,
+                  [&](const std::vector<float2> &pts, const std::vector<float> &half, bool is_closed,
+                      const std::vector<StrokeJoin> &stroke_joins, const std::vector<float> &stroke_opacity) {
+                    stroke(shape, pts, half, is_closed, stroke_joins, stroke_opacity);
+                  },
+                  &opacity);
       }
     }
   }

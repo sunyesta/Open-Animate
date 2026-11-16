@@ -534,6 +534,7 @@ SymmetrizeResult layer_symmetrize_with_partner(Document &doc, Layer &layer, Laye
         d.points[i].pos = back.apply(now.pos);
       }
       d.points[i].radius = now.radius;
+      d.points[i].opacity = now.opacity;
       d.points[i].weights = now.weights;
     }
     const int c0 = k == 0 ? 0 : int(layer.drawing.curves.size());

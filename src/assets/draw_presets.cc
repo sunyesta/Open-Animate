@@ -170,7 +170,9 @@ static json preset_json(const DrawPreset &p)
           {"sizeView", ink.size_view},
           {"viewSize", ink.view_size},
           {"nibAngle", ink.nib_angle},
-          {"nibDirection", ink.nib_direction}};
+          {"nibDirection", ink.nib_direction},
+          {"opacityPressure", ink.opacity_pressure},
+          {"minOpacity", ink.min_opacity}};
 }
 
 static DrawPreset preset_from_json(const json &j, const std::string &fallback_name)
@@ -212,6 +214,8 @@ static DrawPreset preset_from_json(const json &j, const std::string &fallback_na
   ink.view_size = std::clamp(j.value("viewSize", none.view_size), 0.0f, 500.0f);
   ink.nib_angle = std::fmod(j.value("nibAngle", none.nib_angle), 180.0f);
   ink.nib_direction = amount("nibDirection", none.nib_direction);
+  ink.opacity_pressure = j.value("opacityPressure", none.opacity_pressure);
+  ink.min_opacity = amount("minOpacity", none.min_opacity);
   p.category = DRAW_CATEGORY_MINE;
   return p;
 }

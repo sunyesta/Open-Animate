@@ -529,7 +529,7 @@ class SceneWalker {
         }
         line_runs(outline, radii, visible, joins, closed, cutter.empty() ? nullptr : &cutter, transform,
                   [&](const std::vector<float2> &pts, const std::vector<float> &half, bool is_closed,
-                      const std::vector<StrokeJoin> &stroke_joins) {
+                      const std::vector<StrokeJoin> &stroke_joins, const std::vector<float> &) {
                     element(to, stroke_path(pts, half, is_closed, stroke_joins, to_px), run.style.line, opacity, false, line_mask);
                     scene_.lines++;
                   });
@@ -1017,7 +1017,7 @@ class SceneWalker {
           }
           line_runs(outline, radii, visible, joins, closed, nullptr, transform,
                     [&](const std::vector<float2> &pts, const std::vector<float> &half, bool is_closed,
-                        const std::vector<StrokeJoin> &stroke_joins) {
+                        const std::vector<StrokeJoin> &stroke_joins, const std::vector<float> &) {
                       element(to, stroke_path(pts, half, is_closed, stroke_joins, to_px), paint, 1.0f);
                     });
         }

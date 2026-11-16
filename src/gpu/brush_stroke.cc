@@ -151,6 +151,8 @@ BrushPath brush_path(const VectorDrawing &drawing, const Shape &shape, float ext
     }
     e.half0 = drawing.points[from].radius * half + extra_half;
     e.half1 = drawing.points[to].radius * half + extra_half;
+    e.opacity0 = drawing.points[from].opacity;
+    e.opacity1 = drawing.points[to].opacity;
     e.visible = !curve.points[o.edge.segment].edge_hidden;
     path.edges.push_back(e);
   }
@@ -339,7 +341,8 @@ void brush_stroke(const BrushPath &shown, const BrushPath &rest_path, const Brus
         base_angle += brush.angle_drift * smooth_noise(seed ^ 0x63d83595U, s / std::max(40.0f * here, 1e-6f));
       }
     }
-    const float base_shows = std::clamp(alpha, 0.0f, 1.0f) * thin *
+    const float faded = std::clamp(edge.opacity0 + (edge.opacity1 - edge.opacity0) * u, 0.0f, 1.0f);
+    const float base_shows = std::clamp(alpha, 0.0f, 1.0f) * thin * faded *
                              (transfer ? fade(order, brush.opacity_fade_in, brush.opacity_fade_out) *
                                              cut_fade(order, brush.opacity_fade_in, brush.opacity_fade_out)
                                        : 1.0f);

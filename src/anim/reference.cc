@@ -227,11 +227,13 @@ static void build_one(const Document &doc, Layer &ref)
   rs.built_ids.clear();
   rs.built_pos.clear();
   rs.built_radius.clear();
+  rs.built_point_opacity.clear();
   rs.built_weights.clear();
   for (const MeshPoint &p : ref.drawing.points) {
     rs.built_ids.push_back(p.id);
     rs.built_pos.push_back(p.pos);
     rs.built_radius.push_back(p.radius);
+    rs.built_point_opacity.push_back(p.opacity);
     rs.built_weights.push_back(p.weights);
   }
   rs.built_shapes = ref.drawing.shapes;
@@ -329,6 +331,9 @@ static void capture_one(const Document &doc, Layer &ref)
       }
       if (p.radius != rs.built_radius[i]) {
         refuse("a copy's line widths follow its original");
+      }
+      if (i < rs.built_point_opacity.size() && p.opacity != rs.built_point_opacity[i]) {
+        refuse("a copy's line opacity follows its original");
       }
       if (p.weights != rs.built_weights[i] &&
           !only_lost_gone_bones(p.weights, rs.built_weights[i],

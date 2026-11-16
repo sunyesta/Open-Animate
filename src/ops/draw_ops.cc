@@ -101,6 +101,7 @@ static bool line_add(Context &C, VectorDrawing &drawing, const std::vector<InkKn
     if (p < 0) {
       p = drawing_add_point(drawing, knot.pos);
       drawing.points[p].radius = knot.radius;
+      drawing.points[p].opacity = std::clamp(knot.opacity, 0.0f, 1.0f);
     }
     CurvePoint cp{p};
     cp.curvature = knot.corner ? CURVATURE_PEAKED : CURVATURE_SMOOTH;
@@ -187,8 +188,13 @@ static OpStatus quick_shape_exec(Context &C)
   const float pixel = op_arg_float(C, "pixel", 2.0f / std::max(float(doc.height), 1.0f));
   const float width = std::max(op_arg_float(C, "line_width", ts.style.line_width), 0.0f);
   const float radius = std::clamp(op_arg_float(C, "radius", 1.0f), 0.0f, 1.0f);
+  const float opacity = std::clamp(op_arg_float(C, "opacity", 1.0f), 0.0f, 1.0f);
   const bool closed = shape.kind == QuickShape::Kind::Ellipse;
-  if (!line_add(C, layer->drawing, quick_shape_knots(shape, radius), closed, ts.draw_fill, width, pixel)) {
+  std::vector<InkKnot> knots = quick_shape_knots(shape, radius);
+  for (InkKnot &k : knots) {
+    k.opacity = opacity;
+  }
+  if (!line_add(C, layer->drawing, knots, closed, ts.draw_fill, width, pixel)) {
     return OpStatus::Cancelled;
   }
   draw_brush_used(ts);

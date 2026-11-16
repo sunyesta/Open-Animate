@@ -64,9 +64,10 @@ void tessellate_stencil_fan(const std::vector<const std::vector<float2> *> &ring
 /* Strokes a polyline (each vertex with its offset from the line and the stroke's widest half width, Vertex). `half_widths` has one entry per point. `joins` (optional, one per point)
  * says how the stroke turns there: Smooth (the default) mitres gently, Round adds a round join
  * and Sharp a mitred one, bevelled past a 4x miter limit. Ends get round caps unless their join
- * is Sharp, which ends them flat. */
+ * is Sharp, which ends them flat. `opacity` (optional, one per point) fades the colour there (the points' own
+ * opacity, from pen pressure), blending along each segment. */
 void tessellate_stroke(const std::vector<float2> &points, const std::vector<float> &half_widths, bool closed,
                        Color color, float aa, std::vector<Vertex> &r_out,
-                       const std::vector<StrokeJoin> *joins = nullptr);
+                       const std::vector<StrokeJoin> *joins = nullptr, const std::vector<float> *opacity = nullptr);
 
 }  // namespace oanim

@@ -752,10 +752,14 @@ bool shape_chain(const VectorDrawing &drawing, const Shape &shape, std::vector<O
 
 bool shape_outline(const VectorDrawing &drawing, const Shape &shape, int min_steps,
                    std::vector<float2> &r_points, std::vector<float> *r_radii, bool *r_closed,
-                   std::vector<bool> *r_visible, std::vector<StrokeJoin> *r_joins, float tolerance)
+                   std::vector<bool> *r_visible, std::vector<StrokeJoin> *r_joins, float tolerance,
+                   std::vector<float> *r_opacity)
 {
   if (r_joins) {
     r_joins->clear();
+  }
+  if (r_opacity) {
+    r_opacity->clear();
   }
 
   r_points.clear();
@@ -785,6 +789,7 @@ bool shape_outline(const VectorDrawing &drawing, const Shape &shape, int min_ste
     }
     const int steps_per_segment = bezier_steps(ctrl, min_steps, tolerance);
     const float r0 = drawing.points[from].radius, r1 = drawing.points[to].radius;
+    const float o0 = drawing.points[from].opacity, o1 = drawing.points[to].opacity;
     const bool visible = !curve.points[o.edge.segment].edge_hidden;
     /* The radius blends by distance along the segment, not by the curve parameter: samples
      * bunch up near points (a peaked segment eases in and out), and blending by parameter
@@ -803,6 +808,9 @@ bool shape_outline(const VectorDrawing &drawing, const Shape &shape, int min_ste
       const float blend = total > 1e-9f ? along[i] / total : float(i) / float(steps_per_segment);
       if (r_radii) {
         r_radii->push_back(r0 + (r1 - r0) * blend);
+      }
+      if (r_opacity) {
+        r_opacity->push_back(o0 + (o1 - o0) * blend);
       }
       if (r_visible) {
         r_visible->push_back(visible);
@@ -824,6 +832,9 @@ bool shape_outline(const VectorDrawing &drawing, const Shape &shape, int min_ste
     r_points.push_back(drawing.points[last_to].pos);
     if (r_radii) {
       r_radii->push_back(drawing.points[last_to].radius);
+    }
+    if (r_opacity) {
+      r_opacity->push_back(drawing.points[last_to].opacity);
     }
     if (r_visible) {
       r_visible->push_back(false);
@@ -1583,7 +1594,10 @@ int drawing_split_segment(VectorDrawing &drawing, ShapeEdge edge, float t)
     int from = 0, to = 0;
     curve_segment_points(curve, edge.segment, &from, &to);
     const float r0 = drawing.points[from].radius, r1 = drawing.points[to].radius;
-    drawing.points[point].radius = r0 + (r1 - r0) * (total > 1e-12f ? upto / total : t);
+    const float blend = total > 1e-12f ? upto / total : t;
+    drawing.points[point].radius = r0 + (r1 - r0) * blend;
+    /* Its opacity too, as the line showed it there. */
+    drawing.points[point].opacity = drawing.points[from].opacity + (drawing.points[to].opacity - drawing.points[from].opacity) * blend;
   }
   /* A point added between two of a group's is in it, weighted between theirs (as Blender's
    * Subdivide does). */
@@ -1725,6 +1739,7 @@ std::vector<int> drawing_split_segments(VectorDrawing &drawing, int curve_index,
     }
     const float total = lengths[32];
     const float r0 = drawing.points[size_t(from)].radius, r1 = drawing.points[size_t(to)].radius;
+    const float o0 = drawing.points[size_t(from)].opacity, o1 = drawing.points[size_t(to)].opacity;
     const uint64_t id_a = drawing.points[size_t(from)].id, id_b = drawing.points[size_t(to)].id;
     std::vector<float> ts;
     ts.push_back(0.0f);
@@ -1737,7 +1752,9 @@ std::vector<int> drawing_split_segments(VectorDrawing &drawing, int curve_index,
       const float f = std::clamp(t, 0.0f, 1.0f) * 32.0f;
       const int step = std::min(int(f), 31);
       const float upto = lengths[step] + (lengths[step + 1] - lengths[step]) * (f - float(step));
-      drawing.points[size_t(point)].radius = r0 + (r1 - r0) * (total > 1e-12f ? upto / total : t);
+      const float blend = total > 1e-12f ? upto / total : t;
+      drawing.points[size_t(point)].radius = r0 + (r1 - r0) * blend;
+      drawing.points[size_t(point)].opacity = o0 + (o1 - o0) * blend;
       if (!drawing.groups.empty()) {
         grouped.push_back({point, t, id_a, id_b});
       }
@@ -2769,6 +2786,33 @@ float drawing_selected_mean_radius(const VectorDrawing &drawing)
     }
   }
   return count ? sum / float(count) : -1.0f;
+}
+
+float drawing_selected_mean_opacity(const VectorDrawing &drawing)
+{
+  float sum = 0.0f;
+  int count = 0;
+  for (const MeshPoint &p : drawing.points) {
+    if (p.selected) {
+      sum += p.opacity;
+      count++;
+    }
+  }
+  return count ? sum / float(count) : -1.0f;
+}
+
+void drawing_set_selected_mean_opacity(VectorDrawing &drawing, float mean)
+{
+  const float current = drawing_selected_mean_opacity(drawing);
+  if (current < 0.0f) {
+    return;
+  }
+  const float delta = std::clamp(mean, 0.0f, 1.0f) - current;
+  for (MeshPoint &p : drawing.points) {
+    if (p.selected) {
+      p.opacity = std::clamp(p.opacity + delta, 0.0f, 1.0f);
+    }
+  }
 }
 
 void drawing_set_selected_mean_radius(VectorDrawing &drawing, float mean)
@@ -4147,6 +4191,7 @@ SymmetrizeResult drawing_symmetrize(VectorDrawing &drawing, bool right_to_left, 
       to.pos = point_setup_pos(to) + reflect2(from.pos - point_setup_pos(from), true, false);
     }
     to.radius = from.radius;
+    to.opacity = from.opacity;
     if (weight_flip) {
       to.weights = from.weights;
       for (BoneWeight &w : to.weights) {

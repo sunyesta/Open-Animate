@@ -157,7 +157,9 @@ float path_shelf_height(const Context &C, const Area &area);
 void path_shelf_draw(Context &C, Area &area, ImVec2 min, ImVec2 size);
 /* A path brush's picture (the shelf's tiles). */
 void path_brush_icon(ImDrawList *dl, PathBrush brush, ImVec2 center, float size, unsigned int col);
-void ink_line_draw(ImDrawList *dl, const std::vector<float2> &points, const std::vector<float> &half_widths, Color color);
+/* `opacity` (optional, one per point) fades it there, as a line's points' opacity does. */
+void ink_line_draw(ImDrawList *dl, const std::vector<float2> &points, const std::vector<float> &half_widths, Color color,
+                   const std::vector<float> *opacity = nullptr);
 /* Fixes' lines in a knob's box (the viewport's and the Spots panel's), `at` taking frames to the screen: each fainter as
  * less of it plays, the edited one brighter, a dot where it plays. */
 /* Whether a 2 Axis Controller's box shows in the viewport (Show Box), `picked` or not. */

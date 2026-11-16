@@ -93,6 +93,15 @@ float InkStroke::radius(float pressure, float2 tilt, float speed, float nib) con
   return s.min_size + (1.0f - s.min_size) * v;
 }
 
+float InkStroke::opacity(float pressure) const
+{
+  const InkSettings &s = settings_;
+  if (!s.opacity_pressure) {
+    return 1.0f;
+  }
+  return s.min_opacity + (1.0f - s.min_opacity) * pressure_curve(s, pressure);
+}
+
 float InkStroke::nib(float2 heading) const
 {
   const InkSettings &s = settings_;
@@ -108,6 +117,7 @@ void InkStroke::emit(float2 pos, float pressure, float2 tilt, float speed)
   if (!points_.empty() && distance(pos, emitted_) < MIN_SPACING) {
     /* A pen resting in place: pressing harder there still shows. */
     points_.back().radius = std::max(points_.back().radius, radius(pressure, tilt, speed, nib(heading_)));
+    points_.back().opacity = std::max(points_.back().opacity, opacity(pressure));
     return;
   }
   if (!points_.empty()) {
@@ -120,7 +130,7 @@ void InkStroke::emit(float2 pos, float pressure, float2 tilt, float speed)
     /* The first point had no way to go yet: it takes the next one's. */
     points_[0].radius = r;
   }
-  points_.push_back({pos * view_.pixel, r, speed});
+  points_.push_back({pos * view_.pixel, r, speed, opacity(pressure)});
   emitted_ = pos;
 }
 
@@ -239,14 +249,14 @@ std::vector<InkPoint> InkStroke::tail(float2 pen) const
     for (int i = 1; i <= CATCH_UP_STEPS && distance(spring.pos, end) > MIN_SPACING; i++) {
       spring.step(end, STEP, CATCH_UP_OMEGA);
       if (distance(spring.pos, last) >= MIN_SPACING) {
-        out.push_back({spring.pos * view_.pixel, r, speed});
+        out.push_back({spring.pos * view_.pixel, r, speed, opacity(pressure_)});
         last = spring.pos;
       }
     }
   }
   /* However near, the line ends at the pen itself. */
   if (distance(end, last) > 1e-3f) {
-    out.push_back({end * view_.pixel, r, speed});
+    out.push_back({end * view_.pixel, r, speed, opacity(pressure_)});
   }
   return out;
 }
@@ -349,6 +359,9 @@ float2 bezier_at(const float2 c[4], float t)
 /* Schneider's "An Algorithm for Automatically Fitting Digitized Curves" (Graphics Gems I), with the width
  * counted in the error: a segment's width runs straight along it, so a stretch the width doesn't is split
  * like one the line doesn't follow. All in screen pixels. */
+/* How far a fitted line's opacity may be off between its points. */
+static constexpr float OPACITY_TOLERANCE = 0.04f;
+
 struct Fitter {
   const std::vector<float2> &p;
   /* How far along the line each sample is, and its half width. */
@@ -358,6 +371,8 @@ struct Fitter {
   /* Each sample's place along the segment being fitted. */
   std::vector<float> u;
   std::vector<FitSegment> segments;
+  /* Each sample's opacity, when pressure sets it: a segment fits only where it changes evenly enough. */
+  const std::vector<float> *opacity = nullptr;
 
   /* Which way the line goes from sample i, forward (step 1) or back (step -1), over `reach` pixels: closer
    * than that a sample's step says more about the pen than the line. */
@@ -430,7 +445,14 @@ struct Fitter {
       const float blend = span > 0.0f ? (along[i] - along[seg.first]) / span : 0.0f;
       const float width_off = std::abs(half[seg.first] + (half[seg.last] - half[seg.first]) * blend - half[i]);
       /* Counted for more: the eye sees a bend in a line's edge well before a place a pixel off. */
-      const float e = std::max(distance(bezier_at(seg.ctrl, u[i]), p[i]), width_off * 3.0f);
+      float e = std::max(distance(bezier_at(seg.ctrl, u[i]), p[i]), width_off * 3.0f);
+      if (opacity) {
+        /* Opacity off by OPACITY_TOLERANCE counts as a place off by the whole tolerance. */
+        const std::vector<float> &o = *opacity;
+        const float opacity_off = std::abs(o[size_t(seg.first)] + (o[size_t(seg.last)] - o[size_t(seg.first)]) * blend -
+                                           o[size_t(i)]);
+        e = std::max(e, opacity_off * tolerance / OPACITY_TOLERANCE);
+      }
       if (e > worst) {
         worst = e;
         *r_worst = i;
@@ -599,15 +621,17 @@ std::vector<InkKnot> ink_fit(std::vector<InkPoint> points, const InkSettings &se
   if (points.empty()) {
     return knots;
   }
-  float length_total = 0.0f, widest = 0.0f;
+  float length_total = 0.0f, widest = 0.0f, most_solid = 0.0f;
   for (size_t i = 0; i < points.size(); i++) {
     length_total += i > 0 ? distance(points[i - 1].pos, points[i].pos) : 0.0f;
     widest = std::max(widest, points[i].radius);
+    most_solid = std::max(most_solid, points[i].opacity);
   }
   if (points.size() < 2 || length_total < view.pixel) {
     const float2 at = points.front().pos;
     knots.push_back({at, widest});
     knots.push_back({at + float2(view.pixel * 0.5f, 0.0f), widest});
+    knots[0].opacity = knots[1].opacity = most_solid;
     return knots;
   }
   if (!closed) {
@@ -634,7 +658,7 @@ std::vector<InkKnot> ink_fit(std::vector<InkPoint> points, const InkSettings &se
 
   /* In screen pixels, skipping any samples on top of each other. */
   std::vector<float2> p;
-  std::vector<float> along, half;
+  std::vector<float> along, half, opacity;
   std::vector<InkPoint> kept;
   const float half_pixels = view.half_width / view.pixel;
   for (const InkPoint &point : points) {
@@ -645,11 +669,15 @@ std::vector<InkKnot> ink_fit(std::vector<InkPoint> points, const InkSettings &se
     along.push_back(p.empty() ? 0.0f : along.back() + distance(at, p.back()));
     p.push_back(at);
     half.push_back(point.radius * half_pixels);
+    opacity.push_back(point.opacity);
     kept.push_back(point);
   }
   const int last = int(p.size()) - 1;
 
   Fitter fitter{p, along, half, ink_tolerance(settings.fidelity), std::vector<float>(p.size(), 0.0f), {}};
+  if (std::any_of(opacity.begin(), opacity.end(), [&](float o) { return o != opacity.front(); })) {
+    fitter.opacity = &opacity;
+  }
   std::vector<int> ends = {0};
   for (const int corner : find_corners(p, along, kept)) {
     ends.push_back(corner);
@@ -678,6 +706,7 @@ std::vector<InkKnot> ink_fit(std::vector<InkPoint> points, const InkSettings &se
     const int sample = i < segments.size() ? segments[i].first : segments.back().last;
     knot.pos = kept[sample].pos;
     knot.radius = kept[sample].radius;
+    knot.opacity = kept[sample].opacity;
     /* The line's own ends aren't corners: E carries on from them smoothly. */
     knot.corner = i > 0 && i < segments.size() && std::find(ends.begin(), ends.end(), sample) != ends.end();
     if (i > 0) {

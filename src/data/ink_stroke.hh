@@ -69,6 +69,10 @@ struct InkSettings {
    * its edge loses `nib_direction` (0-1) of its width, one drawn across it keeps all of it. */
   float nib_angle = 30.0f;
   float nib_direction = 0.0f;
+  /* Pressure sets each point's opacity too, through the same curve, from `min_opacity` (pressing lightly) to
+   * solid. */
+  bool opacity_pressure = false;
+  float min_opacity = 0.1f;
   bool operator==(const InkSettings &) const = default;
 };
 
@@ -98,6 +102,8 @@ struct InkPoint {
   float radius = 1.0f;
   /* Screen pixels a second. */
   float speed = 0.0f;
+  /* As MeshPoint::opacity: 1 unless pressure sets it. */
+  float opacity = 1.0f;
 };
 
 class InkStroke {
@@ -133,6 +139,7 @@ class InkStroke {
   };
 
   float radius(float pressure, float2 tilt, float speed, float nib = 1.0f) const;
+  float opacity(float pressure) const;
   /* How much of the width the nib leaves for a line heading `heading` (screen pixels; 1 with no nib). */
   float nib(float2 heading) const;
   void emit(float2 pos, float pressure, float2 tilt, float speed);
@@ -166,6 +173,7 @@ struct InkKnot {
   float radius = 1.0f;
   float2 handle_in, handle_out;
   bool corner = false;
+  float opacity = 1.0f;
 };
 
 /* The line as Bezier points, tapered. Closed: `points` goes round to its start, and the last point joins

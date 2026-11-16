@@ -832,6 +832,8 @@ add_test(NAME hold_to_shape
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_hold_to_shape.py)
 add_test(NAME draw_size_nib
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_draw_size_nib.py)
+add_test(NAME point_opacity
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_point_opacity.py)
 add_test(NAME fill_paint
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_fill_paint.py)
 add_test(NAME line_cut

@@ -505,12 +505,20 @@ bool layer_pick_apply(Document &doc, uint64_t id, LayerPickMode mode)
 
 void line_runs(const std::vector<float2> &outline, const std::vector<float> &radii, const std::vector<bool> &visible,
                const std::vector<StrokeJoin> &joins, bool closed, const LineCutter *cutter,
-               const Transform2D &to_document, const LineRunStroke &stroke)
+               const Transform2D &to_document, const LineRunStroke &stroke, const std::vector<float> *opacity)
 {
   const auto shows_at = [&](float2 p) { return line_cutter_shows(*cutter, to_document.apply(p)); };
   std::vector<float2> run;
-  std::vector<float> run_radii;
+  std::vector<float> run_radii, run_opacity;
   std::vector<StrokeJoin> run_joins;
+  if (opacity && opacity->size() != outline.size()) {
+    opacity = nullptr;
+  }
+  static const std::vector<float> no_opacity;
+  /* The opacity at sample `i`, or between `i` and `j` at `t`. */
+  const auto opacity_at = [&](int i, int j, float t) {
+    return (*opacity)[size_t(i)] + ((*opacity)[size_t(j)] - (*opacity)[size_t(i)]) * t;
+  };
   const int n = int(outline.size());
   const int pieces = closed ? n : n - 1;
   /* End Lines at Edge: whether each point shows (all of them without it). */
@@ -527,7 +535,7 @@ void line_runs(const std::vector<float2> &outline, const std::vector<float> &rad
     hidden_at = visible[i] ? -1 : i;
   }
   if (hidden_at < 0 && !cut_any) {
-    stroke(outline, radii, closed, joins);
+    stroke(outline, radii, closed, joins, opacity ? *opacity : no_opacity);
   }
   else {
     /* Hidden edges (and End Lines at Edge) break the outline into open runs. A closed
@@ -548,18 +556,28 @@ void line_runs(const std::vector<float2> &outline, const std::vector<float> &rad
     run.clear();
     run_radii.clear();
     run_joins.clear();
+    run_opacity.clear();
     const auto flush_run = [&] {
       if (run.size() >= 2) {
-        stroke(run, run_radii, false, run_joins);
+        stroke(run, run_radii, false, run_joins, run_opacity);
       }
       run.clear();
       run_radii.clear();
       run_joins.clear();
+      run_opacity.clear();
+    };
+    const auto add = [&](float2 p, float r, StrokeJoin join, int i, int j, float t) {
+      run.push_back(p);
+      run_radii.push_back(r);
+      run_joins.push_back(join);
+      if (opacity) {
+        run_opacity.push_back(opacity_at(i, j, t));
+      }
     };
     /* Where the line crosses the edge between points i and j, found by halving. An end made
      * there is round (Ends: Brush) or flat (Flat). */
     const StrokeJoin cut_join = cutter && cutter->flat ? StrokeJoin::Sharp : StrokeJoin::Smooth;
-    const auto crossing = [&](int i, int j, float2 *r_point, float *r_radius) {
+    const auto crossing = [&](int i, int j, float2 *r_point, float *r_radius, float *r_t) {
       const bool from = shows[size_t(i)] != 0;
       float lo = 0.0f, hi = 1.0f;
       for (int step = 0; step < 12; step++) {
@@ -570,6 +588,7 @@ void line_runs(const std::vector<float2> &outline, const std::vector<float> &rad
       const float t = (lo + hi) * 0.5f;
       *r_point = outline[size_t(i)] + (outline[size_t(j)] - outline[size_t(i)]) * t;
       *r_radius = radii[size_t(i)] + (radii[size_t(j)] - radii[size_t(i)]) * t;
+      *r_t = t;
     };
     for (int k = 0; k < pieces; k++) {
       const int i = (start + k) % n, j = (i + 1) % n;
@@ -583,19 +602,15 @@ void line_runs(const std::vector<float2> &outline, const std::vector<float> &rad
         continue;
       }
       if (a && run.empty()) {
-        run.push_back(outline[i]);
-        run_radii.push_back(radii[i]);
-        run_joins.push_back(joins[i]);
+        add(outline[i], radii[i], joins[i], i, i, 0.0f);
       }
       if (a && b) {
-        run.push_back(outline[j]);
-        run_radii.push_back(radii[j]);
-        run_joins.push_back(joins[j]);
+        add(outline[j], radii[j], joins[j], j, j, 0.0f);
         continue;
       }
       float2 at;
-      float r = 0.0f;
-      crossing(i, j, &at, &r);
+      float r = 0.0f, t = 0.0f;
+      crossing(i, j, &at, &r, &t);
       if (!cutter->flat) {
         /* A round end stops its radius short of the edge, back along the line, so it just
          * touches it (Reach 0); Reach moves it on, past the edge from 0.5. */
@@ -608,20 +623,14 @@ void line_runs(const std::vector<float2> &outline, const std::vector<float> &rad
       }
       if (a) {
         /* Leaving: the run ends at the edge. */
-        run.push_back(at);
-        run_radii.push_back(r);
-        run_joins.push_back(cut_join);
+        add(at, r, cut_join, i, j, t);
         flush_run();
       }
       else {
         /* Coming back: a run starts at the edge. */
         flush_run();
-        run.push_back(at);
-        run_radii.push_back(r);
-        run_joins.push_back(cut_join);
-        run.push_back(outline[j]);
-        run_radii.push_back(radii[j]);
-        run_joins.push_back(joins[j]);
+        add(at, r, cut_join, i, j, t);
+        add(outline[j], radii[j], joins[j], j, j, 0.0f);
       }
     }
     flush_run();
