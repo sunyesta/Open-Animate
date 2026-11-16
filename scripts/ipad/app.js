@@ -86,6 +86,8 @@ function applyView() {
 let onion = [];
 const live = { kind: '', color: [0, 0, 0, 1], pts: [], own: false, dabs: new Map(), n: 0 };
 let awaitingCanvas = false;
+/* The Pencil lifted and Open Animate not yet done with the stroke: the line and its tip stay drawn as they were. */
+let lifted = false;
 let raw = [];            // the stroke's samples so far, canvas pixels: [x, y, pressure]
 let hover = null;        // the Pencil hovering: [x, y] on the screen
 let drawQueued = false;
@@ -188,7 +190,7 @@ function redraw() {
   if (live.kind === 'line') drawVarLine(ctx, live.pts, live.color, V);
   drawDabs(dabRenderer, live.kind === 'dabs' ? live.dabs : null, live.own, V, innerWidth, innerHeight);
   /* What the pen has drawn since: the samples Open Animate hasn't answered yet, at the line's width. */
-  if (raw.length > 0 && penDown) {
+  if (raw.length > 0 && (penDown || lifted || awaitingCanvas)) {
     const from = Math.max(0, live.n - 1);
     const half = penHalfWidth();
     const usePressure = state && state.settings.use_pressure;
@@ -393,6 +395,7 @@ function penStart(e) {
   penErasing = e.button === 5 || (e.buttons & 32) !== 0;
   liveClear();
   awaitingCanvas = false;
+  lifted = false;
   const s = coalesced(e).map(sampleOf);
   raw.push(...s);
   send({ t: 'down', eraser: penErasing, zoom: zoomOf(V), s });
@@ -410,12 +413,14 @@ function penMove(e) {
 function penEnd(e) {
   if (!penDown || e.pointerId !== penId) return;
   penDown = false;
+  lifted = true;
   /* Lifting isn't a sample (its pressure is 0): the line ends where the last one was, as the viewport's does. */
   send({ t: 'up', s: [] });
   dirty();
 }
 
 function penCancel(tell = true) {
+  lifted = false;
   if (!penDown) return;
   penDown = false;
   if (tell) send({ t: 'cancel' });
@@ -556,22 +561,24 @@ function receive(m) {
       art.innerHTML = m.svg.replace(/^<\?xml[^>]*>\s*/, '');
       onion = m.onion || [];
       if (changed || !fitted) { fitted = true; fitView(); }
-      if (awaitingCanvas && !penDown) { awaitingCanvas = false; liveClear(); }
+      if (awaitingCanvas && !penDown && !lifted) { awaitingCanvas = false; liveClear(); }
       dirty();
       break;
     }
     case 'live':
-      if (!penDown && !awaitingCanvas) break;
+      if (!penDown && !lifted && !awaitingCanvas) break;
       liveUpdate(live, m);
       live.n = m.n || live.n;
       dirty();
       break;
     case 'done':
+      lifted = false;
       if (m.undo) awaitingCanvas = true;
       else liveClear();
       break;
     case 'refused':
       penCancel(false);
+      liveClear();
       flashBanner(m.why);
       break;
   }
