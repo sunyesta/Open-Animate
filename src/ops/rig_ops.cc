@@ -2807,50 +2807,6 @@ void rig_operators_register()
                  return OpStatus::Finished;
                });
 
-  rig_operator("armature.bone_fix_take_out", "Take Out Action",
-               "Key fix action name= so that action action= playing under it adds nothing on its poses (the frames its "
-               "line has keys on): the opposite of what it adds there, on every bone and point it moves. factor= how "
-               "much of it to take out (1 all of it), selected_mask=1 only on the selected bones and points; layer= the "
-               "bone layer (else the active one's)",
-               [](Context &C) { return C.document != nullptr; }, [](Context &C) {
-                 Document &doc = *C.document;
-                 Layer *owner = op_has_arg(C, "layer") ? layer_find(doc, std::stoull("0" + op_arg(C, "layer")))
-                                                        : active_armature(C);
-                 if (!owner || !owner->is_bone_layer()) {
-                   report(ReportType::Warning, "Take Out works in a bone layer's fix action");
-                   return OpStatus::Cancelled;
-                 }
-                 const std::string name = op_arg(C, "name"), action = op_arg(C, "action");
-                 if (!bone_fix_find(*owner, name)) {
-                   report(ReportType::Warning, "No fix action named " + name);
-                   return OpStatus::Cancelled;
-                 }
-                 if (action == name || std::find(owner->actions.begin(), owner->actions.end(), action) ==
-                                           owner->actions.end())
-                 {
-                   report(ReportType::Warning, "No action named " + action + " plays under " + name);
-                   return OpStatus::Cancelled;
-                 }
-                 if (action_muted(*owner, action)) {
-                   report(ReportType::Warning, action + " is muted: it adds nothing to take out");
-                   return OpStatus::Cancelled;
-                 }
-                 const float factor = op_has_arg(C, "factor") ? op_arg_float(C, "factor", 1.0f) : 1.0f;
-                 const bool selected = op_has_arg(C, "selected_mask") && op_arg_bool(C, "selected_mask");
-                 const int keyed = document_bone_fix_take_out(doc, owner->id, name, action, factor, selected);
-                 if (keyed == 0) {
-                   report(ReportType::Warning, action + " moves nothing " +
-                                                   (selected ? "selected " : "") + "on " + name + "'s poses");
-                   return OpStatus::Cancelled;
-                 }
-                 report(ReportType::Info, "Took " + action + " out of " + name);
-                 return OpStatus::Finished;
-               },
-               {op_float_property("factor", "Factor", "How much of what it adds to take out (1: all of it, 0.5: half)",
-                                  "1", 0.0f, 1.0f, 0.01f),
-                op_bool_property("selected_mask", "On Selected Only",
-                                 "Only on the selected bones and points", "0")});
-
   /* --- Spots: named places for a 2 Axis Controller's knob (the Bone tab's Spots panel). ---------------------- */
 
   /* bone=: that controller of the active bone layer, else the active bone. */
