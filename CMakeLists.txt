@@ -135,6 +135,9 @@ set(OANIM_SOURCES
   src/wm/file_dialog.cc
   src/wm/file_drop.cc
   src/wm/input_log.cc
+  src/wm/ipad_link.cc
+  src/wm/ipad_server.cc
+  ${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp
   src/wm/pen_input.cc
   src/wm/pen_wintab.cc
   src/wm/keymap.cc
@@ -148,8 +151,11 @@ set_source_files_properties(src/anim/merge.cc src/data/fill_area.cc PROPERTIES C
 
 target_include_directories(OpenAnimate PRIVATE src)
 # Header-only libraries as system headers, so /W4 doesn't report their warnings.
-target_include_directories(OpenAnimate SYSTEM PRIVATE ${earcut_SOURCE_DIR}/include ${json_SOURCE_DIR}/single_include)
-target_link_libraries(OpenAnimate PRIVATE oanim_imgui SDL3::SDL3 pybind11::embed miniz Clipper2 opengl32 ws2_32 dbghelp dwrite
+target_include_directories(OpenAnimate SYSTEM PRIVATE ${earcut_SOURCE_DIR}/include ${json_SOURCE_DIR}/single_include
+  ${qrcodegen_SOURCE_DIR}/cpp)
+# The QR code maker is someone else's code: built, not held to /W4.
+set_source_files_properties(${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp PROPERTIES COMPILE_OPTIONS "/W0")
+target_link_libraries(OpenAnimate PRIVATE oanim_imgui SDL3::SDL3 pybind11::embed miniz Clipper2 opengl32 ws2_32 bcrypt dbghelp dwrite
   mfplat mfreadwrite mfuuid windowscodecs ole32 propsys shell32)
 target_compile_definitions(OpenAnimate PRIVATE
   OANIM_SCRIPTS_DIR="${CMAKE_SOURCE_DIR}/scripts"
@@ -845,6 +851,8 @@ add_test(NAME number_pen
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_number_pen.py)
 add_test(NAME input_log
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_input_log.py)
+add_test(NAME ipad
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_ipad.py)
 add_test(NAME timeline_sweep_fixes
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_timeline_sweep_fixes.py)
 add_test(NAME rig_sweep_fixes

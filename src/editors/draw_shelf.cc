@@ -16,6 +16,7 @@
 
 #include "assets/draw_presets.hh"
 #include "data/ink_stroke.hh"
+#include "editors/draw_tile.hh"
 #include "editors/editors.hh"
 #include "gpu/tessellate.hh"
 #include "imgui_stdlib.h"
@@ -118,78 +119,148 @@ static const std::vector<InkPoint> &sample_line(const std::string &name, const I
   return line.points;
 }
 
-static void tile_picture(ImDrawList *dl, const ToolSettings &ts, const DrawPreset &p, ImVec2 a, ImVec2 b)
+/* A curve as a polyline of `steps` pieces, for a tile's picture. */
+static std::vector<float2> bezier_points(float2 p0, float2 p1, float2 p2, float2 p3, int steps)
 {
-  const float size = b.x - a.x;
-  const ImVec2 c = (a + b) * 0.5f;
+  std::vector<float2> out;
+  for (int i = 0; i <= steps; i++) {
+    const float t = float(i) / float(steps), u = 1.0f - t;
+    out.push_back(p0 * (u * u * u) + p1 * (3.0f * u * u * t) + p2 * (3.0f * u * t * t) + p3 * (t * t * t));
+  }
+  return out;
+}
+
+static TileStroke plain_stroke(std::vector<float2> points, float width, Color color)
+{
+  TileStroke s;
+  s.points = std::move(points);
+  s.widths.assign(s.points.size(), width * 0.5f);
+  s.color = color;
+  s.plain = true;
+  return s;
+}
+
+TilePicture draw_tile_picture(const ToolSettings &ts, const DrawPreset &p, float size)
+{
+  TilePicture pic;
+  const float2 c{size * 0.5f, size * 0.5f};
+  const Color ink_col{0x1e / 255.0f, 0x1e / 255.0f, 0x1e / 255.0f, 1.0f};
   if (p.mode == DrawMode::Pen) {
     /* A curve with its points and handles. */
     const float s = size * 0.32f, t = std::max(1.0f, size * 0.03f);
-    const ImVec2 p0 = c + ImVec2(-s, s * 0.6f), p1 = c + ImVec2(s, -s * 0.6f);
-    const ImVec2 h0 = c + ImVec2(-s * 0.3f, -s * 0.9f), h1 = c + ImVec2(s * 0.3f, s * 0.9f);
-    dl->AddBezierCubic(p0, h0, h1, p1, COL_INK, t, 24);
-    dl->AddLine(p0, h0, IM_COL32(0xa8, 0xa8, 0xa8, 255), 1.0f);
-    dl->AddLine(p1, h1, IM_COL32(0xa8, 0xa8, 0xa8, 255), 1.0f);
+    const float2 p0 = c + float2{-s, s * 0.6f}, p1 = c + float2{s, -s * 0.6f};
+    const float2 h0 = c + float2{-s * 0.3f, -s * 0.9f}, h1 = c + float2{s * 0.3f, s * 0.9f};
+    pic.strokes.push_back(plain_stroke(bezier_points(p0, h0, h1, p1, 24), t, ink_col));
+    const Color grey{0xa8 / 255.0f, 0xa8 / 255.0f, 0xa8 / 255.0f, 1.0f};
+    pic.strokes.push_back(plain_stroke({p0, h0}, 1.0f, grey));
+    pic.strokes.push_back(plain_stroke({p1, h1}, 1.0f, grey));
     const float r = size * 0.035f;
-    dl->AddCircleFilled(h0, r, IM_COL32(0x47, 0x72, 0xb3, 255));
-    dl->AddCircleFilled(h1, r, IM_COL32(0x47, 0x72, 0xb3, 255));
-    dl->AddRectFilled(p0 - ImVec2(r, r), p0 + ImVec2(r, r), COL_INK);
-    dl->AddRectFilled(p1 - ImVec2(r, r), p1 + ImVec2(r, r), COL_INK);
-    return;
+    const Color blue{0x47 / 255.0f, 0x72 / 255.0f, 0xb3 / 255.0f, 1.0f};
+    pic.dots.push_back({h0, r, blue, false});
+    pic.dots.push_back({h1, r, blue, false});
+    pic.dots.push_back({p0, r, ink_col, true});
+    pic.dots.push_back({p1, r, ink_col, true});
+    return pic;
   }
   if (p.mode == DrawMode::StrokeEraser || p.mode == DrawMode::Trimmer) {
     const float s = size * 0.36f, t = std::max(1.5f, size * 0.05f);
-    const ImU32 gone = IM_COL32(0xc8, 0xc8, 0xc8, 255);
+    const Color gone{0xc8 / 255.0f, 0xc8 / 255.0f, 0xc8 / 255.0f, 1.0f};
+    const auto line = [&](float2 a, float2 b, Color col) { pic.strokes.push_back(plain_stroke({a, b}, t, col)); };
+    const auto curve = [&](float2 a, float2 b, float2 d, float2 e, Color col, int steps) {
+      pic.strokes.push_back(plain_stroke(bezier_points(a, b, d, e, steps), t, col));
+    };
     if (p.mode == DrawMode::Trimmer) {
       /* A line crossing two others, the piece between them gone. */
       for (const float x : {-0.5f, 0.5f}) {
-        dl->AddLine(c + ImVec2(x * s, -s), c + ImVec2(x * s, s), COL_INK, t);
+        line(c + float2{x * s, -s}, c + float2{x * s, s}, ink_col);
       }
-      dl->AddLine(c + ImVec2(-s * 1.1f, 0.0f), c + ImVec2(-s * 0.5f, 0.0f), COL_INK, t);
-      dl->AddLine(c + ImVec2(s * 0.5f, 0.0f), c + ImVec2(s * 1.1f, 0.0f), COL_INK, t);
-      dl->AddLine(c + ImVec2(-s * 0.5f, 0.0f), c + ImVec2(s * 0.5f, 0.0f), gone, t);
+      line(c + float2{-s * 1.1f, 0.0f}, c + float2{-s * 0.5f, 0.0f}, ink_col);
+      line(c + float2{s * 0.5f, 0.0f}, c + float2{s * 1.1f, 0.0f}, ink_col);
+      line(c + float2{-s * 0.5f, 0.0f}, c + float2{s * 0.5f, 0.0f}, gone);
     }
     else if (p.ink.erase_whole) {
       /* Two lines, one of them gone. */
-      dl->AddBezierCubic(c + ImVec2(-s, s * 0.6f), c + ImVec2(-s * 0.3f, -s * 0.1f), c + ImVec2(s * 0.3f, s * 1.1f),
-                         c + ImVec2(s, s * 0.4f), COL_INK, t, 20);
-      dl->AddBezierCubic(c + ImVec2(-s, -s * 0.4f), c + ImVec2(-s * 0.3f, -s * 1.1f), c + ImVec2(s * 0.3f, s * 0.1f),
-                         c + ImVec2(s, -s * 0.6f), gone, t, 20);
+      curve(c + float2{-s, s * 0.6f}, c + float2{-s * 0.3f, -s * 0.1f}, c + float2{s * 0.3f, s * 1.1f},
+            c + float2{s, s * 0.4f}, ink_col, 20);
+      curve(c + float2{-s, -s * 0.4f}, c + float2{-s * 0.3f, -s * 1.1f}, c + float2{s * 0.3f, s * 0.1f},
+            c + float2{s, -s * 0.6f}, gone, 20);
     }
     else {
       /* A line with a gap in it. */
-      dl->AddBezierCubic(c + ImVec2(-s * 1.1f, s * 0.5f), c + ImVec2(-s * 0.8f, -s * 0.2f), c + ImVec2(-s * 0.5f, -s * 0.1f),
-                         c + ImVec2(-s * 0.25f, s * 0.1f), COL_INK, t, 16);
-      dl->AddBezierCubic(c + ImVec2(s * 0.25f, -s * 0.1f), c + ImVec2(s * 0.5f, s * 0.1f), c + ImVec2(s * 0.8f, s * 0.2f),
-                         c + ImVec2(s * 1.1f, -s * 0.5f), COL_INK, t, 16);
-      dl->AddLine(c + ImVec2(-s * 0.25f, s * 0.1f), c + ImVec2(s * 0.25f, -s * 0.1f), gone, t);
+      curve(c + float2{-s * 1.1f, s * 0.5f}, c + float2{-s * 0.8f, -s * 0.2f}, c + float2{-s * 0.5f, -s * 0.1f},
+            c + float2{-s * 0.25f, s * 0.1f}, ink_col, 16);
+      curve(c + float2{s * 0.25f, -s * 0.1f}, c + float2{s * 0.5f, s * 0.1f}, c + float2{s * 0.8f, s * 0.2f},
+            c + float2{s * 1.1f, -s * 0.5f}, ink_col, 16);
+      line(c + float2{-s * 0.25f, s * 0.1f}, c + float2{s * 0.25f, -s * 0.1f}, gone);
     }
-    return;
+    return pic;
   }
   InkSettings ink;
   float line_width = 0.0f;
   preset_now(ts, p, &ink, &line_width);
   const float scale = size * 0.8f / SAMPLE_PIXELS;
   const float half = line_width * SAMPLE_DOCUMENT_HEIGHT * 0.25f * scale * SAMPLE_WIDEN;
-  std::vector<float2> points;
-  std::vector<float> widths, opacity;
+  TileStroke stroke;
   for (const InkPoint &point : sample_line(p.name, ink, line_width)) {
-    const ImVec2 at = c + ImVec2(point.pos.x - SAMPLE_PIXELS * 0.5f, -point.pos.y) * scale;
-    points.push_back({at.x, at.y});
-    widths.push_back(std::min(point.radius * half, size * 0.1f));
-    opacity.push_back(point.opacity);
+    stroke.points.push_back(c + float2{point.pos.x - SAMPLE_PIXELS * 0.5f, -point.pos.y} * scale);
+    stroke.widths.push_back(std::min(point.radius * half, size * 0.1f));
+    stroke.opacity.push_back(point.opacity);
   }
-  if (points.size() < 2) {
-    return;
+  if (stroke.points.size() < 2) {
+    return pic;
   }
   if (p.mode == DrawMode::FillEraser) {
     /* A patch of fill, with the eraser's path cut out of it. */
-    dl->AddRectFilled(a + ImVec2(size * 0.1f, size * 0.2f), b - ImVec2(size * 0.1f, size * 0.2f), IM_COL32(0xd8, 0x9a, 0x5c, 255), 3.0f);
-    ink_line_draw(dl, points, widths, Color{0.95f, 0.95f, 0.95f, 1.0f});
-    return;
+    pic.rects.push_back({float2{size * 0.1f, size * 0.2f}, float2{size * 0.9f, size * 0.8f},
+                         Color{0xd8 / 255.0f, 0x9a / 255.0f, 0x5c / 255.0f, 1.0f}, 3.0f});
+    stroke.color = Color{0.95f, 0.95f, 0.95f, 1.0f};
+    stroke.opacity.clear();
   }
-  ink_line_draw(dl, points, widths, p.mode == DrawMode::FillPen ? Color{0.85f, 0.6f, 0.36f, 1.0f} : Color{0.12f, 0.12f, 0.12f, 1.0f},
-                p.mode == DrawMode::Freehand ? &opacity : nullptr);
+  else {
+    stroke.color = p.mode == DrawMode::FillPen ? Color{0.85f, 0.6f, 0.36f, 1.0f} : Color{0.12f, 0.12f, 0.12f, 1.0f};
+    if (p.mode != DrawMode::Freehand) {
+      stroke.opacity.clear();
+    }
+  }
+  pic.strokes.push_back(std::move(stroke));
+  return pic;
+}
+
+static ImU32 tile_color(Color c)
+{
+  return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, c.a));
+}
+
+static void tile_picture(ImDrawList *dl, const ToolSettings &ts, const DrawPreset &p, ImVec2 a, ImVec2 b)
+{
+  const TilePicture pic = draw_tile_picture(ts, p, b.x - a.x);
+  const auto at = [&](float2 q) { return ImVec2(a.x + q.x, a.y + q.y); };
+  for (const TileRect &r : pic.rects) {
+    dl->AddRectFilled(at(r.a), at(r.b), tile_color(r.color), r.rounding);
+  }
+  for (const TileStroke &s : pic.strokes) {
+    if (s.plain) {
+      std::vector<ImVec2> points;
+      for (const float2 q : s.points) {
+        points.push_back(at(q));
+      }
+      dl->AddPolyline(points.data(), int(points.size()), tile_color(s.color), ImDrawFlags_None, s.widths[0] * 2.0f);
+      continue;
+    }
+    std::vector<float2> points;
+    for (const float2 q : s.points) {
+      points.push_back({a.x + q.x, a.y + q.y});
+    }
+    ink_line_draw(dl, points, s.widths, s.color, s.opacity.empty() ? nullptr : &s.opacity);
+  }
+  for (const TileDot &d : pic.dots) {
+    if (d.square) {
+      dl->AddRectFilled(at(d.c) - ImVec2(d.r, d.r), at(d.c) + ImVec2(d.r, d.r), tile_color(d.color));
+    }
+    else {
+      dl->AddCircleFilled(at(d.c), d.r, tile_color(d.color));
+    }
+  }
 }
 
 static bool in_tab(const DrawPreset &p, int tab)

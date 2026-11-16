@@ -18,6 +18,8 @@ struct SvgExport {
   int width = 0, height = 0;
   /* No background: clear where nothing is drawn. */
   bool transparent = false;
+  /* Guides too, as the viewport shows them (VectorSceneOptions::guides). */
+  bool guides = false;
 };
 
 /* What a file holds, for the report. */

@@ -53,6 +53,21 @@ PENDING = [
      'A pen drag carried on is one undo step', 'tests/test_number_pen.py'),
     ('src/wm/input_log.cc', '  if (!g_on) {', '  if (false && !g_on) {',
      'The input log logs nothing until asked', 'tests/test_input_log.py'),
+    ('src/wm/ipad_server.cc', '      else if (query_value(query, "k") != g_server.token) {',
+     '      else if (query_value(query, "k") == "never") {',
+     "The iPad's socket must bring the QR code's key", 'tests/test_ipad.py'),
+    ('src/wm/ipad_link.cc', '  const float pixel = g_stroke.canvas_pixel / zoom;', '  const float pixel = g_stroke.canvas_pixel + 0.0f * zoom;',
+     "A pen sized on screen is that size on the iPad", 'tests/test_ipad.py'),
+    ('src/wm/ipad_link.cc', '                  : eraser && ts.draw_mode == DrawMode::Freehand ? DrawMode::StrokeEraser\n                                                                 : ts.draw_mode;',
+     '                  : ts.draw_mode;', "The Pencil's eraser end erases", 'tests/test_ipad.py'),
+    ('src/wm/ipad_link.cc', '    while (keep < sent->size() && keep < now.size() && (*sent)[keep] == now[keep]) {',
+     '    while (false && keep < sent->size()) {', "Only what changed of the line is sent again", 'tests/test_ipad.py'),
+    ('src/wm/ipad_link.cc', '    if (i < images.size() && !g_images_sent.count(id)) {', '    if (i < images.size()) {',
+     "A brush's picture goes to the iPad once", 'tests/test_ipad.py'),
+    ('src/io/vector_export.cc', '    return layer.shown_in_render() && (layer.render_visible || options_.guides);',
+     '    return layer.shown_in_render() && layer.render_visible;', "Guides show on the iPad's canvas", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py', '    if _drawing is not None:\n        # The header', '    if False:\n        # The header',
+     "Undo waits for the stroke being drawn on the iPad", 'tests/test_ipad.py'),
 ]
 
 def build(root):

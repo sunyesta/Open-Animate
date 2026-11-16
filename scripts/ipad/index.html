@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Open Animate">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="app.css">
+<title>Open Animate</title>
+</head>
+<body>
+<div id="stage">
+  <div id="view">
+    <div id="art"></div>
+    <canvas id="dabs"></canvas>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <div id="tool-strip" class="strip left"></div>
+  <div id="shared-strip" class="strip right"></div>
+
+  <div id="banner" hidden></div>
+  <div id="toast" hidden></div>
+
+  <div id="shelf">
+    <div id="shelf-tabs"></div>
+    <div id="shelf-tiles"></div>
+  </div>
+
+  <div id="switch-screen" hidden>
+    <div class="switch-box">
+      <div class="switch-icon"></div>
+      <div class="switch-text">Switch to Draw in Open Animate</div>
+    </div>
+  </div>
+  <div id="connect-screen">
+    <div class="switch-box">
+      <div class="switch-text" id="connect-text">Connecting to Open Animate</div>
+    </div>
+  </div>
+  <div id="popover-layer"></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

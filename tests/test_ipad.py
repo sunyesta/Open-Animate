@@ -1,0 +1,346 @@
+"""Draw on iPad (wm/ipad_server.cc, wm/ipad_link.cc, scripts/modules/oanim/ipad.py, the page in scripts/ipad): a web
+server on the network serving the drawing page and talking to it over a WebSocket that must bring the QR code's
+one-time key; the Pencil's strokes drawn by Open Animate's own Stroke Pen as the viewport draws them (the same line,
+the same undo step), the line sent back as it grows with only what changed; the header's settings both ways; the
+canvas as the viewport shows it (guides too), with onion skins.
+
+The page itself needs an iPad (or a browser): checked live.
+
+Run with:  OpenAnimate --background --python tests/test_ipad.py
+"""
+
+import base64
+import json
+import math
+import os
+import socket
+import struct
+import time
+import urllib.error
+import urllib.request
+
+import oanim
+from oanim import ipad
+
+ops = oanim.ops
+_oanim = oanim._oanim
+
+# --- The WebSocket's handshake and frames (RFC 6455's own example) ------------------------------------------------------
+assert _oanim.websocket_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+assert _oanim.websocket_frame(b"hi", 1) == b"\x81\x02hi"
+assert _oanim.websocket_frame(b"x" * 126, 1)[:4] == b"\x81\x7e\x00\x7e"
+assert _oanim.websocket_frame(b"x" * 70000, 1)[:10] == b"\x81\x7f" + struct.pack(">Q", 70000)
+
+
+# --- The server: the page's files for anyone, the socket only with the key --------------------------------------------
+def ws_open(port, key):
+    s = socket.create_connection(("127.0.0.1", port), timeout=5)
+    s.sendall(("GET /ws?k=%s HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+               "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n"
+               % (key, base64.b64encode(os.urandom(16)).decode())).encode())
+    head = b""
+    while b"\r\n\r\n" not in head:
+        c = s.recv(1)
+        if not c:
+            break
+        head += c
+    return s, head.split(b"\r\n")[0]
+
+
+def ws_send(s, obj):
+    data = json.dumps(obj).encode()
+    mask = os.urandom(4)
+    n = len(data)
+    head = bytes([0x81]) + (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack(">H", n))
+    s.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+
+
+def ws_recv(s):
+    def exact(n):
+        b = b""
+        while len(b) < n:
+            c = s.recv(n - len(b))
+            assert c, "closed"
+            b += c
+        return b
+    h = exact(2)
+    n = h[1] & 127
+    if n == 126:
+        n = struct.unpack(">H", exact(2))[0]
+    elif n == 127:
+        n = struct.unpack(">Q", exact(8))[0]
+    return json.loads(exact(n))
+
+
+def take_messages(wait=2.0):
+    """The server's messages come in on its threads: wait for them."""
+    end = time.monotonic() + wait
+    got = []
+    while time.monotonic() < end:
+        got += _oanim.ipad_take()
+        if got:
+            time.sleep(0.05)
+            got += _oanim.ipad_take()
+            return got
+        time.sleep(0.02)
+    return got
+
+
+port = ipad.start(0)
+assert port > 0 and ipad.running()
+url = ipad.url()
+key = url.split("k=")[1]
+assert url.startswith("http://") and (":%d/?k=" % port) in url and len(key) == 32, url
+page = urllib.request.urlopen("http://127.0.0.1:%d/" % port).read()
+assert b"app.js" in page, "the page"
+assert b"Pencil" in urllib.request.urlopen("http://127.0.0.1:%d/app.js" % port).read()
+try:
+    urllib.request.urlopen("http://127.0.0.1:%d/..%%2fCMakeLists.txt" % port)
+    assert False, "nothing outside the page's folder"
+except urllib.error.HTTPError as e:
+    assert e.code == 404
+
+s, status = ws_open(port, "0" * 32)
+assert b"403" in status, ("a wrong key is refused", status)
+s.close()
+s, status = ws_open(port, key)
+assert b"101" in status, status
+got = take_messages()
+assert len(got) == 1 and json.loads(got[0][1]) == {"t": "_open"}, got
+client = got[0][0]
+ws_send(s, {"t": "hello", "x": "é" * 200})
+got = take_messages()
+assert got and json.loads(got[0][1])["x"] == "é" * 200, "a message as sent (longer than 125 bytes, UTF-8)"
+_oanim.ipad_send(client, json.dumps({"t": "test", "big": "y" * 100000}))
+assert ws_recv(s)["big"] == "y" * 100000
+assert ipad.clients() == 1
+s.close()
+got = take_messages()
+assert got and json.loads(got[-1][1]) == {"t": "_close"}, got
+ipad.stop()
+assert not ipad.running() and ipad.url() == ""
+# A new start, a new key: the old one no longer works.
+port2 = ipad.start(0)
+assert ipad.url().split("k=")[1] != key
+ipad.stop()
+
+
+# --- The page's messages, handled without the network: what is sent is caught ----------------------------------------------
+sent = []
+ipad._send = lambda client, text: sent.append((client, json.loads(text if isinstance(text, str) else text.decode())))
+CLIENT = 7
+
+
+def messages(*items):
+    sent.clear()
+    changed = ipad._tick([(CLIENT, json.dumps(m)) for m in items])
+    ipad._flush(changed)
+    return [m for _, m in sent]
+
+
+def of(kind, got):
+    return [m for m in got if m["t"] == kind]
+
+
+def fresh():
+    ops.wm.read_homefile(confirmed="1")
+    ops.layer.new()
+    doc = oanim.data.document
+    doc.frame_current = 0
+    ops.draw.preset_load(name="Ink")
+    # The Draw tool's settings outlive the document: as a new session's.
+    oanim.wm.set_draw(size_view=False)
+    _oanim.ipad_brush_shape_set("")
+    ipad._reset()
+    got = messages({"t": "_open"})
+    return doc, got
+
+
+doc, got = fresh()
+assert [m["t"] for m in got] == ["state", "tiles", "brush", "canvas"], [m["t"] for m in got]
+st = of("state", got)[0]
+assert st["refused"] == "" and st["tool"] == "DRAW" and st["mode"] == "FREEHAND" and st["preset"] == "Ink"
+assert {p["name"] for p in st["presets"]} >= {"Ink", "Pencil", "Marker", "Tapered", "Mouse"}
+tiles = {t["name"]: t for t in of("tiles", got)[0]["tiles"]}
+assert set(tiles) == {p["name"] for p in st["presets"]}
+assert len(tiles["Ink"]["strokes"]) == 1 and len(tiles["Ink"]["strokes"][0]["p"]) > 20, "Ink's sample line"
+canvas = of("canvas", got)[0]
+W, H = ipad.canvas_size()
+assert (canvas["w"], canvas["h"]) == (W, H) and "<svg" in canvas["svg"] and canvas["onion"] == []
+assert messages() == [], "nothing again until something changes"
+
+
+def wave(n=60):
+    return [[W * 0.25 + i * W * 0.008, H * 0.5 + H * 0.1 * math.sin(i / 6), 0.3 + 0.6 * math.sin(i / n * math.pi), 0, 0,
+             i / 120] for i in range(n)]
+
+
+def stroke(rows, zoom=1.0, eraser=False):
+    got = messages({"t": "down", "zoom": zoom, "eraser": eraser, "s": rows[:5]})
+    got += messages({"t": "move", "s": rows[5:30]})
+    got += messages({"t": "move", "s": rows[30:]})
+    return got + messages({"t": "up", "s": []})
+
+
+def shapes():
+    return len(oanim.data.layers.active.shapes)
+
+
+def points():
+    return [tuple(round(c, 6) for c in p) for p in oanim.data.layers.active.points]
+
+
+# --- A stroke is the viewport's: the same line as draw.stroke makes of the same hand, one "Draw" step ------------------
+undo_before = oanim.wm.undo_history()[1]
+got = stroke(wave())
+live = of("live", got)
+assert len(live) == 3 and [m["n"] for m in live] == [5, 30, 60], [m.get("n") for m in live]
+assert all(m["kind"] == "line" for m in live)
+assert live[1]["keep"] > 0 and live[2]["keep"] > 0, "only what changed is sent again"
+line = []
+for m in live:
+    del line[m["keep"]:]
+    line += m["add"]
+assert of("done", got)[0]["undo"] == "Draw"
+assert oanim.wm.undo_history()[0][-1] == "Draw" and oanim.wm.undo_history()[1] == undo_before + 1
+assert shapes() == 1
+drawn = points()
+# The line shown ends where the line made does (canvas pixels to the document: the camera's frame, 2 units tall).
+end_px = line[-4:-2]
+to_doc = lambda x, y: ((x - W / 2) / (H / 2), (H / 2 - y) / (H / 2))
+last = to_doc(*end_px)
+assert min(math.hypot(last[0] - p[0], last[1] - p[1]) for p in drawn) < 2.0 / H, (last, drawn[-3:])
+assert of("canvas", got) and "<path" in of("canvas", got)[-1]["svg"], "the canvas sent again with the line in it"
+
+# The same samples through draw.stroke, in the layer's space with the iPad's pixel: the same points. With Size Unit
+# View the width follows the iPad's zoom, so a pen sized on screen is that size on the iPad.
+for view in (False, True):
+    doc, _ = fresh()
+    oanim.wm.set_draw(size_view=view, view_size=9.0)
+    zoom = 0.37
+    stroke(wave(), zoom=zoom)
+    by_ipad = points()
+    width_ipad = oanim.data.layers.active.shape_style(0)["line_width"]
+    doc, _ = fresh()
+    oanim.wm.set_draw(size_view=view, view_size=9.0)
+    rows = [(to_doc(r[0], r[1]) + (r[2], r[5])) for r in wave()]
+    pixel = (2.0 / H) / zoom
+    ops.draw.stroke(samples=";".join("%.9f,%.9f,%.9f,%.9f" % r for r in rows), pixel=pixel)
+    by_op = points()
+    assert len(by_ipad) == len(by_op) and all(math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-4 for a, b in zip(by_ipad, by_op)), \
+        (view, by_ipad[:3], by_op[:3])
+    width_op = oanim.data.layers.active.shape_style(0)["line_width"]
+    assert abs(width_ipad - width_op) < 1e-7, (view, width_ipad, width_op)
+    if view:
+        assert abs(width_op - 9.0 * pixel) < 1e-6, "9 of the iPad's screen pixels wide"
+
+# --- What refuses a stroke, as the viewport --------------------------------------------------------------------------------
+doc, _ = fresh()
+ops.wm.tool_select()
+got = messages({"t": "down", "zoom": 1, "s": wave()[:3]})
+assert of("refused", got)[0]["why"] == "Switch to Draw in Open Animate"
+assert of("state", got)[0]["refused"] == "Switch to Draw in Open Animate"
+messages({"t": "up", "s": []})
+assert shapes() == 0
+ops.wm.tool_draw(mode="FREEHAND")
+doc.frame_current = 3
+assert of("refused", messages({"t": "down", "zoom": 1, "s": wave()[:3]}))[0]["why"] == "Switch to Setup (frame 0) to draw"
+doc.frame_current = 0
+
+# --- The eraser end erases; the Fill Pen paints ------------------------------------------------------------------------------
+doc, _ = fresh()
+stroke(wave())
+assert shapes() == 1
+cross = [[W * 0.45, H * 0.2 + i * H * 0.02, 0.8, 0, 0, i / 100] for i in range(40)]
+got = stroke(cross, eraser=True)
+assert of("done", got)[0]["undo"] == "Erase Line", of("done", got)
+assert of("live", got)[0]["color"] == [0.9, 0.3, 0.3, 0.4], "an eraser's path shows as the viewport's"
+ops.wm.tool_draw(mode="FILL_PEN")
+got = stroke([[W * 0.6 + 40 * math.cos(i / 6), H * 0.3 + 40 * math.sin(i / 6), 1, 0, 0, i / 100] for i in range(40)])
+assert of("done", got)[0]["undo"] == "Paint Fill"
+
+# --- A stroke being drawn: the header and the gestures wait; a page going drops it ---------------------------------------------
+doc, _ = fresh()
+history = oanim.wm.undo_history()[1]
+messages({"t": "down", "zoom": 1, "s": wave()[:5]})
+messages({"t": "undo"})
+assert oanim.wm.undo_history()[1] == history, "no undo mid-stroke"
+messages({"t": "_close"})
+assert not _oanim.ipad_stroke_active() and shapes() == 0
+messages({"t": "_open"})
+
+# --- Undo and redo (two and three fingers) ------------------------------------------------------------------------------------
+stroke(wave())
+assert shapes() == 1
+got = messages({"t": "undo"})
+assert shapes() == 0 and of("canvas", got), "undone, and the canvas sent again"
+messages({"t": "redo"})
+assert shapes() == 1
+
+# --- The header's settings, as the PC's fields make them ----------------------------------------------------------------------
+doc, _ = fresh()
+got = messages({"t": "set", "values": {"size_px": 12.0}})
+assert abs(oanim.wm.draw_settings()["line_width"] - 12.0 / (doc.height / 2)) < 1e-6
+assert abs(of("state", got)[0]["size_px"] - 12.0) < 1e-4, "and the state sent back says so"
+messages({"t": "set", "values": {"opacity": 0.4, "taper_start": 30, "stabilizer": "PULLED_STRING", "use_pressure": False}})
+s = oanim.wm.draw_settings()
+assert abs(s["line_color"][3] - 0.4) < 1e-6 and s["taper_start"] == 30 and s["stabilizer"] == "PULLED_STRING"
+assert not s["use_pressure"]
+messages({"t": "set", "values": {"size_view": True}})
+messages({"t": "set", "values": {"size_px": 20}})
+assert abs(oanim.wm.draw_settings()["view_size"] - 20) < 1e-6, "with Size Unit View the size is on screen"
+ops.wm.tool_draw(mode="FILL_PEN")
+messages({"t": "set", "values": {"opacity": 0.25}})
+assert abs(oanim.wm.draw_settings()["fill_color"][3] - 0.25) < 1e-6, "the Fill Pen's opacity is its fill's"
+got = messages({"t": "set", "values": {"line_color": [1, 0, 0, 1]}})
+assert of("state", got)[0]["settings"]["line_color"] == [1.0, 0.0, 0.0, 1.0]
+got = messages({"t": "preset", "name": "Marker"})
+assert oanim.wm.draw_settings()["preset"] == "Marker" and of("state", got)[0]["preset"] == "Marker"
+assert of("tiles", got), "the tiles follow the settings"
+
+# --- A brushed line: its stamps, the brush's pictures sent once -----------------------------------------------------------------
+doc, _ = fresh()
+preview = of("brush", messages({"t": "brush", "name": "Round"}))[0]["preview"]
+assert preview["kind"] == "dabs" and preview["pngs"], "the brush button's picture, stamped with the brush"
+got = messages({"t": "down", "zoom": 1, "s": wave()[:20]})
+got += messages({"t": "move", "s": wave()[20:40]})
+dabs = of("live", got)
+assert [m["kind"] for m in dabs] == ["dabs", "dabs"], [m["kind"] for m in dabs]
+first, second = dabs
+image = str(first["images"][0]["id"])
+assert image in preview["pngs"] and first["pngs"] == {} and second["pngs"] == {}, "the brush's picture sent once"
+messages({"t": "_open"})
+got = messages({"t": "move", "s": wave()[40:45]})
+assert image in of("live", got)[0]["pngs"], "and again to a page that connects"
+assert second["images"][0]["keep"] > 0 and second["images"][0]["keep"] % 6 == 0, "stamps already down stay"
+assert len(first["images"][0]["add"]) % 48 == 0, "two triangles a stamp, eight numbers a corner"
+assert of("done", messages({"t": "up", "s": []}))[0]["undo"] == "Draw"
+
+# --- The canvas: guides show (a reference picture often is one), and the onion skins -------------------------------------------
+doc, _ = fresh()
+layer = oanim.data.layers.active
+layer.add_curve([(-0.5, 0.0), (0.5, 0.0)])
+messages({"t": "_open"})
+with_line = of("canvas", messages())
+svg = json.loads(_oanim.ipad_canvas(W, H))["svg"]
+layer.render_visible = False
+guide_svg = json.loads(_oanim.ipad_canvas(W, H))["svg"]
+assert guide_svg == svg, "a guide is on the iPad's canvas as on the viewport"
+layer.render_visible = True
+ops.layer.new()
+moving = oanim.data.layers.active
+moving.add_curve([(0.0, 0.0), (0.0, 0.5)])
+for frame, x in ((10, 0.2), (20, 0.4)):
+    doc.frame_current = frame
+    moving.location_x = x
+doc.frame_current = 20
+doc.onion_skin = True
+canvas = json.loads(_oanim.ipad_canvas(W, H))
+assert canvas["frame"] == 20 and len(canvas["onion"]) == 1 and canvas["onion"][0]["lines"], canvas["onion"]
+ghost_x = canvas["onion"][0]["lines"][0][0]
+assert abs(ghost_x - (W / 2 + 0.2 * H / 2)) < 1.0, ("the ghost where frame 10 has it", ghost_x)
+st = of("state", messages())
+doc.onion_skin = False
+assert json.loads(_oanim.ipad_canvas(W, H))["onion"] == []
+
+print("ipad: ok")

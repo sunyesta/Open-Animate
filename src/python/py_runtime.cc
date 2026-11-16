@@ -63,6 +63,8 @@
 #include "wm/pen_input.hh"
 #include "wm/pointer_track.hh"
 #include "wm/input_log.hh"
+#include "wm/ipad_link.hh"
+#include "wm/ipad_server.hh"
 #include "editors/number_pen.hh"
 #include "wm/event_system.hh"
 #include "wm/file_drop.hh"
@@ -472,6 +474,75 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   m.def("remote_port", []() { return remote_port(); });
   m.def("remote_process", []() { remote_process(current_context()); });
   m.def("remote_dispatch", [](const std::string &request) { return remote_dispatch(current_context(), request); });
+  /* Draw on iPad (wm/ipad_server.hh, wm/ipad_link.hh; oanim.ipad handles its messages). */
+  m.def("ipad_start", [](int port) {
+    const std::u8string root = (oanim::python::scripts_dir() / "ipad").u8string();
+    return ipad_server_start(port, std::string(root.begin(), root.end()));
+  });
+  m.def("ipad_stop", []() {
+    ipad_stroke_cancel();
+    ipad_server_stop();
+  });
+  m.def("ipad_running", []() { return ipad_server_running(); });
+  m.def("ipad_url", []() { return ipad_server_url(); });
+  m.def("ipad_token", []() { return ipad_server_token(); });
+  m.def("ipad_port", []() { return ipad_server_port(); });
+  m.def("ipad_clients", []() { return ipad_server_clients(); });
+  m.def("ipad_take", []() {
+    py::list out;
+    for (const IpadMessage &m : ipad_server_take()) {
+      out.append(py::make_tuple(m.client, py::bytes(m.text)));
+    }
+    return out;
+  });
+  m.def("ipad_send", [](int client, const std::string &text) { ipad_server_send(client, text); });
+  m.def("ipad_canvas", [](int width, int height) {
+    return py::bytes(ipad_canvas_message(current_context(), std::clamp(width, 1, 8192), std::clamp(height, 1, 8192)));
+  });
+  m.def("ipad_draw_refused", []() { return ipad_draw_refused(current_context()); });
+  /* Changes whenever the canvas may have: an edit or selection (onion skins follow it), the frame, the active layer,
+   * Python having run. */
+  m.def("ipad_canvas_key", []() {
+    const Context &C = current_context();
+    const Document &doc = *C.document;
+    return py::make_tuple(C.undo ? C.undo->change_count() : 0, doc.frame_current, doc.active_layer,
+                          oanim::python::python_runs(), doc.onion_skin, int(doc.onion_mode), doc.onion_before,
+                          doc.onion_after, doc.onion_step, doc.onion_fade, doc.width, doc.height);
+  });
+  m.def("ipad_stroke_begin", [](int width, int height, float zoom, bool eraser) {
+    return ipad_stroke_begin(current_context(), width, height, zoom, eraser);
+  });
+  m.def("ipad_stroke_add", [](const std::vector<std::tuple<float, float, float, float, float, double>> &samples) {
+    std::vector<IpadSample> list;
+    for (const auto &[x, y, pressure, tilt_x, tilt_y, time] : samples) {
+      list.push_back({x, y, pressure, tilt_x, tilt_y, time});
+    }
+    return py::bytes(ipad_stroke_add(current_context(), list));
+  });
+  m.def("ipad_stroke_end", []() { return ipad_stroke_end(current_context()); });
+  m.def("ipad_stroke_cancel", []() { ipad_stroke_cancel(); });
+  m.def("ipad_stroke_active", []() { return ipad_stroke_active(); });
+  m.def("ipad_images_reset", []() { ipad_images_reset(); });
+  m.def("ipad_tiles", [](float size) { return py::bytes(ipad_tiles_json(current_context(), size)); });
+  m.def("ipad_brush_preview", [](float width, float height) {
+    return py::bytes(ipad_brush_preview_json(current_context(), width, height));
+  });
+  m.def("ipad_brush_shape_set", [](const std::string &name) { ipad_brush_shape_set(current_context(), name); });
+  m.def("ipad_brush_shapes", []() {
+    py::list out;
+    for (const Brush &b : brushes()) {
+      out.append(b.name);
+    }
+    return out;
+  });
+  m.def("ipad_brush_name", []() {
+    const ToolSettings &ts = current_context().wm->tool_settings;
+    return brush_display_name(ts.style.brush.name);
+  });
+  m.def("websocket_accept", [](const std::string &key) { return ipad_websocket_accept(key); });
+  m.def("websocket_frame", [](const py::bytes &payload, int opcode) {
+    return py::bytes(ipad_websocket_frame(std::string(payload), opcode));
+  });
 
   /* The timeline's rows with every row open: (depth, name, red, pinned). */
   m.def("timeline_key_header", []() {
@@ -1073,6 +1144,8 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     d["brush_recent"] = recent;
     d["line_width"] = ts.style.line_width;
+    d["line_color"] = py::make_tuple(ts.style.line.r, ts.style.line.g, ts.style.line.b, ts.style.line.a);
+    d["fill_color"] = py::make_tuple(ts.style.fill.r, ts.style.fill.g, ts.style.fill.b, ts.style.fill.a);
     ink_settings_read(ts.ink, d);
     return d;
   });
@@ -6214,6 +6287,29 @@ bool text_run(const std::string &name, const std::string &source)
   g_python_runs++;
   const std::optional<py::object> result = console_call("run_text", name, source);
   return result && result->cast<bool>();
+}
+
+void ipad_tick()
+{
+  if (!g_initialized) {
+    return;
+  }
+  /* A mistake in it would come every frame: said a few times, then kept quiet. */
+  static int errors = 0;
+  try {
+    const py::module_ ipad = py::module_::import("oanim.ipad");
+    const bool changed = ipad.attr("_tick")().cast<bool>();
+    if (changed) {
+      /* Something besides a stroke (an undo, a setting) ran Python's way: what is drawn is made anew. */
+      g_python_runs++;
+    }
+    ipad.attr("_flush")(changed);
+  }
+  catch (py::error_already_set &error) {
+    if (errors++ < 3) {
+      report(ReportType::Error, "Draw on iPad:\n" + format_exception(error));
+    }
+  }
 }
 
 std::string remote_run(const std::string &code)

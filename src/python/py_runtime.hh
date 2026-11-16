@@ -53,4 +53,7 @@ bool text_run(const std::string &name, const std::string &source);
  * printed ("output"), the last line's value ("result", its repr) and any traceback ("error"). */
 std::string remote_run(const std::string &code);
 
+/* Draw on iPad's messages handled (oanim.ipad._tick), each frame while its server runs. */
+void ipad_tick();
+
 }  // namespace oanim::python

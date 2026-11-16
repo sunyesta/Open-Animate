@@ -1,0 +1,9 @@
+{
+  "name": "Open Animate",
+  "short_name": "Open Animate",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#3a3a3a",
+  "theme_color": "#303030",
+  "icons": [{"src": "icon.png", "sizes": "180x180", "type": "image/png"}]
+}

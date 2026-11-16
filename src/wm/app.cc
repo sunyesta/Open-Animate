@@ -29,6 +29,8 @@
 #include "data/layer_mirror.hh"
 #include "wm/clipboard_image.hh"
 #include "wm/input_log.hh"
+#include "wm/ipad_link.hh"
+#include "wm/ipad_server.hh"
 #include "wm/pen_input.hh"
 #include "wm/pen_wintab.hh"
 #include "data/camera.hh"
@@ -146,6 +148,7 @@ int App::run(const LaunchOptions &options)
   rig_operators_register();
   sculpt_operators_register();
   draw_operators_register();
+  ipad_operators_register();
   file_operators_register();
   media_operators_register();
   text_operators_register();
@@ -169,6 +172,7 @@ int App::run(const LaunchOptions &options)
 
   if (options.background) {
     remote_stop();
+    ipad_server_stop();
     python::shutdown();
     media_shutdown();
     return ok ? 0 : 1;
@@ -192,6 +196,7 @@ int App::run(const LaunchOptions &options)
   main_loop();
   /* Requests still waiting run Python: stop before it does. */
   remote_stop();
+  ipad_server_stop();
   autosave_quit(ctx_);
   audio_close();
   window_exit();
@@ -465,6 +470,8 @@ void App::main_loop()
       OANIM_PROFILE("remote");
       remote_process(ctx_);
     }
+    /* Draw on iPad's messages, the same way. */
+    ipad_process(ctx_);
     if (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) {
       SDL_Delay(10);
       continue;
@@ -1167,6 +1174,13 @@ void App::draw_top_bar()
       workspace.layout_built = false;
     }
     ImGui::Separator();
+    if (ImGui::MenuItem("Draw on iPad...", nullptr, ipad_server_running())) {
+      operator_call(ctx_, "wm.ipad_draw_start");
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("%s\n\nPython: oanim.ops.wm.ipad_draw_start()", operators().find("wm.ipad_draw_start")->description.c_str());
+    }
+    ImGui::Separator();
     menu_operator(ctx_, "Next Workspace", "screen.workspace_cycle_next");
     menu_operator(ctx_, "Previous Workspace", "screen.workspace_cycle_prev");
     ImGui::Separator();
@@ -1808,6 +1822,7 @@ void App::draw_ui()
   ui_layer_eyedropper_overlay();
   ui_flash_update(wm_);
 
+  ipad_window_draw(ctx_);
   if (show_about_) {
     ImGui::OpenPopup("About Open Animate");
     show_about_ = false;

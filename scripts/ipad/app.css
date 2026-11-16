@@ -1,0 +1,310 @@
+/* Blender's dark theme, as Open Animate's own header and shelf use it. */
+:root {
+  --canvas: #3a3a3a;
+  --header: #303030;
+  --widget: #545454;
+  --widget-hover: #656565;
+  --field: #282828;
+  --field-fill: #4772b3;
+  --toggle-on: #4772b3;
+  --text: #e6e6e6;
+  --text-dim: #9a9a9a;
+  --line: #1d1d1d;
+  --popover: #1f1f1f;
+  --tile: #2b2b2b;
+  --tile-active: #4772b3;
+  --h: 30px;
+  --round: 10px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--canvas);
+  color: var(--text);
+  font: 13px -apple-system, "Segoe UI", sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+}
+
+#stage { position: fixed; inset: 0; }
+
+#view {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+#art {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  box-shadow: 0 0 0 1px #000, 0 4px 30px rgba(0, 0, 0, 0.45);
+  background: #fff;
+}
+#art svg { display: block; }
+#art.moving { will-change: transform; }
+
+#dabs, #overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* The header's two strips, in the canvas's top corners, rounded where they meet it. */
+.strip {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: calc(var(--safe-top) + 6px) 8px 6px 8px;
+  background: var(--header);
+  z-index: 5;
+}
+.strip.left { left: 0; border-bottom-right-radius: var(--round); }
+.strip.right { right: 0; border-bottom-left-radius: var(--round); }
+.strip:empty { display: none; }
+
+.joined { display: flex; gap: 1px; }
+.joined > *:not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.joined > *:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+
+button, .field, .swatch {
+  height: var(--h);
+  border: 0;
+  border-radius: 4px;
+  background: var(--widget);
+  color: var(--text);
+  font: inherit;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+button:active { background: var(--widget-hover); }
+button.on { background: var(--toggle-on); }
+button:disabled, .field.disabled { opacity: 0.45; }
+button.icon { width: var(--h); padding: 0; }
+
+.dropdown::after {
+  content: "";
+  border: 4px solid transparent;
+  border-top: 5px solid var(--text);
+  margin-top: 4px;
+}
+
+/* A Blender number field: the fill shows the value, a drag across changes it, a tap types it. */
+.field {
+  position: relative;
+  background: var(--field);
+  padding: 0;
+  overflow: hidden;
+  touch-action: none;
+  min-width: 120px;
+}
+.field .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--field-fill); pointer-events: none; }
+.field .label { position: relative; flex: 1; text-align: center; pointer-events: none; padding: 0 8px; }
+.field input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: #1a1a1a;
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  outline: 2px solid var(--toggle-on);
+}
+.with-pressure { display: flex; gap: 1px; }
+.with-pressure .field { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.with-pressure button { border-top-left-radius: 0; border-bottom-left-radius: 0; width: var(--h); padding: 0; }
+
+.pen-icon {
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M11.5 1.5l3 3-8.5 8.5-4 1 1-4z'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M11.5 1.5l3 3-8.5 8.5-4 1 1-4z'/></svg>") center / contain no-repeat;
+}
+.gear-icon {
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M7 0h2l.4 2.1 1.5.6 1.8-1.2 1.4 1.4-1.2 1.8.6 1.5L16 7v2l-2.1.4-.6 1.5 1.2 1.8-1.4 1.4-1.8-1.2-1.5.6L9 16H7l-.4-2.1-1.5-.6-1.8 1.2-1.4-1.4 1.2-1.8-.6-1.5L0 9V7l2.1-.4.6-1.5-1.2-1.8 1.4-1.4 1.8 1.2 1.5-.6zM8 5a3 3 0 100 6 3 3 0 000-6z'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M7 0h2l.4 2.1 1.5.6 1.8-1.2 1.4 1.4-1.2 1.8.6 1.5L16 7v2l-2.1.4-.6 1.5 1.2 1.8-1.4 1.4-1.8-1.2-1.5.6L9 16H7l-.4-2.1-1.5-.6-1.8 1.2-1.4-1.4 1.2-1.8-.6-1.5L0 9V7l2.1-.4.6-1.5-1.2-1.8 1.4-1.4 1.8 1.2 1.5-.6zM8 5a3 3 0 100 6 3 3 0 000-6z'/></svg>") center / contain no-repeat;
+}
+
+.brush-button { padding: 0 6px 0 4px; }
+.brush-button canvas { width: 96px; height: 24px; background: #fff; border-radius: 3px; }
+
+.swatch { width: 48px; padding: 0; position: relative; overflow: hidden; }
+.swatch .chip { position: absolute; inset: 4px; border-radius: 3px; }
+.swatch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; }
+
+/* Popovers: Advanced, Options, the stabilizer's gear, the brush. */
+#popover-layer { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
+.popover {
+  position: absolute;
+  pointer-events: auto;
+  background: var(--popover);
+  border: 1px solid #000;
+  border-radius: 6px;
+  padding: 10px;
+  min-width: 250px;
+  max-height: 70vh;
+  overflow-y: auto;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  touch-action: pan-y;
+}
+.popover .row { display: flex; align-items: center; gap: 8px; }
+.popover .row > .grow { flex: 1; }
+.popover .field { width: 100%; }
+.popover .section {
+  color: var(--text-dim);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.popover .section::after { content: ""; flex: 1; height: 1px; background: #444; }
+.popover .panel-head { display: flex; align-items: center; gap: 6px; padding: 6px 0; color: var(--text); }
+.popover .panel-head::before {
+  content: "";
+  border: 5px solid transparent;
+  border-left: 6px solid var(--text);
+  margin-left: 2px;
+  transition: transform 0.12s;
+  transform-origin: 3px 5px;
+}
+.popover .panel.open > .panel-head::before { transform: rotate(90deg); }
+.popover .panel > .panel-body { display: none; flex-direction: column; gap: 6px; padding-left: 4px; }
+.popover .panel.open > .panel-body { display: flex; }
+.check { display: flex; align-items: center; gap: 8px; height: var(--h); }
+.check .box {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--widget);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.check.on .box { background: var(--toggle-on); }
+.check.on .box::after {
+  content: "";
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translate(1px, -1px);
+}
+.check.disabled { opacity: 0.45; }
+.list-item { height: var(--h); display: flex; align-items: center; padding: 0 8px; border-radius: 4px; }
+.list-item.on { background: var(--toggle-on); }
+.curve { background: #111; border-radius: 4px; width: 100%; height: 160px; touch-action: none; }
+
+/* The shelf, as the Draw tool's along the viewport's bottom. */
+#shelf {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--header);
+  padding-bottom: var(--safe-bottom);
+  z-index: 5;
+  border-top: 1px solid var(--line);
+}
+#shelf-tabs { display: flex; gap: 2px; padding: 6px 8px 0 8px; }
+#shelf-tabs button { height: 28px; border-radius: 4px 4px 0 0; background: transparent; color: var(--text-dim); }
+#shelf-tabs button.on { background: var(--tile); color: var(--text); }
+#shelf-tiles {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  overflow-x: auto;
+  background: var(--tile);
+  touch-action: pan-x;
+  scrollbar-width: none;
+}
+#shelf-tiles::-webkit-scrollbar { display: none; }
+.tile {
+  flex: 0 0 auto;
+  width: 76px;
+  border-radius: 6px;
+  background: #e8e8e8;
+  padding: 4px 4px 2px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  outline: 2px solid transparent;
+}
+.tile.on { outline-color: var(--tile-active); }
+.tile canvas { width: 64px; height: 64px; }
+.tile .name { color: #1e1e1e; font-size: 11px; height: 16px; max-width: 68px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile.changed .name { color: #4772b3; }
+.tile.plus { background: #3a3a3a; color: var(--text-dim); justify-content: center; font-size: 30px; }
+
+#banner {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--safe-top) + 64px);
+  transform: translateX(-50%);
+  background: rgba(30, 30, 30, 0.92);
+  border: 1px solid #000;
+  color: #f0c040;
+  padding: 8px 14px;
+  border-radius: 6px;
+  z-index: 6;
+  pointer-events: none;
+}
+#toast {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  transform: translate(-50%, -50%);
+  background: rgba(20, 20, 20, 0.85);
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 16px;
+  z-index: 7;
+  pointer-events: none;
+}
+
+#switch-screen, #connect-screen {
+  position: absolute;
+  inset: 0;
+  background: rgba(40, 40, 40, 0.94);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#switch-screen[hidden], #connect-screen[hidden], #banner[hidden], #toast[hidden] { display: none; }
+.switch-box { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.switch-text { font-size: 20px; }
+.switch-icon {
+  width: 56px;
+  height: 56px;
+  background: var(--text-dim);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M11.5 1.5l3 3-8.5 8.5-4 1 1-4z'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M11.5 1.5l3 3-8.5 8.5-4 1 1-4z'/></svg>") center / contain no-repeat;
+}

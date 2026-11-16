@@ -70,13 +70,22 @@ set(CLIPPER2_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CLIPPER2_TESTS OFF CACHE BOOL "" FORCE)
 set(CLIPPER2_USINGZ "OFF" CACHE STRING "" FORCE)
 
+# --- QR Code generator: the QR code Draw on iPad shows ---------------------------------------
+# One C++ file, built with the app (CMakeLists.txt); SOURCE_SUBDIR points nowhere so nothing else is.
+FetchContent_Declare(qrcodegen
+  GIT_REPOSITORY https://github.com/nayuki/QR-Code-generator.git
+  GIT_TAG v1.8.0
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR do-not-build
+)
+
 # The Python installation to embed. Its DLL is copied next to the executable.
 set(OANIM_PYTHON_ROOT "C:/Python314" CACHE PATH "Root of the Python installation to embed")
 set(Python_ROOT_DIR ${OANIM_PYTHON_ROOT})
 find_package(Python 3.14 EXACT REQUIRED COMPONENTS Interpreter Development.Embed)
 set(PYBIND11_FINDPYTHON ON)
 
-FetchContent_MakeAvailable(SDL3 imgui pybind11 earcut miniz json Clipper2)
+FetchContent_MakeAvailable(SDL3 imgui pybind11 earcut miniz json Clipper2 qrcodegen)
 
 # Blender's number fields: Shift while dragging is precise (a tenth of the speed). ImGui makes
 # Shift ten times faster and has no setting for it, so its fetched copy is changed here (the same

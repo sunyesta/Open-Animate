@@ -171,6 +171,7 @@ std::string svg_frame(const Document &doc, const SvgExport &options, SvgExportRe
   scene_options.width = options.width;
   scene_options.height = options.height;
   scene_options.transparent = options.transparent;
+  scene_options.guides = options.guides;
   const VectorScene scene = vector_scene(doc, scene_options);
   const std::string w = std::to_string(scene.width), h = std::to_string(scene.height);
   std::string defs;

@@ -74,6 +74,8 @@ struct VectorSceneOptions {
   bool transparent = false;
   /* Hidden layers and guides too, each in a group saying so (a PDF's layers switched off), as they would draw shown. */
   bool hidden_layers = false;
+  /* Guides too (layers the viewport shows but renders leave out, as a reference picture often is), drawn as shown. */
+  bool guides = false;
   /* Brushed lines' pictures at this many pixels a pixel. */
   float picture_scale = 2.0f;
 };
