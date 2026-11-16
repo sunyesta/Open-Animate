@@ -14,6 +14,7 @@
 #include "gpu/scene_renderer.hh"
 #include "ops/undo.hh"
 #include "wm/context.hh"
+#include "wm/pointer_track.hh"
 
 struct SDL_Window;
 struct SDL_GLContextState;
@@ -102,6 +103,8 @@ class App {
   bool show_about_ = false;
   /* A number field's scrub has the mouse grabbed (relative mouse mode). */
   bool number_grab_ = false;
+  /* Whether the pen or the mouse is the pointer: a pen's lift doesn't flash the cursor where the mouse was. */
+  PointerTrack pointer_;
   /* Keys pressed while a click is still on its way to the tools (ImGui hands a click's press and release over one
    * frame each), held until it has arrived: G right after clicking a point moves that point, as its selection is
    * there by then. */

@@ -61,6 +61,7 @@
 #include "rna/rna.hh"
 #include "wm/context.hh"
 #include "wm/pen_input.hh"
+#include "wm/pointer_track.hh"
 #include "wm/event_system.hh"
 #include "wm/file_drop.hh"
 #include "wm/keymap.hh"
@@ -1130,6 +1131,29 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         throw py::value_error("no draw setting '" + key + "' (see oanim.wm.draw_settings)");
       }
     }
+  });
+  /* Which of the pen and the mouse is the pointer (wm/pointer_track.hh), through a list of moves: ("pen", x, y,
+   * cursor_x, cursor_y) with where the system cursor is then, or ("mouse", x, y). For each mouse move, whether it is
+   * taken (False: the cursor the pen left behind, dropped); and where ImGui's own read of the cursor at (x, y) ends up
+   * for a ("read", x, y). */
+  m.def("pointer_track", [](const std::vector<py::tuple> &moves) {
+    PointerTrack t;
+    py::list result;
+    for (const py::tuple &move : moves) {
+      const std::string kind = move[0].cast<std::string>();
+      const float x = move[1].cast<float>(), y = move[2].cast<float>();
+      if (kind == "pen") {
+        pointer_pen_moved(t, x, y, move[3].cast<float>(), move[4].cast<float>());
+      }
+      else if (kind == "mouse") {
+        result.append(pointer_mouse_moved(t, x, y));
+      }
+      else {
+        const bool stray = pointer_stray(t, x, y);
+        result.append(py::make_tuple(stray ? t.pen_x : x, stray ? t.pen_y : y));
+      }
+    }
+    return result;
   });
   /* The Stroke Pen's engine on samples (x, y, pressure, tilt_x, tilt_y, seconds), without the window: its line as
    * the pen left it and the tail to the last sample, the finished line, and the finished line's Bezier points. */

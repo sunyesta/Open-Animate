@@ -39,6 +39,8 @@ PENDING = [
      'A brushed line drawn live is seeded as its finished shape', 'tests/test_draw_live_brush.py'),
     ('src/ops/draw_ops.cc', '  ink_taper(line, ink.settings(), ink.view());\n  if (line.size() < 2) {',
      '  if (line.size() < 2) {', 'A brushed line drawn live has its tapers', 'tests/test_draw_live_brush.py'),
+    ('src/wm/pointer_track.hh', '  return t.pen && std::fabs(x - t.left_x)', '  return false && t.pen && std::fabs(x - t.left_x)',
+     'Lifting the pen does not flash the cursor where the mouse was', 'tests/test_pointer_track.py'),
 ]
 
 def build(root):

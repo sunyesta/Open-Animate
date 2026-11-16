@@ -359,6 +359,27 @@ void App::main_loop()
         ui_number_grab_motion(event.motion.xrel, event.motion.yrel);
         continue;
       }
+      /* The pen's moves (and the mouse moves SDL makes of them) make it the pointer; a mouse move to where the pen
+       * left the system cursor is that cursor reported (as the pen lifts or leaves), not the mouse: dropped, or the
+       * cursor would flash there (wm/pointer_track.hh). */
+      if (event.type == SDL_EVENT_PEN_MOTION || event.type == SDL_EVENT_PEN_DOWN || event.type == SDL_EVENT_PEN_UP ||
+          (event.type == SDL_EVENT_MOUSE_MOTION && event.motion.which == SDL_PEN_MOUSEID))
+      {
+        const float x = event.type == SDL_EVENT_PEN_MOTION     ? event.pmotion.x
+                        : event.type == SDL_EVENT_MOUSE_MOTION ? event.motion.x
+                                                               : event.ptouch.x;
+        const float y = event.type == SDL_EVENT_PEN_MOTION     ? event.pmotion.y
+                        : event.type == SDL_EVENT_MOUSE_MOTION ? event.motion.y
+                                                               : event.ptouch.y;
+        float gx = 0.0f, gy = 0.0f;
+        int wx = 0, wy = 0;
+        SDL_GetGlobalMouseState(&gx, &gy);
+        SDL_GetWindowPosition(window_, &wx, &wy);
+        pointer_pen_moved(pointer_, x, y, gx - float(wx), gy - float(wy));
+      }
+      else if (event.type == SDL_EVENT_MOUSE_MOTION && !pointer_mouse_moved(pointer_, event.motion.x, event.motion.y)) {
+        continue;
+      }
       ImGui_ImplSDL3_ProcessEvent(&event);
       if (event.type == SDL_EVENT_MOUSE_MOTION && !wm_.mouse_simulated_held && wm_.mouse_simulated.empty()) {
         wm_.mouse_simulating = false;
@@ -433,6 +454,17 @@ void App::main_loop()
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
+    /* With nothing over the window (as the pen leaves it), ImGui reads the system cursor, which the pen never moved:
+     * that read is the stray place too, and the pen's own is kept. */
+    if (pointer_.pen && !wm_.mouse_simulating) {
+      const ImGuiInputEvent *last = nullptr;
+      for (const ImGuiInputEvent &e : GImGui->InputEventsQueue) {
+        last = e.Type == ImGuiInputEventType_MousePos ? &e : last;
+      }
+      if (last && pointer_stray(pointer_, last->MousePos.PosX, last->MousePos.PosY)) {
+        ImGui::GetIO().AddMousePosEvent(pointer_.pen_x, pointer_.pen_y);
+      }
+    }
     if (wm_.mouse_simulating && wm_.mouse_simulated.empty()) {
       ImGui::GetIO().AddMousePosEvent(wm_.mouse_simulated_x, wm_.mouse_simulated_y);
     }
