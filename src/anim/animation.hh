@@ -201,6 +201,14 @@ std::string document_bone_fix_mirror(Document &doc, uint64_t owner, const std::s
 /* Bone `bone` added to or taken from what fix `name` follows. Taken, its keys in the fix go with it (they would play as
  * the fix). */
 bool document_bone_fix_follow(Document &doc, uint64_t owner, const std::string &name, uint64_t bone, bool follow);
+/* The actions playing under fix `name` that Take Out offers: those of the bones it follows, and the fixes those bones
+ * alone play. */
+std::vector<std::string> bone_fix_take_out_choices(const Layer &owner, const std::string &name);
+/* Take Out: keys fix `name` with the opposite of what `action` adds under it (times `factor`) on each of its poses (the
+ * frames its line has keys on), on every channel the action keys (`selected_only`: the selected bones' and points').
+ * Opens the fix for it and goes back. Returns how many keys it set. */
+int document_bone_fix_take_out(Document &doc, uint64_t owner, const std::string &name, const std::string &action,
+                               float factor = 1.0f, bool selected_only = false);
 /* The action bone actions of `owner` playing now, its bones as they are: each with the frame its bone's turn
  * picks (more than 0). */
 std::vector<std::pair<std::string, float>> action_bone_actions_playing(const Layer &owner);

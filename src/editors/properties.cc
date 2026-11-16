@@ -1692,6 +1692,7 @@ static void bone_fixes_panel(Context &C, Layer &armature)
   ImGui::BeginChild("##fixes", ImVec2(list_w, rows * row_h + style.WindowPadding.y), ImGuiChildFlags_Borders);
   ImDrawList *dl = ImGui::GetWindowDrawList();
   std::string doomed;
+  std::pair<std::string, std::string> take_out;
   for (const std::string &name : fixes) {
     const BoneFix *fix = bone_fix_find(armature, name);
     const bool open = editing_here && doc.action == name;
@@ -1743,6 +1744,20 @@ static void bone_fixes_panel(Context &C, Layer &armature)
         if (ImGui::MenuItem("Delete")) {
           doomed = name;
         }
+        /* What plays under it, to key it away (Take Out Action). */
+        const std::vector<std::string> under = bone_fix_take_out_choices(armature, name);
+        if (ImGui::BeginMenu("Take Out", !under.empty())) {
+          for (const std::string &a : under) {
+            if (ImGui::MenuItem(a.c_str())) {
+              take_out = {name, a};
+            }
+            tip("Key this fix so the action adds nothing on its poses: the opposite of what it adds there, on every "
+                "bone and point it moves. Factor and On Selected Only are in the redo panel");
+          }
+          ImGui::EndMenu();
+        }
+        tip(under.empty() ? "Nothing plays under this fix: no action of the bones it follows"
+                          : "Take an action playing under this fix out of it, so you edit from the pose without it");
         ImGui::EndPopup();
       }
       dl->AddText(ImVec2(text_x, row.y + style.FramePadding.y),
@@ -1786,6 +1801,10 @@ static void bone_fixes_panel(Context &C, Layer &armature)
   ImGui::Dummy(ImVec2(0.0f, 0.0f));
   ImGui::EndChild();
   const ImVec2 list_max = ImGui::GetItemRectMax();
+  if (!take_out.first.empty()) {
+    operator_call(C, "armature.bone_fix_take_out",
+                  {layer_arg, {"name", take_out.first}, {"action", take_out.second}});
+  }
   if (!doomed.empty()) {
     operator_call(C, "anim.action_delete", {layer_arg, {"name", doomed}});
     ImGui::PopID();

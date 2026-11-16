@@ -154,6 +154,14 @@ PENDING = [
      "An _L drawing's pose flips onto its _R partner", 'tests/test_pose_paste_flipped.py'),
     ('src/ops/pose_clipboard.cc', '          return neighbour == reach_in ? 1 : neighbour == reach_out ? 0 : -1;', '          return neighbour == reach_in ? 0 : neighbour == reach_out ? 1 : -1;',
      "A flipped handle goes on the image's handle reaching for the image of what it reached for", 'tests/test_pose_paste_flipped.py'),
+    ('src/anim/animation.cc', '    action_play_find(*layer_find(doc, owner_id), action)->mute = true;', '    action_play_find(*layer_find(doc, owner_id), action)->mute = false;',
+     'Take Out measures the poses without the action', 'tests/test_bone_fix_take_out.py'),
+    ('src/anim/animation.cc', '          to.push_back({t, (ch.keys.empty() ? setup : ch.evaluate(t)) - add * factor});', '          to.push_back({t, (ch.keys.empty() ? setup : ch.evaluate(t)) - add});',
+     "Take Out's Factor takes out part of it", 'tests/test_bone_fix_take_out.py'),
+    ('src/anim/animation.cc', '    if (leave.count(key) || bone_fix_tracing(*owner, fix, key) || (selected_only && !picked.count(key))) {', '    if (leave.count(key) || bone_fix_tracing(*owner, fix, key)) {',
+     'Take Out on Selected Only leaves what is not selected', 'tests/test_bone_fix_take_out.py'),
+    ('src/anim/animation.cc', '          to.push_back({t, (ch.keys.empty() ? setup : ch.evaluate(t)) - add * factor});', '          to.push_back({t, setup - add * factor});',
+     "Take Out keeps the fix's own keys on top", 'tests/test_bone_fix_take_out.py'),
 ]
 
 def build(root):
