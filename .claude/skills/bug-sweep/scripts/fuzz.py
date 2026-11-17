@@ -51,6 +51,7 @@ REPLAY = os.environ.get("OA_FUZZ_REPLAY", "")
 FRAMES = int(os.environ.get("OA_FUZZ_FRAMES", "60"))
 HANG = int(os.environ.get("OA_FUZZ_HANG", "150"))
 QUIET = os.environ.get("OA_FUZZ_QUIET", "1") == "1"
+CANVAS = os.environ.get("OA_FUZZ_CANVAS") == "1"   # the iPad canvas cache checked after every op (check_canvas)
 
 
 class Failure(Exception):
@@ -863,6 +864,9 @@ def mp_where(op, label):
     return None
 
 
+UNKEYED = [False]   # edits made with auto-key off since the frame last changed (the next frame change drops them)
+
+
 def apply_mpath(op):
     if "rig" in op:
         rig = pick_bones(op)
@@ -879,7 +883,8 @@ def apply_mpath(op):
             other.selected = other.id == layer.id
         layer = pick_points(op)
     keep = (doc.motion_paths, doc.path_all, doc.path_own_motion, wm.tool(), doc.frame_current)
-    check_same = doc.auto_key
+    # (edits made while auto-key was off aren't keys: the frame visits below drop them, auto-key on again or not)
+    check_same = doc.auto_key and not UNKEYED[0]
     before = snap() if check_same else None
     try:
         doc.motion_paths = True
@@ -1671,12 +1676,25 @@ def apply(op):
 
 
 # --- The checks -------------------------------------------------------------------------------------------------------
+def check_canvas(op):
+    """Draw on iPad's canvas, each layer's part kept from the last canvas where its drawing and place are the same, is
+    what working the whole canvas out afresh gives (asked after every op, as the iPad asks after each change)."""
+    kept = json.loads(oanim._oanim.ipad_canvas(480, 270))["svg"]
+    fresh = json.loads(oanim._oanim.ipad_canvas(480, 270, cached=False))["svg"]
+    if kept != fresh:
+        at = next((i for i, (a, b) in enumerate(zip(kept, fresh)) if a != b), min(len(kept), len(fresh)))
+        raise Failure(f"canvas-cache: after {op['op']} the iPad canvas kept from the last differs from one worked out "
+                      f"afresh at {at}: {kept[max(0, at - 60):at + 60]!r} vs {fresh[max(0, at - 60):at + 60]!r}")
+
+
 def check_op(op, r, before, step_before, frame_before=None):
     after, step_after = snap(), active_step()
     bn = bad_numbers(after)
     if bn:
         raise Failure(f"non-finite numbers at {bn[:3]}")
     check_fixes()
+    if CANVAS:
+        check_canvas(op)
     if TABLE[op["op"]][1] == "op":
         same_frame = after
         if frame_before is not None and doc.frame_current != frame_before:
@@ -1814,6 +1832,10 @@ def main():
                 raise Failure(f"exception: {op['op']} raised {type(e).__name__}: {e}\n{traceback.format_exc()}")
             if r != "skip":
                 check_op(op, r, before, step_before, frame_before)
+                if doc.frame_current != frame_before:
+                    UNKEYED[0] = False
+                elif not doc.auto_key and op["op"] != "auto_key":
+                    UNKEYED[0] = True
                 kind = TABLE[op["op"]][1]
                 if kind == "op" and active_step() != step_before:
                     dirty = False
@@ -1830,6 +1852,7 @@ def main():
                 check_roundtrip()
                 check_follow(checks)
                 dirty = False   # reopened: the base is what's there now
+                UNKEYED[0] = False   # (and the checks went to other frames)
             faulthandler.cancel_dump_traceback_later()
             os.remove(fail_path)
         print(f"fuzz seed {SEED}: {len(log)} ops clean", flush=True)

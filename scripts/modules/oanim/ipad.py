@@ -494,7 +494,8 @@ def _tick(messages=None):
     for client, text in messages:
         try:
             message = json.loads(text, parse_constant=_no_constant, parse_float=_finite_float)
-        except (ValueError, OverflowError):
+        except (ValueError, OverflowError, RecursionError):
+            # RecursionError: nested past Python's limit (a few hundred KB of brackets), dropped like any bad one.
             continue
         if not isinstance(message, dict):
             continue

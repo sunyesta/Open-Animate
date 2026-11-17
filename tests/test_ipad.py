@@ -327,6 +327,27 @@ assert of("done", messages({"t": "up", "s": []}))[0]["undo"] == "Erase Fill"
 ops.wm.tool_draw(mode="FILL_PEN")
 got = stroke([[W * 0.6 + 40 * math.cos(i / 6), H * 0.3 + 40 * math.sin(i / 6), 1, 0, 0, i / 100] for i in range(40)])
 assert of("done", got)[0]["undo"] == "Paint Fill"
+# A reference of the line being erased (as the practice character's inside of the mouth is of its lip line) shows the
+# cut as the eraser goes, as when the Pencil lifts: the frame is worked out with the cut, then put back as it was.
+fresh()
+stroke(wave())
+original = oanim.data.layers.active
+ids = {l.id for l in oanim.data.layers.all()}
+assert ops.layer.make_reference() == {'FINISHED'}
+reference = next(l for l in oanim.data.layers.all() if l.id not in ids)
+reference.location_y = 0.5
+oanim.data.layers.active = original
+painted, ref_before = points(), reference.shown()
+canvases = []
+for k in range(0, len(cross), 10):
+    time.sleep(ipad.ERASE_INTERVAL + 0.01)
+    canvases += of("canvas", messages({"t": "down" if k == 0 else "move", "zoom": 1, "eraser": True,
+                                       "s": cross[k:k + 10]}))
+mid = page["svg"]
+assert points() == painted and reference.shown() == ref_before, "the original and its reference as they were"
+got = messages({"t": "up", "s": []})
+assert of("done", got)[0]["undo"] == "Erase Line" and reference.shown() != ref_before
+assert canvases and mid == page["svg"], "the reference cut with its original as the eraser goes"
 
 # --- A stroke being drawn: the header and the gestures wait; a page going drops it ---------------------------------------------
 doc, _ = fresh()
@@ -645,6 +666,12 @@ ipad._tick([(CLIENT, '{"t":"set","values":{"no_such_setting":1}}'),
             (CLIENT, json.dumps({"t": "set", "values": {"weld": not weld}}))])
 assert oanim.wm.draw_settings()["weld"] == (not weld) and ipad._drawing is None
 oanim.wm.set_draw(weld=weld)
+# Nested past what Python's reader takes (a few hundred KB of brackets, well under the 4 MB a message may be): dropped
+# alone too, the Pencil lifting after it still ends the stroke.
+fresh()
+ipad._tick([(CLIENT, json.dumps({"t": "down", "zoom": 1, "eraser": False, "s": wave()}))])
+ipad._tick([(CLIENT, "[" * 200000 + "]" * 200000), (CLIENT, json.dumps({"t": "up", "s": []}))])
+assert not _oanim.ipad_stroke_active() and shapes() == 1, "the up after a message nested too deep"
 
 # The server: a few pages at once, no message over 4 MB, a limit to connections (with or without the key).
 port = ipad.start(0)

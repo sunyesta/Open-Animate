@@ -12,6 +12,7 @@
 
 #include "imgui.h"
 
+#include "anim/animation.hh"
 #include "anim/onion.hh"
 #include "assets/brushes.hh"
 #include "assets/draw_presets.hh"
@@ -534,24 +535,31 @@ std::string ipad_stroke_cut_canvas(Context &C, int width, int height)
   if (!layer || layer->id != g_stroke.layer) {
     return {};
   }
-  /* The drawings the stroke may cut, kept to put back: the canvas shows the cut, the document stays as it was until
-   * the stroke ends (one undo step, cut from the drawings as they were). */
+  /* The canvas shows the cut, the document stays as it was until the stroke ends (one undo step, cut from the drawings
+   * as they were). Every layer is kept to put back, not only the drawings cut: the frame is worked out again with the
+   * cut as the app's next update would (points that follow a cut line's points, as the practice character's inside of
+   * the mouth follows its lip line; else the canvas showed them where they were and the fill the lift took away). */
   std::vector<Layer *> layers = {layer};
   if (C.wm->tool_settings.draw_erase_all_layers) {
     layers = editable_layers(C);
   }
-  std::vector<VectorDrawing> kept;
-  kept.reserve(layers.size());
-  for (Layer *l : layers) {
-    kept.push_back(l->drawing);
-  }
+  const std::vector<Layer> kept = doc.layers;
+  const bool applied = doc.action_bones_applied;
   std::string out;
   if (draw_stroke_cut_so_far(C, *layer, g_stroke.ink, g_stroke.mode)) {
+    /* New revisions for what the cut changed, so what is kept by them is worked out again. */
+    for (Layer *l : layers) {
+      layer_touch(*l);
+    }
+    if (doc.evaluated_frame == doc.frame_current) {
+      animation_sync(doc);
+    }
     out = ipad_canvas_message(C, width, height, true);
   }
-  for (size_t i = 0; i < layers.size(); i++) {
-    layers[i]->drawing = std::move(kept[i]);
-  }
+  /* Copied back into the same layers (none were added or removed), so pointers to them stay good; their revisions go
+   * back with them, as what they were made for. */
+  doc.layers = kept;
+  doc.action_bones_applied = applied;
   return out;
 }
 
