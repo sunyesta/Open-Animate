@@ -482,11 +482,22 @@ static void symmetrize_pair(Document &doc, uint64_t id, int from, SymmetrizeAnim
   for (Layer &child : copy.children) {
     layer_tree_walk(child, [&](Layer &l) {
       const std::string flipped = bone_mirror_name(l.name);
-      if (const auto it = old_ids.find(flipped); it != old_ids.end()) {
+      auto it = old_ids.find(flipped);
+      /* A name with no side was made unique when first mirrored ("EyeRig 1" beside "EyeRig"): the same layer again,
+       * else it was made anew and Keep Partner's had nothing to keep. */
+      for (auto o = old_ids.begin(); it == old_ids.end() && o != old_ids.end(); ++o) {
+        const std::string &n = o->first;
+        if (n.size() > flipped.size() + 1 && n.compare(0, flipped.size() + 1, flipped + " ") == 0 &&
+            std::all_of(n.begin() + flipped.size() + 1, n.end(), [](char c) { return c >= '0' && c <= '9'; }))
+        {
+          it = o;
+        }
+      }
+      if (it != old_ids.end()) {
         reassign[l.id] = it->second;
         l.id = it->second;
+        l.name = it->first == flipped ? flipped : it->first;
         old_ids.erase(it);
-        l.name = flipped;
       }
       else {
         l.name = layer_named(doc, flipped) ? document_layer_unique_name(doc, flipped) : flipped;

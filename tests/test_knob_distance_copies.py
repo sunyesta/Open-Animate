@@ -22,6 +22,15 @@ OUT = tempfile.mkdtemp(prefix="oanim_knobs_")
 def _print(*args):
     print(*args)
 
+
+L = lambda: oanim.data.layers
+find = lambda n: next((l for l in L().all() if l.name == n), None)
+
+
+def at(d, f):
+    d.frame_current = f + 1
+    d.frame_current = f
+
 import oanim
 ops = oanim.ops
 
@@ -296,5 +305,58 @@ _print("knob", bone("Eye_L")["knob"], "driven", other.rotation)
 assert abs(bone("Eye_L")["knob"][1] - 20.0) < 1e-3
 assert abs(other.rotation - 20.0) < 1e-2, \
     f"format 8 file: a driver reading Eye_L's knob (20 frames up) gave 20 there; opened now it gives {other.rotation:.4f}"
+
+
+# --- Layer Symmetrize again, Keep Partner's, on a bone layer named with no side: the same partner layers keep their keys
+def partner_kept():
+    """The group Eye_L holding bone layer EyeRig (a knob looking up) symmetrized, the copy's knob keyed 20 frames up,
+    then symmetrized again with Keep Partner's (the copy's bone layer is "EyeRig 1": its name has no side)."""
+    assert ops.wm.read_homefile(confirmed="1") == {'FINISHED'}
+    d = oanim.data.document
+    d.auto_key = True
+    d.frame_current = 0
+    ops.layer.new_group()
+    grp = L().active
+    grp.name = "Eye_L"
+    ops.layer.new_bone()
+    L().active.name = "EyeRig"
+    assert ops.armature.bone_add(name="knob", head_x="0.5", head_y="0", tail_x="0.5", tail_y="0.1", parent="") == {'FINISHED'}
+    assert ops.layer.move_to_group(group=str(grp.id)) == {'FINISHED'}
+    ops.layer.new()
+    L().active.name = "Pupil"
+    L().active.add_curve([(0.5, 0.0), (0.6, 0.0)])
+    assert ops.layer.move_to_group(group=str(find("EyeRig").id)) == {'FINISHED'}
+    assert ops.layer.parent_bone_set(bone="knob") == {'FINISHED'}
+    L().active = find("EyeRig")
+    assert ops.anim.action_new(name="look up") == {'FINISHED'}
+    d.frame_current = 40
+    find("Pupil").set_point(1, (0.6, 0.3))
+    at(d, 40)
+    d.action = ""
+    at(d, 0)
+    L().active = find("EyeRig")
+    find("EyeRig").select_bone("knob")
+    assert ops.armature.bone_convert(type="CONTROLLER_2D") == {'FINISHED'}
+    assert ops.armature.controller_side(side="UP", action="look up") == {'FINISHED'}
+    find("EyeRig").bone_set("knob", contain_knob=False)
+    L().active = grp
+    assert ops.layer.symmetrize(direction="POSITIVE_TO_NEGATIVE") == {'FINISHED'}
+    copy = next(l for l in find("Eye_R").children if l.type == 'BONE')
+    L().active = copy
+    at(d, 10)
+    copy.bone_set("knob", knob=(0.0, 20.0))
+    at(d, 10)
+    at(d, 0)
+    L().active = grp
+    assert ops.layer.symmetrize(direction="POSITIVE_TO_NEGATIVE", animation="KEEP_PARTNER") == {'FINISHED'}
+    return d, copy.id
+
+
+d, copy_id = partner_kept()
+copy = next(l for l in find("Eye_R").children if l.type == 'BONE')
+assert copy.id == copy_id, ("the same partner layer, remade", copy.name, copy.id, copy_id)
+assert [k["frame"] for k in copy.keyframes('bones["knob"].position')] == [0, 10], copy.keyframes('bones["knob"].position')
+at(d, 10)
+assert abs(next(b for b in copy.bones if b["name"] == "knob")["knob"][1] - 20.0) < 1e-2, "kept 20 frames up"
 
 print("knob distance copies ok")

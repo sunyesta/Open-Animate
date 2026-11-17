@@ -120,6 +120,10 @@ PENDING = [
     ('src/io/oanim_file.cc',
      '        expression = replaced(expression, v.name, "(" + v.name + " / " + number(source) + ")");',
      '        (void)replaced;\n        (void)number;', 'old drivers read knob frames', 'tests/test_knob_distance_copies.py'),
+    # Symmetrize again: a partner layer named with no side ("EyeRig 1") found again, its keys kept.
+    ("src/ops/layer_ops.cc", "      for (auto o = old_ids.begin(); it == old_ids.end() && o != old_ids.end(); ++o) {",
+     "      for (auto o = old_ids.begin(); false && it == old_ids.end() && o != old_ids.end(); ++o) {",
+     "symmetrize finds numbered partners", "tests/test_knob_distance_copies.py"),
 ]
 
 def build(root):
