@@ -519,4 +519,15 @@ lines_reused, lines_made = lines_after(stroke([[x, y + H * 0.3, p, a, b, t] for 
 canvas_same("a seventh line")
 assert lines_reused >= 6 and 1 <= lines_made <= 2, (lines_reused, lines_made)
 
+# The page's input log (Options > Send Input Log) is saved where input_log_path() says, the last 2000 rows.
+log_path = ipad.input_log_path()
+if os.path.exists(log_path):
+    os.remove(log_path)
+messages({"t": "input_log", "agent": "test", "events": [[k, "touchstart", "direct", 1, 10, 10, 20, 0, 1] for k in range(2500)]})
+with open(log_path, encoding="utf-8") as f:
+    saved = json.load(f)
+assert saved["agent"] == "test" and len(saved["events"]) == 2000 and saved["events"][0][0] == 500, len(saved["events"])
+messages({"t": "input_log", "events": "not a list"})
+os.remove(log_path)
+
 print("ipad: ok")

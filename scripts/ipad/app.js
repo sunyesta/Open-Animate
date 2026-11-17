@@ -498,6 +498,30 @@ eraseButton.addEventListener('pointerdown', (e) => {
 });
 
 /* ---------------------------------------------------------------------------------------------------------------
+ * The input log: the canvas's last pointer and touch events and what was made of them, sent to the PC (Options > Send
+ * Input Log) for finding out what this iPad's Safari sends. */
+
+const inputLog = [];
+const LOG_MAX = 1500;
+function logInput(...entry) {
+  inputLog.push([Math.round(performance.now()), ...entry]);
+  if (inputLog.length > LOG_MAX) inputLog.splice(0, inputLog.length - LOG_MAX);
+}
+const r1 = (v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v);
+for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+  view.addEventListener(type, (e) => logInput(type, e.pointerType, e.pointerId, r1(e.clientX), r1(e.clientY), r1(e.width),
+                                              r1(e.pressure), e.buttons), { capture: true });
+}
+for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+  view.addEventListener(type, (e) => {
+    for (const t of e.changedTouches) {
+      logInput(type, t.touchType || '', t.identifier, r1(t.clientX), r1(t.clientY), r1(t.radiusX), r1(t.force),
+               e.touches.length);
+    }
+  }, { capture: true });
+}
+
+/* ---------------------------------------------------------------------------------------------------------------
  * Safari's pointer events take one kind of input at a time: with a finger down the Pencil's never come, and with the
  * Pencil down a finger's never do. Touch events carry every touch, so they find the fingers held still, and while a
  * finger is down they draw the Pencil's strokes (with no coalesced samples, so only then). */
@@ -520,8 +544,9 @@ function touchAsPointer(t, e) {
  * about to start; a finger the pointer events see too stops panning, the view going back to where it was. */
 function fingerRest(id) {
   const f = fingers.get(id);
+  logInput('rest', id, !f ? 'gone' : f.palm ? 'palm' : f.slid ? 'slid' : !erases() ? 'no eraser' : 'ok', penDown);
   if (!f || f.palm || f.slid || !erases()) return;
-  if (!penDown && [...fingers.values()].some((o) => o !== f && !o.hold)) return;
+  if (!penDown && [...fingers.values()].some((o) => o !== f && !o.hold)) { logInput('rest', id, 'pinch'); return; }
   f.hold = true;
   let near = null, best = 40;
   for (const t of touches.values()) {
@@ -552,6 +577,7 @@ view.addEventListener('touchstart', (e) => {
       if (!penDown && fingers.size > 0) {
         penStart(touchAsPointer(t, e));
         if (penDown) touchPen = t.identifier;
+        logInput('touch pen', t.identifier, penDown);
       }
       continue;
     }
@@ -1312,6 +1338,15 @@ function optionsPopover(p) {
     pencil = c;
     try { localStorage.setItem('oa-pencil-curve', JSON.stringify(c)); } catch (e) { /* not kept */ }
   }));
+  const sendLog = el('button', '', 'Send Input Log');
+  sendLog.title = "The canvas's last touches and Pencil strokes, saved on the PC for finding out what this iPad sends";
+  sendLog.addEventListener('click', (e) => {
+    e.stopPropagation();
+    send({ t: 'input_log', agent: navigator.userAgent, events: inputLog });
+    closePopovers();
+    toast('Input log sent');
+  });
+  p.append(sendLog);
 }
 
 /* ---------------------------------------------------------------------------------------------------------------

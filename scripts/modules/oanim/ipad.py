@@ -15,6 +15,7 @@ The page sends (JSON, "t" naming each):
   preset {name}            a shelf tile picked; preset_save {name} the + tile
   brush {name}             the line brush's shape ("" plain); brush_recent {index}
   canvas_full              the page lost track of the canvases: the next comes whole
+  input_log {agent, events}  the page's last touches and Pencil events, saved to input_log_path()
 
 Open Animate sends:
   state                    the header's settings, the shelf's pens, why drawing is refused ("" when it isn't), the
@@ -271,10 +272,37 @@ def _handle(client, message):
     if t == "brush":
         _oanim.ipad_brush_shape_set(str(message.get("name", "")))
         return True
+    if t == "input_log":
+        _input_log_save(message)
+        return True
     if t == "brush_recent":
         oanim.ops.brush.recent_pick(index=int(message.get("index", -1)))
         return True
     return False
+
+
+def input_log_path():
+    """Where the page's input log goes (Options > Send Input Log on the iPad)."""
+    import os
+    import tempfile
+
+    return os.path.join(tempfile.gettempdir(), "OpenAnimate", "ipad_input_log.json")
+
+
+def _input_log_save(message):
+    """The page's last touches and Pencil events, written to input_log_path() (a fixed file, at most 2000 rows)."""
+    import os
+
+    import oanim
+
+    events = message.get("events")
+    if not isinstance(events, list):
+        return
+    path = input_log_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"agent": str(message.get("agent", ""))[:300], "events": events[-2000:]}, f)
+    oanim.wm.report("iPad input log saved to " + path)
 
 
 def _samples(rows):
