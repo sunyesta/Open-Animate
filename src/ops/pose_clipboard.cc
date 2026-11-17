@@ -1,4 +1,4 @@
-/* Copy Pose and Paste Pose, as Blender's pose mode has them: Ctrl C and Ctrl V over the viewport off the setup frame
+/* Copy Pose and Paste Pose, as Blender's pose mode has them: Ctrl C over the viewport off the setup frame, Ctrl V on any
  * (frame 0 is where the drawing and the rig are made, as Edit Mode; every other frame poses, as Pose Mode). The
  * selected bones' and points' pose on the frame shown goes back on the same bones (by name) and points (by id, or by
  * their order in a drawing with as many points) on another frame, in another action or in another file.
@@ -21,6 +21,7 @@
 #include "anim/bone_family.hh"
 #include "anim/controller.hh"
 #include "anim/deform.hh"
+#include "anim/keep_poses.hh"
 #include "core/log.hh"
 #include "data/bones.hh"
 #include "data/document.hh"
@@ -234,6 +235,7 @@ static std::vector<Layer *> pose_all_drawings(Document &doc)
 static constexpr float SAME_PLACE_HAIR = 1e-5f;
 static PasteAs g_paste_as = PasteAs::Keys;
 static bool g_pose_keep_place = false;
+static bool g_pose_keep_poses = false;
 
 static const char *paste_as_id(PasteAs as)
 {
@@ -552,7 +554,7 @@ static void pose_paste_handles_flipped(PoseTarget &t, const std::vector<Transfor
 OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyOptions &options)
 {
   Document &doc = *C.document;
-  if (doc.frame_current == 0) {
+  if (doc.frame_current == 0 && !options.setup_frame) {
     report(ReportType::Warning, options.anywhere ? "Poses go on frames other than the setup frame (frame 0)"
                                                  : "Paste Pose poses: go to a frame other than the setup frame (frame 0)");
     return OpStatus::Cancelled;
@@ -772,17 +774,41 @@ static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
   options.selected_only = op_arg_bool(C, "selected_mask");
   options.factor = op_arg_float(C, "factor", 1.0f);
   options.keep_place = remembered_arg(C, "keep_place", g_pose_keep_place);
+  /* On the setup frame the pose becomes the setup pose, as a move there does; Keep Poses as a move's: the other frames'
+   * keyed poses stay where they are, the change taken off their keys. */
+  Document &doc = *C.document;
+  options.setup_frame = true;
+  const bool setup = doc.frame_current == 0;
+  op_arg_used(C, "setup", setup ? "1" : "0");
+  const bool keep = remembered_arg(C, "keep_poses", g_pose_keep_poses) && setup;
+  SetupSnapshot before;
+  if (keep) {
+    std::vector<uint64_t> ids;
+    for (const Layer *l : pose_rigs(C)) {
+      ids.push_back(l->id);
+    }
+    for (const Layer *l : pose_drawings(C)) {
+      ids.push_back(l->id);
+    }
+    before = setup_snapshot(doc, ids);
+  }
+  const auto kept = [&](OpStatus status) {
+    if (status == OpStatus::Finished && !before.empty()) {
+      animation_record(doc);
+      keep_poses(doc, before);
+    }
+    return status;
+  };
   const bool again = options.as != PasteAs::Keys && options.factor >= 1.0f;
   options.quiet = again;
   const OpStatus status = pose_apply(C, pose, flipped, options);
   if (status != OpStatus::Finished || !again) {
-    return status;
+    return kept(status);
   }
-  Document &doc = *C.document;
   animation_record(doc);
   animation_evaluate(doc, doc.frame_current);
   options.quiet = false;
-  return pose_apply(C, pose, flipped, options);
+  return kept(pose_apply(C, pose, flipped, options));
 }
 
 /* The pose on the clipboard (null json if none). */
@@ -813,6 +839,20 @@ static OpProperty paste_as_property()
       "Same Place: it stays exactly where it was on screen when copied, wherever the bones are now"};
   p.fallback = "KEYS";
   p.expand = true;
+  return p;
+}
+
+/* Keep Poses, shown for a paste on the setup frame (setup=1): as a move's there. */
+static OpProperty keep_poses_property()
+{
+  OpProperty p = op_bool_property("keep_poses", "Keep Poses",
+                                  "On the setup frame: other frames' keyed poses stay where they are, the paste "
+                                  "changing only the setup pose (its change taken off every key on another frame)",
+                                  "0");
+  p.visible = [](const OpArgs &args) {
+    const auto it = args.find("setup");
+    return it != args.end() && it->second == "1";
+  };
   return p;
 }
 
@@ -875,19 +915,21 @@ void pose_clipboard_operators_register()
     ot.idname = flipped ? "pose.paste_flipped" : "pose.paste";
     ot.name = flipped ? "Paste Pose Flipped" : "Paste Pose";
     ot.description =
-        flipped ? "Paste the copied pose mirrored left to right (Ctrl Shift V over the viewport off the setup frame): "
-                  "each _L bone's or drawing's pose on its _R partner and the other way, the rest on themselves, "
-                  "each point on its mirror image"
+        flipped ? "Paste the copied pose mirrored left to right (Ctrl Shift V over the viewport): each _L bone's or "
+                  "drawing's pose on its _R partner and the other way, the rest on themselves, each point on its "
+                  "mirror image"
                 : "Paste the copied pose onto the same bones (by name) and points on this frame (Ctrl V over the "
-                  "viewport off the setup frame); Auto Keying keys it. paste_as=KEYS: the keys copied, what the actions "
+                  "viewport); Auto Keying keys it. On the setup frame (frame 0) it becomes the setup pose, as a move "
+                  "there does: keep_poses=1 leaves the other frames' keyed poses where they are. paste_as=KEYS: the keys copied, what the actions "
                   "here add coming on top; LOOK: as it looked, moving with the bones here; PLACE: where it showed, "
                   "whatever the bones and actions do here (ignore_bones=1, its old name). Kept for the next paste. "
                   "keep_place=1: the shape only, its centre staying where it is here. flipped=1: mirrored left to "
                   "right, as Paste Pose Flipped";
     ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-    /* Only where the copied bones or points are (else Ctrl V pastes the shapes copied with them). */
+    /* Only where the copied bones or points are (else Ctrl V pastes the shapes copied with them). On the setup frame
+     * too: the pose becomes the setup pose. */
     ot.poll = [flipped](Context &C) {
-      if (!C.document || C.document->frame_current == 0) {
+      if (!C.document) {
         return false;
       }
       const json pose = clipboard_pose();
@@ -904,6 +946,7 @@ void pose_clipboard_operators_register()
                           0.0f, 1.0f, 0.01f),
         paste_as_property(),
         keep_place_property(),
+        keep_poses_property(),
     };
     ot.exec = [flipped](Context &C) {
       const json pose = clipboard_pose();

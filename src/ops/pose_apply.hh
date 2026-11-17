@@ -36,6 +36,8 @@ struct PoseApplyOptions {
   /* The bone layer and drawings found anywhere in the document (by id, else name), not only the ones being edited: a
    * pose kept in the file goes back on what it was saved from whatever is active. */
   bool anywhere = false;
+  /* Allowed on the setup frame (frame 0): the pose put back there becomes the setup pose (Paste Pose there). */
+  bool setup_frame = false;
   /* Filled with what it posed: (bone layer, bone id) and (drawing, point index). */
   std::vector<std::pair<uint64_t, uint64_t>> *r_bones = nullptr;
   std::vector<std::pair<uint64_t, size_t>> *r_points = nullptr;
@@ -54,8 +56,8 @@ nlohmann::ordered_json pose_copy_json(Context &C, int *r_bones, int *r_points);
 /* The same for bone layers `rigs` and `drawings`, their selected bones and points. */
 nlohmann::ordered_json pose_record(Document &doc, const std::vector<Layer *> &rigs, const std::vector<Layer *> &drawings,
                                    int *r_bones, int *r_points);
-/* Puts a recorded pose back on the frame shown (flipped: mirrored left to right). Cancelled on frame 0, or when none of
- * its bones and points is here. */
+/* Puts a recorded pose back on the frame shown (flipped: mirrored left to right). Cancelled on frame 0 (unless
+ * `setup_frame`), or when none of its bones and points is here. */
 OpStatus pose_apply(Context &C, const nlohmann::ordered_json &pose, bool flipped, const PoseApplyOptions &options);
 
 }  // namespace oanim

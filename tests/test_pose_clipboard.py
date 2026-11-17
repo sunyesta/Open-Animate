@@ -1,7 +1,7 @@
 """Copy Pose and Paste Pose, as Blender's pose mode: off the setup frame Ctrl C over the viewport copies the selected
 bones' and points' pose and Ctrl V puts it back on the same bones and points on another frame or in an action (Auto
 Keying keys it; without it, it is an edit going to another frame drops). On frame 0, where the drawing is made, Ctrl C
-and Ctrl V copy and paste shapes as before. Options: On Selected Only, Factor (a blend toward the copied pose), Ignore
+copies shapes as before, and Ctrl V pastes a pose copied on another frame as the setup pose (Keep Poses as a move's). Options: On Selected Only, Factor (a blend toward the copied pose), Ignore
 Bones (each point shows where it did when copied, whatever the bones do here) and Keep Place (the shape only, its
 centre staying where it is).
 
@@ -229,12 +229,57 @@ assert wm.event_simulate("V", ctrl=True, area="Viewport")
 assert last_step() == "Paste Shapes", last_step()
 assert len(next(l for l in layers.all() if l.id == other.id).points) == 3
 
-# --- On the setup frame Ctrl C and Ctrl V are the shapes' ---------------------------------------------------------------
+# --- A pose copied off the setup frame pasted on it: the setup pose takes it (as a move there does) ------------------
+def setup_paste(keep):
+    scene()
+    at(10)
+    layers.active = rig()
+    ops.armature.select_none()
+    rig().select_bone("Leg")
+    leg_setup, leg10 = bone("Leg")["setup_angle"], bone("Leg")["angle"]
+    assert ops.pose.copy() == {'FINISHED'}
+    at(20)
+    leg20 = bone("Leg")["angle"]
+    doc.frame_current = 0
+    assert ops.pose.paste(keep_poses="1" if keep else "0") == {'FINISHED'}, "a pose pastes on the setup frame"
+    assert abs(bone("Leg")["angle"] - leg10) < 1e-5, ("the setup pose takes it", bone("Leg")["angle"], leg10)
+    op = wm.last_operation()
+    assert op and op[1].get("setup") == "1" and "keep_poses" in op[1], op
+    at(0)
+    assert abs(bone("Leg")["setup_angle"] - leg10) < 1e-5, ("its setup now", bone("Leg")["setup_angle"], leg10)
+    at(20)
+    # Keep Poses: frame 20 shows as it did; without, its key's change goes on top of the new setup.
+    want = leg20 if keep else leg20 + (leg10 - leg_setup)
+    assert abs(bone("Leg")["angle"] - want) < 1e-4, (keep, bone("Leg")["angle"], want)
+
+    # Points: the setup takes where they were on frame 10.
+    scene()
+    at(10)
+    was10, was20 = stored(), None
+    edit_points([0, 1])
+    assert ops.pose.copy() == {'FINISHED'}
+    at(20)
+    was20 = stored()
+    doc.frame_current = 0
+    edit_points([0, 1])
+    setup = stored()
+    assert ops.pose.paste(keep_poses="1" if keep else "0") == {'FINISHED'}
+    at(0)
+    now = stored()
+    assert close(now[0], was10[0]) and close(now[1], was10[1]), (now, was10)
+    assert close(now[2], setup[2]), "a point not copied stays"
+    at(20)
+    for i in (0, 1):
+        want = was20[i] if keep else tuple(w + (a - s) for w, a, s in zip(was20[i], was10[i], setup[i]))
+        assert close(stored()[i], want), (keep, i, stored()[i], want)
+
+
+setup_paste(keep=False)
+setup_paste(keep=True)
+
+# --- On the setup frame Ctrl C and Ctrl V are the shapes' (a pose pasted where its points aren't: the shapes) --------
 scene()
-edit_points([0, 1])
-assert ops.pose.copy() == {'FINISHED'}
 doc.frame_current = 0
-assert ops.pose.paste() == {'CANCELLED'}, "a pose isn't pasted on the setup frame"
 edit_points([0, 1, 2])
 assert wm.event_simulate("C", ctrl=True, area="Viewport")
 assert "shape" in said(), said()

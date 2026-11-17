@@ -85,6 +85,13 @@ PENDING = [
     ("src/editors/viewport.cc", "      clearing.push_back(l);",
      "      if (l->id == armature.id) {\n        clearing.push_back(l);\n      }",
      "clear sub group bones", "tests/test_clear_sub_group_bones.py"),
+    # Paste Pose on the setup frame: the pose becomes the setup pose.
+    ("src/ops/pose_clipboard.cc", "  options.setup_frame = true;", "  options.setup_frame = false;",
+     "paste pose on frame 0", "tests/test_pose_clipboard.py"),
+    # ...with Keep Poses, the other frames' poses kept.
+    ("src/ops/pose_clipboard.cc", "    if (status == OpStatus::Finished && !before.empty()) {",
+     "    if (false && status == OpStatus::Finished && !before.empty()) {", "paste on frame 0 keeps poses",
+     "tests/test_pose_clipboard.py"),
 ]
 
 def build(root):
