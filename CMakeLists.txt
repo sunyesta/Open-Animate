@@ -707,6 +707,8 @@ add_test(NAME pose_clipboard
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_clipboard.py)
 add_test(NAME pose_paste_setup
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_paste_setup.py)
+add_test(NAME controller_spots_range
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_controller_spots_range.py)
 add_test(NAME bone_duplicate_keys
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_duplicate_keys.py)
 add_test(NAME clear_sub_group_bones

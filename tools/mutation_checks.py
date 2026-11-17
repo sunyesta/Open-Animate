@@ -61,6 +61,14 @@ PENDING = [
     # Keys only in the actions the bone layer pasted into has.
     ("src/ops/rig_ops.cc", "            return actions.count(name) ? std::optional<std::string>(name) : std::nullopt;",
      "            return std::optional<std::string>(name);", "paste drops actions the bone layer lacks", "tests/test_bone_duplicate_keys.py"),
+    # Spots outside a controller's box are deleted with the edit's undo step.
+    ("src/ops/undo.cc", "  controller_spots_tidy(doc);\n", "", "spots out of range go with the step", "tests/test_controller_spots_range.py"),
+    # ... and on opening a file.
+    ("src/io/oanim_file.cc", "  bone_fix_names_follow(doc);\n  controller_spots_tidy(doc);", "  bone_fix_names_follow(doc);",
+     "spots out of range go on opening", "tests/test_controller_spots_range.py"),
+    # Adding a spot outside the box is refused.
+    ("src/ops/rig_ops.cc", "                 if (spot_outside(*knob, at)) {\n                   return OpStatus::Cancelled;\n                 }\n                 std::string name",
+     "                 std::string name", "a spot added outside the box is refused", "tests/test_controller_spots_range.py"),
 ]
 
 def build(root):

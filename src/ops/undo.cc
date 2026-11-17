@@ -210,6 +210,7 @@ void UndoStack::push(const std::string &name, Document &doc)
   }
   animation_record(doc);
   bone_fixes_tidy(doc);
+  controller_spots_tidy(doc);
   if (steps_.empty()) {
     reset(doc);
   }

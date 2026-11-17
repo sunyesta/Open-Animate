@@ -57,9 +57,10 @@ for x, y in (("nan", "0"), ("inf", "0"), ("0", "-inf"), ("1e30", "0"), ("x", "0"
     was = wm.undo_history()[1]
     assert ops.armature.controller_spot_add(x=x, y=y) == {"CANCELLED"}, (x, y)
     assert wm.undo_history()[1] == was and not bone(rig, "K")["controller_spots"], bone(rig, "K")["controller_spots"]
-assert ops.armature.controller_spot_add(x="3", y="1", name="Up") == {"FINISHED"}
+# (A knob with no sides has no range but its rest point: a spot goes there.)
+assert ops.armature.controller_spot_add(x="0", y="0", name="Up") == {"FINISHED"}
 spots = bone(rig, "K")["controller_spots"]
-assert len(spots) == 1 and spots[0][0] == "Up" and close(spots[0][1], (3.0, 1.0)), spots
+assert len(spots) == 1 and spots[0][0] == "Up" and close(spots[0][1], (0.0, 0.0)), spots
 
 # --- Renaming a bone: never another bone's name, nor an ordinary action's (it would become the bone's own) -----------------
 doc, rig = rig_new([("arm", (0, 0), (1, 0)), ("leg", (0, -1), (0, -2))])

@@ -3324,6 +3324,33 @@ void bone_fixes_tidy(Document &doc)
   bone_fix_names_follow(doc);
 }
 
+int controller_spots_tidy(Document &doc)
+{
+  /* The box as the keys have it now. */
+  controllers_update(doc);
+  int removed = 0;
+  for (const Layer *flat : document_layers_flat(doc)) {
+    if (!flat->is_bone_layer()) {
+      continue;
+    }
+    Layer &owner = *layer_find(doc, flat->id);
+    for (Bone &knob : owner.bones) {
+      if (!bone_is_controller(knob) || knob.controller_spots.empty()) {
+        continue;
+      }
+      float2 lo, hi;
+      controller_box(knob, lo, hi);
+      /* A little slack: spots are stored as placed, a hair off an edge. */
+      constexpr float SLACK = 1e-3f;
+      removed += int(std::erase_if(knob.controller_spots, [&](const ControllerSpot &spot) {
+        return !(spot.at.x >= lo.x - SLACK && spot.at.x <= hi.x + SLACK && spot.at.y >= lo.y - SLACK &&
+                 spot.at.y <= hi.y + SLACK);
+      }));
+    }
+  }
+  return removed;
+}
+
 bool document_action_rename(Document &doc, uint64_t owner_id, const std::string &from, const std::string &to)
 {
   Layer *owner = layer_find(doc, owner_id);

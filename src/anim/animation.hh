@@ -254,6 +254,9 @@ bool action_adds(const Layer &owner, const std::string &name);
 /* After every change (each undo step): a fix that follows a bone deleted follows the rest, and fixes named after
  * their bones' actions take their names as they are now (bone_fix_names_follow). */
 void bone_fixes_tidy(Document &doc);
+/* A 2 Axis Controller's spots outside its box (a side's action made shorter, or taken off) are deleted, on every undo
+ * step and on opening a file. Returns how many went. */
+int controller_spots_tidy(Document &doc);
 /* Renames action `from` of `owner`: its keys, its fix or controller side and, edited, the timeline's name. */
 bool document_action_rename(Document &doc, uint64_t owner, const std::string &from, const std::string &to);
 /* Bone `from` of `owner` renamed `to`: its action bone actions take the new name. */

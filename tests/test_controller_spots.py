@@ -179,7 +179,9 @@ assert ops.armature.controller_spots_corners() == {'CANCELLED'}, "each has one a
 # --- Symmetrize: the other side's spots, Left and Right swapped --------------------------------------------------------
 r = Rig(name="joy_L")
 assert ops.armature.controller_spot_add(name="Wink_L", x="30", y="10") == {'FINISHED'}
+assert ops.armature.controller_spot_add(name="Turn_L", x="30", y="0") == {'FINISHED'}
 assert ops.armature.symmetrize() == {'FINISHED'}
-assert r.spots("joy_R") == [("Wink_R", (-30.0, 10.0))], r.spots("joy_R")
+# joy_R plays turn_l on its Left and nothing Up (look_up is joy_L's): Wink's Up 10 is outside its range, so it goes.
+assert r.spots("joy_R") == [("Turn_R", (-30.0, 0.0))], r.spots("joy_R")
 
 print("test_controller_spots: ok")

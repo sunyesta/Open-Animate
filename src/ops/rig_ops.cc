@@ -3199,6 +3199,18 @@ void rig_operators_register()
   /* --- Spots: named places for a 2 Axis Controller's knob (the Bone tab's Spots panel). ---------------------- */
 
   /* bone=: that controller of the active bone layer, else the active bone. */
+  /* Spots stay in the knob's box (one left outside, by a side's action made shorter, is deleted with the step): one
+   * asked for outside it is refused, rather than made and gone at once. */
+  const auto spot_outside = [](const Bone &knob, float2 at) {
+    float2 lo, hi;
+    controller_box(knob, lo, hi);
+    constexpr float SLACK = 1e-3f;
+    if (at.x >= lo.x - SLACK && at.x <= hi.x + SLACK && at.y >= lo.y - SLACK && at.y <= hi.y + SLACK) {
+      return false;
+    }
+    report(ReportType::Warning, "Outside the knob's range: a spot has to be inside its box");
+    return true;
+  };
   const auto spot_controller = [](Context &C) -> Bone * {
     Layer *armature = active_armature(C);
     Bone *knob = !armature                 ? nullptr
@@ -3249,7 +3261,7 @@ void rig_operators_register()
   rig_operator("armature.controller_spot_add", "Add Spot",
                "Save where the active 2 Axis Controller's knob is (or x= and y=, in frames) as a spot named name= "
                "(\"Spot 1\", ... without one); bone=: that controller. Spots are the rig's: never keyed",
-               bone_layer_active, [spot_controller](Context &C) {
+               bone_layer_active, [spot_controller, spot_outside](Context &C) {
                  Bone *knob = spot_controller(C);
                  if (!knob) {
                    return OpStatus::Cancelled;
@@ -3265,6 +3277,9 @@ void rig_operators_register()
                      report(ReportType::Warning, "A spot's x and y are numbers of frames");
                      return OpStatus::Cancelled;
                    }
+                 }
+                 if (spot_outside(*knob, at)) {
+                   return OpStatus::Cancelled;
                  }
                  std::string name = op_arg(C, "name");
                  if (name.empty()) {
@@ -3347,7 +3362,7 @@ void rig_operators_register()
 
   rig_operator("armature.controller_spot_move", "Move Spot Here",
                "Move spot name= of the active 2 Axis Controller (bone=: that one) to where the knob is",
-               bone_layer_active, [spot_controller, spot_named](Context &C) {
+               bone_layer_active, [spot_controller, spot_named, spot_outside](Context &C) {
                  Bone *knob = spot_controller(C);
                  ControllerSpot *spot = knob ? spot_named(*knob, C) : nullptr;
                  if (!spot) {
@@ -3355,7 +3370,11 @@ void rig_operators_register()
                  }
                  Layer &armature = *active_armature(C);
                  /* Where the knob is seen (an independent or constrained knob's keys aren't its place). */
-                 spot->at = controller_knob_shown(*C.document, armature, *knob);
+                 const float2 at = controller_knob_shown(*C.document, armature, *knob);
+                 if (spot_outside(*knob, at)) {
+                   return OpStatus::Cancelled;
+                 }
+                 spot->at = at;
                  return OpStatus::Finished;
                });
 
