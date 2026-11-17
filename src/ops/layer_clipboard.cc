@@ -57,7 +57,8 @@ static std::string clipboard_get()
     char *text = SDL_GetClipboardText();
     std::string s = text ? text : "";
     SDL_free(text);
-    if (s.find(CLIPBOARD_KEY) != std::string::npos || s.find(POSE_CLIPBOARD_KEY) != std::string::npos) {
+    if (s.find(CLIPBOARD_KEY) != std::string::npos || s.find(POSE_CLIPBOARD_KEY) != std::string::npos ||
+        s.find("open_animate_bones") != std::string::npos) {
       return s;
     }
   }

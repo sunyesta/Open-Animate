@@ -360,6 +360,9 @@ struct WindowManager {
   /* Set by transform.* operators; the viewport under the mouse runs the modal transform:
    * 'G' move, 'R' rotate, 'S' scale, 'E' extrude then move. */
   char transform_request = 0;
+  /* The move asked for follows Duplicate Bones (Shift D): the drag ends as that operator with the move, so its
+   * Keyframes stays adjustable. */
+  bool transform_from_duplicate = false;
   /* Set by view.overlays_toggle (Shift Z): the viewport under the mouse shows or hides its
    * overlays. */
   bool overlays_toggle_request = false;

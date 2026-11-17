@@ -380,6 +380,8 @@ struct PenState {
 static ModalTransform g_modal;
 /* A G/R/S/E request waiting for a click in progress to finish, and the area it's for. */
 static char g_pending_transform = 0;
+/* The pending move follows Duplicate Bones (WindowManager::transform_from_duplicate). */
+static bool g_pending_duplicate = false;
 static int g_pending_area = 0;
 static ToolDrag g_drag;
 static PenState g_pen;
@@ -6747,6 +6749,7 @@ static void header_draw(Area &area, Context &C, ImVec2 origin, float width)
       menu_operator(C, "Add Bone", "armature.bone_primitive_add");
       menu_operator(C, "Extrude", "armature.extrude");
       menu_operator(C, "Duplicate", "armature.duplicate_move");
+      menu_operator(C, "Duplicate with Keys", "armature.duplicate_move", {{"keyframes", "1"}});
       menu_operator(C, "Subdivide", "armature.subdivide");
       ImGui::Separator();
       menu_operator(C, "Make Parent...", "armature.parent_set_menu");
@@ -10371,6 +10374,9 @@ struct BoneModal {
   bool tweak = false;
   /* Ctrl on a controller's knob, as it stood when the drag ended. */
   bool knob_snap = false;
+  /* Following Duplicate Bones (Shift D): it ends as that operator with the move, its Keyframes as given. */
+  bool duplicate = false;
+  std::string duplicate_keyframes = "0";
   int area = 0;
   char kind = 'G';
   uint64_t armature = 0;
@@ -12111,7 +12117,19 @@ static void bone_modal_confirm(Context &C, float2 delta, float degrees, float fa
   OpArgs args{{"only_bones", move_only_bones_on(*C.document) ? "1" : "0"}, {"posing", bm.setup_frame ? "0" : "1"},
               {"keep_poses", keep_poses_on(*C.document) ? "1" : "0"},
               {"without_children", move_without_children_on(*C.document) ? "1" : "0"}};
-  if (bm.kind == 'G') {
+  if (bm.kind == 'G' && bm.duplicate) {
+    /* Done again as Duplicate Bones with the move (one step, as the timeline's Shift D): its Keyframes then shows in
+     * the Adjust Last Operation panel. */
+    C.undo->undo(*C.document);
+    C.document->frame_current = frame;
+    args.erase("posing");
+    args["move_x"] = num_arg(delta.x);
+    args["move_y"] = num_arg(delta.y);
+    args["knob_snap"] = bm.knob_snap ? "1" : "0";
+    args["keyframes"] = bm.duplicate_keyframes;
+    operator_call(C, "armature.duplicate_move", args);
+  }
+  else if (bm.kind == 'G') {
     args["move_x"] = num_arg(delta.x);
     args["move_y"] = num_arg(delta.y);
     args["knob_snap"] = bm.knob_snap ? "1" : "0";
@@ -16334,6 +16352,7 @@ static void bone_parent_menus(Context &C, bool hovered)
     ImGui::Separator();
     menu_operator(C, "Extrude", "armature.extrude");
     menu_operator(C, "Duplicate", "armature.duplicate_move");
+    menu_operator(C, "Duplicate with Keys", "armature.duplicate_move", {{"keyframes", "1"}});
     ImGui::Separator();
     menu_operator(C, "Make Parent...", "armature.parent_set_menu");
     menu_operator(C, "Clear Parent...", "armature.parent_clear_menu");
@@ -18400,8 +18419,10 @@ static void viewport_draw_contents(Area &area, Context &C)
   if (wm.transform_request && hovered && !g_modal.active && !g_bone_modal.active && !g_layer_modal.active &&
       !g_radius_modal.active) {
     g_pending_transform = wm.transform_request;
+    g_pending_duplicate = wm.transform_from_duplicate;
     g_pending_area = area.id;
     wm.transform_request = 0;
+    wm.transform_from_duplicate = false;
   }
   /* A quick click then E can reach the keymap before the click reaches the tool, so the
    * transform waits for the click to finish (a pen point to be placed); otherwise that click
@@ -18414,10 +18435,22 @@ static void viewport_draw_contents(Area &area, Context &C)
     if (g_pending_transform == 'W') {
       radius_modal_start(C, area, at);
     }
-    else if (!layer_modal_start(C, area, g_pending_transform, at) && !bone_modal_start(C, area, g_pending_transform, at)) {
-      modal_start(C, area, g_pending_transform, at);
+    else if (!layer_modal_start(C, area, g_pending_transform, at)) {
+      if (bone_modal_start(C, area, g_pending_transform, at)) {
+        if (g_pending_duplicate && g_pending_transform == 'G') {
+          const LastOperation *dup = operator_last_redo(C);
+          const bool was_dup = dup && dup->idname == "armature.duplicate_move";
+          const auto keyframes = was_dup ? dup->args.find("keyframes") : OpArgs::const_iterator();
+          g_bone_modal.duplicate = true;
+          g_bone_modal.duplicate_keyframes = was_dup && keyframes != dup->args.end() ? keyframes->second : "0";
+        }
+      }
+      else {
+        modal_start(C, area, g_pending_transform, at);
+      }
     }
     g_pending_transform = 0;
+    g_pending_duplicate = false;
   }
   Layer *armature_active = document_active_layer(doc);
   if (armature_active && !armature_active->is_bone_layer()) {
@@ -18507,8 +18540,10 @@ static void viewport_draw_contents(Area &area, Context &C)
      * the click is over. */
     if (wm.transform_request && !g_modal.active) {
       g_pending_transform = wm.transform_request;
+      g_pending_duplicate = wm.transform_from_duplicate;
       g_pending_area = area.id;
       wm.transform_request = 0;
+      wm.transform_from_duplicate = false;
     }
     /* The document may have been restored; look the layer up again. */
     drawing = editable_drawing(C, &layer);

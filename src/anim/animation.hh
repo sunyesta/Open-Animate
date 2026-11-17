@@ -266,6 +266,8 @@ void animation_strip_action_bones(Document &doc);
  * its setup value (frame 0), or with `from_now` the value it has now, its drawings then taking that as
  * their setup pose. With `keep_actions` its actions' keys (action bone actions) stay. */
 void layer_strip_keys(Layer &layer, bool from_now, bool keep_actions);
+/* A bone without keys on any timeline (Duplicate without Keyframes): each channel at its setup value. */
+void bone_strip_keys(Bone &bone);
 /* Every channel of `layer` (not its children): the keys of each action it isn't editing (and frame 0's path handles)
  * under the name `rename` gives theirs, left out where it gives none. Every name is renamed at once, so two swap. */
 void layer_actions_rename(Layer &layer, const std::function<std::optional<std::string>(const std::string &)> &rename);

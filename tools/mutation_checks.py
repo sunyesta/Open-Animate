@@ -42,6 +42,25 @@ PENDING = [
     # The shelf's Poses: a selected collection with no poses is no row.
     ("src/ops/pose_library.cc", "      if (!row.poses.empty()) {", "      if (true || !row.poses.empty()) {",
      "no row for a selected tag without poses", "tests/test_pose_library.py"),
+    # Shift D's Keyframes, off by default: the copies have no keys.
+    ("src/ops/rig_ops.cc", "                     bone_strip_keys(copy);", "                     (void)copy;",
+     "duplicate without keyframes strips the keys", "tests/test_bone_duplicate_keys.py"),
+    # Duplicate's move given as arguments moves the copies.
+    ("src/ops/rig_ops.cc", '                   operator_call(C, "armature.translate", move);',
+     "                   (void)move;", "duplicate moves by its arguments", "tests/test_bone_duplicate_keys.py"),
+    # Paste Bones without Keyframes: no keys.
+    ("src/ops/rig_ops.cc", "        if (!keyframes) {\n          bone_strip_keys(copy);", "        if (false) {\n          (void)copy;",
+     "paste without keyframes strips the keys",
+     "tests/test_bone_duplicate_keys.py"),
+    # A copied bone whose parent stayed behind rests where it did as a root.
+    ("src/ops/rig_ops.cc", "            bone_place(copy, Transform2D(), self->setup_head, self->setup_tail);",
+     "            (void)self;", "copied bone without its parent rests where it did", "tests/test_bone_duplicate_keys.py"),
+    # Pasted under the bone of its parent's name.
+    ("src/ops/rig_ops.cc", "            copy.parent = parent->id;", "            (void)parent;",
+     "pasted bone hangs from its parent's name", "tests/test_bone_duplicate_keys.py"),
+    # Keys only in the actions the bone layer pasted into has.
+    ("src/ops/rig_ops.cc", "            return actions.count(name) ? std::optional<std::string>(name) : std::nullopt;",
+     "            return std::optional<std::string>(name);", "paste drops actions the bone layer lacks", "tests/test_bone_duplicate_keys.py"),
 ]
 
 def build(root):

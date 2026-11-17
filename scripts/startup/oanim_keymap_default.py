@@ -112,6 +112,8 @@ KEYMAP = (
     ("Viewport", "pose.copy", "C", {"ctrl": True}),
     ("Viewport", "pose.paste", "V", {"ctrl": True}),
     ("Viewport", "pose.paste_flipped", "V", {"ctrl": True, "shift": True}),
+    ("Viewport", "armature.copy", "C", {"ctrl": True}),
+    ("Viewport", "armature.paste", "V", {"ctrl": True}),
     ("Viewport", "mesh.copy", "C", {"ctrl": True}),
     ("Viewport", "mesh.paste", "V", {"ctrl": True}),
     ("Viewport", "mesh.select_all", "A", {}),

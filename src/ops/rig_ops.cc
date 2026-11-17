@@ -29,9 +29,12 @@
 #include "core/log.hh"
 #include "data/bones.hh"
 #include "data/document.hh"
+#include "io/oanim_file.hh"
 #include "ops/edit_ops.hh"
 #include "ops/operator.hh"
 #include "wm/context.hh"
+
+#include <nlohmann/json.hpp>
 
 namespace oanim {
 
@@ -863,6 +866,231 @@ static void local_from_transform(const Transform2D &local, float2 old_scale, flo
   rotation += 360.0f * std::round((near - rotation) / 360.0f);
   *r_rotation = rotation;
   *r_scale = {sx, std::abs(sx) > 1e-9f ? (local.a * local.d - local.b * local.c) / sx : old_scale.y};
+}
+
+/* Copy Bones and Paste Bones (Ctrl C and Ctrl V over the viewport on the setup frame): the picked bones themselves,
+ * keys and all, to paste into any bone layer, here or in another file. The keys always go on the clipboard; Paste's
+ * Keyframes says whether they come along. */
+static constexpr const char *BONE_CLIPBOARD_KEY = "open_animate_bones";
+
+/* The bone layer itself active (with a drawing in it active, Ctrl C and Ctrl V are the shapes'). */
+static Layer *bone_layer_active(Context &C)
+{
+  const Layer *active = C.document ? document_active_layer(*C.document) : nullptr;
+  return active && active->is_bone_layer() ? active_armature(C) : nullptr;
+}
+
+static bool bones_picked(const Layer &armature)
+{
+  return std::any_of(armature.bones.begin(), armature.bones.end(), [](const Bone &b) { return b.selected; });
+}
+
+/* The copied bones on the clipboard: {"open_animate_bones": 1, "bones_document": a bone layer of them alone, each whose
+ * parent wasn't copied a root where it rested, "parents": {bone: the parent it had, by name}, "names": {id: name}
+ * of every bone in the bone layer copied from (what constraints aimed at)}; null when there are none. */
+static nlohmann::ordered_json bones_clipboard(const nlohmann::ordered_json &root)
+{
+  if (root.is_discarded() || !root.is_object() || !root.contains(BONE_CLIPBOARD_KEY) ||
+      !root.contains("bones_document"))
+  {
+    return nullptr;
+  }
+  return root;
+}
+
+static void bone_clipboard_register()
+{
+  using json = nlohmann::ordered_json;
+  {
+    OperatorType ot;
+    ot.idname = "armature.copy";
+    ot.name = "Copy Bones";
+    ot.description = "Copy the selected bones, with their keys, to the clipboard (Ctrl C over the viewport on the setup "
+                     "frame), to paste into any bone layer, here or in another file; the points selected with them "
+                     "come along as Copy Shapes copies them";
+    ot.flag = OPTYPE_REGISTER;
+    ot.poll = [](Context &C) {
+      const Layer *armature = bone_layer_active(C);
+      return armature && C.document->frame_current == 0 && bones_picked(*armature);
+    };
+    ot.exec = [](Context &C) {
+      Layer &armature = *active_armature(C);
+      const std::vector<BonePose> poses = armature_pose(armature);
+      json names = json::object(), parents = json::object();
+      std::set<uint64_t> picked;
+      for (const Bone &b : armature.bones) {
+        names[std::to_string(b.id)] = b.name;
+        if (b.selected) {
+          picked.insert(b.id);
+        }
+      }
+      Document mini;
+      Layer holder = armature;
+      holder.children.clear();
+      holder.bones.clear();
+      for (const Bone &b : armature.bones) {
+        if (!b.selected) {
+          continue;
+        }
+        Bone copy = b;
+        copy.outer_layer = copy.outer_bone = 0;
+        copy.outer_carried = false;
+        copy.swap_layer = copy.swap_bone = 0;
+        /* Its parent left behind: a root where it rests, and the parent's name to hang from again if there is one. */
+        if (copy.parent && !picked.count(copy.parent)) {
+          parents[copy.name] = names[std::to_string(copy.parent)];
+          if (const BonePose *self = bone_pose_find(poses, b.id)) {
+            const float length = copy.length;
+            const float2 scale = copy.scale;
+            bone_place(copy, Transform2D(), self->setup_head, self->setup_tail);
+            copy.length = length;
+            copy.scale = scale;
+            copy.setup_position = copy.position;
+            copy.setup_angle = copy.angle;
+          }
+          copy.parent = 0;
+          copy.connected = false;
+        }
+        holder.bones.push_back(std::move(copy));
+      }
+      mini.layers.push_back(std::move(holder));
+      mini.collections = C.document->collections;
+      mini.next_collection_id = C.document->next_collection_id;
+      /* With them the points selected, as Copy Shapes copies them (Ctrl V into a drawing pastes those). */
+      json root;
+      if (shapes_copy_to_clipboard(C) > 0) {
+        root = json::parse(clipboard_text(), nullptr, false);
+      }
+      if (!root.is_object()) {
+        root = json::object();
+      }
+      root[BONE_CLIPBOARD_KEY] = 1;
+      root["bones_document"] = json::parse(oanim_document_to_json(mini));
+      root["parents"] = std::move(parents);
+      root["names"] = std::move(names);
+      clipboard_text_set(root.dump());
+      const size_t count = picked.size();
+      report(ReportType::Info, "Copied " + std::to_string(count) + (count == 1 ? " bone" : " bones"));
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
+  {
+    OperatorType ot;
+    ot.idname = "armature.paste";
+    ot.name = "Paste Bones";
+    ot.description = "Paste copied bones into the active bone layer (Ctrl V over the viewport on the setup frame), "
+                     "where they rested, selected; each whose parent wasn't copied hangs from a bone of that name here "
+                     "if there is one. keyframes=1 brings their keys too";
+    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+    ot.poll = [](Context &C) {
+      return bone_layer_active(C) && C.document->frame_current == 0 &&
+             !bones_clipboard(json::parse(clipboard_text(), nullptr, false)).is_null();
+    };
+    ot.props = {op_bool_property("keyframes", "Keyframes",
+                                 "Bring their keys too, on the mainline and in the actions this bone layer has. Off, "
+                                 "they have none and rest in their setup pose",
+                                 "0")};
+    ot.exec = [](Context &C) {
+      Document &doc = *C.document;
+      const json root = bones_clipboard(json::parse(clipboard_text(), nullptr, false));
+      Document mini;
+      std::string error;
+      if (root.is_null() || !oanim_document_from_json(root["bones_document"].dump(), mini, &error) || mini.layers.empty() ||
+          !mini.layers.front().is_bone_layer() || mini.layers.front().bones.empty())
+      {
+        report(ReportType::Warning, "Copy bones first (Ctrl C over the viewport on the setup frame)");
+        return OpStatus::Cancelled;
+      }
+      const Layer &from = mini.layers.front();
+      Layer &armature = *active_armature(C);
+      const bool keyframes = op_arg_bool(C, "keyframes");
+      const std::vector<BonePose> from_poses = armature_pose(from);
+      const std::vector<BonePose> poses = armature_pose(armature);
+      std::map<uint64_t, uint64_t> ids;
+      for (const Bone &b : from.bones) {
+        ids[b.id] = armature.next_bone_id++;
+      }
+      const json names = root.value("names", json::object());
+      const json parents = root.value("parents", json::object());
+      /* A bone it named: its copy, else the bone of that name here, else none. */
+      const auto here = [&](uint64_t old) -> uint64_t {
+        if (const auto it = ids.find(old); it != ids.end()) {
+          return it->second;
+        }
+        const std::string name = names.value(std::to_string(old), std::string());
+        const Bone *same = name.empty() ? nullptr : bone_find_by_name(armature, name);
+        return same ? same->id : 0;
+      };
+      const std::set<std::string> actions(armature.actions.begin(), armature.actions.end());
+      for (Bone &b : armature.bones) {
+        bone_select(b, false);
+      }
+      uint64_t first = 0;
+      for (const Bone &b : from.bones) {
+        Bone copy = b;
+        copy.id = ids[b.id];
+        copy.name = armature_unique_bone_name(armature, b.name);
+        if (copy.parent) {
+          copy.parent = here(copy.parent);
+        }
+        else if (const std::string name = parents.value(b.name, std::string()); !name.empty()) {
+          const Bone *parent = bone_find_by_name(armature, name);
+          const BonePose *self = bone_pose_find(from_poses, b.id);
+          const BonePose *pp = parent ? bone_pose_find(poses, parent->id) : nullptr;
+          if (self && pp) {
+            const float length = copy.length;
+            const float2 scale = copy.scale;
+            bone_place(copy, pp->setup, self->setup_head, self->setup_tail);
+            copy.length = length;
+            copy.scale = scale;
+            copy.setup_position = copy.position;
+            copy.setup_angle = copy.angle;
+            copy.parent = parent->id;
+          }
+        }
+        for (BoneConstraint &c : copy.constraints) {
+          c.target = c.target ? here(c.target) : 0;
+        }
+        copy.controller_knob_parent = copy.controller_knob_parent ? here(copy.controller_knob_parent) : 0;
+        /* An action has one controller: the copy isn't its sides'. */
+        copy.controller_actions = {};
+        copy.controller_keys = {};
+        /* Collections by name. */
+        std::vector<uint64_t> collections;
+        for (const uint64_t id : copy.collections) {
+          const Collection *was = collection_find(mini, id);
+          if (const Collection *now = was ? collection_find_by_name(doc, was->name) : nullptr) {
+            collections.push_back(now->id);
+          }
+        }
+        copy.collections = std::move(collections);
+        if (copy.shape_layer && !layer_find(doc, copy.shape_layer)) {
+          copy.shape_layer = 0;
+        }
+        if (!keyframes) {
+          bone_strip_keys(copy);
+        }
+        else {
+          /* Only the actions this bone layer has. */
+          Layer holder;
+          holder.bones.push_back(std::move(copy));
+          layer_actions_rename(holder, [&](const std::string &name) -> std::optional<std::string> {
+            return actions.count(name) ? std::optional<std::string>(name) : std::nullopt;
+          });
+          copy = std::move(holder.bones.front());
+        }
+        bone_select(copy, true);
+        first = first ? first : copy.id;
+        armature.bones.push_back(std::move(copy));
+      }
+      armature.active_bone = first;
+      const size_t count = from.bones.size();
+      report(ReportType::Info, "Pasted " + std::to_string(count) + (count == 1 ? " bone" : " bones"));
+      return OpStatus::Finished;
+    };
+    operators().add(std::move(ot));
+  }
 }
 
 void rig_operators_register()
@@ -3177,12 +3405,16 @@ void rig_operators_register()
                });
 
   rig_operator("armature.duplicate_move", "Duplicate Bones",
-               "Copy the selected bones, then move the copies (Shift D, as in Blender)", bone_layer_active,
+               "Copy the selected bones, then move the copies (Shift D, as in Blender). keyframes=1 gives the copies "
+               "the originals' keys (Duplicate with Keys); move_x= and move_y= move them by that much at once (what a "
+               "Shift D drag ends as)",
+               bone_layer_active,
                [](Context &C) {
                  if (!on_setup_frame(C)) {
                    return OpStatus::Cancelled;
                  }
                  Layer &armature = *active_armature(C);
+                 const bool keyframes = op_arg_bool(C, "keyframes");
                  std::map<uint64_t, uint64_t> copies;
                  for (const Bone &b : armature.bones) {
                    if (b.selected) {
@@ -3214,6 +3446,10 @@ void rig_operators_register()
                    }
                    copy.controller_actions = {};
                    copy.controller_keys = {};
+                   /* Without Keyframes the copy rests in its setup pose on every timeline. */
+                   if (!keyframes) {
+                     bone_strip_keys(copy);
+                   }
                    /* A copied child hangs from its parent's copy, as in Blender. */
                    if (auto it = copies.find(copy.parent); it != copies.end()) {
                      copy.parent = it->second;
@@ -3224,9 +3460,30 @@ void rig_operators_register()
                  if (auto it = copies.find(active); it != copies.end()) {
                    armature.active_bone = it->second;
                  }
-                 C.wm->transform_request = 'G';
+                 /* A move given (the drag ended, or adjusted afterwards): made here, so Duplicate stays the last
+                  * operation and its Keyframes can be changed. Else the drag starts. */
+                 if (op_has_arg(C, "move_x") || op_has_arg(C, "move_y")) {
+                   OpArgs move{{"move_x", op_arg(C, "move_x", "0")}, {"move_y", op_arg(C, "move_y", "0")},
+                               {"posing", "0"}};
+                   for (const char *pass : {"only_bones", "keep_poses", "without_children", "knob_snap"}) {
+                     if (op_has_arg(C, pass)) {
+                       move[pass] = op_arg(C, pass);
+                     }
+                   }
+                   operator_call(C, "armature.translate", move);
+                 }
+                 else {
+                   C.wm->transform_request = 'G';
+                   C.wm->transform_from_duplicate = true;
+                 }
                  return OpStatus::Finished;
-               });
+               },
+               {op_bool_property("keyframes", "Keyframes",
+                                 "Give the copies the originals' keys, on the mainline and in every action. Off, they "
+                                 "have none and rest in their setup pose",
+                                 "0"),
+                op_float_property("move_x", "Move X", "How far the copies moved across", "0", -1e6f, 1e6f, 0.01f),
+                op_float_property("move_y", "Move Y", "How far the copies moved up", "0", -1e6f, 1e6f, 0.01f)});
 
   rig_operator("armature.parent_set", "Make Parent",
                "Parent the selected bones to the active bone (Ctrl P), those selected in sub bone groups inside "
@@ -5252,6 +5509,7 @@ void rig_operators_register()
                  std::swap(layer.modifiers[index], layer.modifiers[to]);
                  return OpStatus::Finished;
                });
+  bone_clipboard_register();
 }
 
 }  // namespace oanim

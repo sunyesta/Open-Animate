@@ -38,6 +38,35 @@
 
 namespace oanim {
 
+/* A bone's channels besides its Transform and Angle (which are changes from its setup pose, worked out around them). */
+template<typename F> static void bone_other_channels(Bone &bone, F &&f)
+{
+  f(bone.scale_keys, bone.scale);
+  f(bone.depth_keys, bone.depth);
+  for (BoneConstraint &c : bone.constraints) {
+    f(c.influence_keys, c.influence);
+    f(c.follow_shift_keys, c.follow_shift);
+    f(c.follow_shift2_keys, c.follow_shift2);
+    f(c.follow_shift3_keys, c.follow_shift3);
+    f(c.weight_keys, c.weight);
+    f(c.wind_catch_keys, c.wind_catch);
+    f(c.gravity_keys, c.gravity);
+    f(c.wind_keys, c.wind);
+    f(c.wind_direction_keys, c.wind_direction);
+    f(c.wind_gusts_keys, c.wind_gusts);
+    f(c.wind_gust_speed_keys, c.wind_gust_speed);
+    f(c.wind_turbulence_keys, c.wind_turbulence);
+    for (BoneSpring *s : {&c.angle_spring, &c.position_spring, &c.scale_spring}) {
+      f(s->settle_speed_keys, s->settle_speed);
+      f(s->bounce_keys, s->bounce);
+      f(s->inertia_keys, s->inertia);
+      f(s->stretch_keys, s->stretch);
+      f(s->limit_keys, s->limit);
+      f(s->squash_limit_keys, s->squash_limit);
+    }
+  }
+}
+
 /* Calls f(channel, value) for every channel of a layer (not its children). Without `sync` the
  * values aren't worked out (the points' and bones' changes from their setup): for reading keys only,
  * which the timeline does every frame. */
@@ -98,30 +127,7 @@ template<bool sync = true, typename F> static void layer_for_each_channel(Layer 
     if constexpr (sync) {
       bone_values_from_changes(bone);
     }
-    f(bone.scale_keys, bone.scale);
-    f(bone.depth_keys, bone.depth);
-    for (BoneConstraint &c : bone.constraints) {
-      f(c.influence_keys, c.influence);
-      f(c.follow_shift_keys, c.follow_shift);
-      f(c.follow_shift2_keys, c.follow_shift2);
-      f(c.follow_shift3_keys, c.follow_shift3);
-      f(c.weight_keys, c.weight);
-      f(c.wind_catch_keys, c.wind_catch);
-      f(c.gravity_keys, c.gravity);
-      f(c.wind_keys, c.wind);
-      f(c.wind_direction_keys, c.wind_direction);
-      f(c.wind_gusts_keys, c.wind_gusts);
-      f(c.wind_gust_speed_keys, c.wind_gust_speed);
-      f(c.wind_turbulence_keys, c.wind_turbulence);
-      for (BoneSpring *s : {&c.angle_spring, &c.position_spring, &c.scale_spring}) {
-        f(s->settle_speed_keys, s->settle_speed);
-        f(s->bounce_keys, s->bounce);
-        f(s->inertia_keys, s->inertia);
-        f(s->stretch_keys, s->stretch);
-        f(s->limit_keys, s->limit);
-        f(s->squash_limit_keys, s->squash_limit);
-      }
-    }
+    bone_other_channels(bone, f);
   }
   for (LayerMask &m : layer.masks) {
     f(m.line_reach_keys, m.line_reach);
@@ -2157,6 +2163,31 @@ void layer_strip_keys(Layer &layer, bool from_now, bool keep_actions)
   for (Layer &child : layer.children) {
     layer_strip_keys(child, from_now, keep_actions);
   }
+}
+
+void bone_strip_keys(Bone &bone)
+{
+  /* As layer_strip_keys: each channel at its setup value (frame 0), with no keys on any timeline. */
+  const auto strip = [](auto &ch, auto &value) {
+    using T = std::decay_t<decltype(value)>;
+    value -= ch.from_action_bones;
+    if (ch.animated()) {
+      value = ch.evaluate(0);
+    }
+    ch.keys.clear();
+    ch.actions.clear();
+    ch.action_setup.clear();
+    ch.from_action_bones = T{};
+    ch.action_bone_live = false;
+    ch.action_played = {};
+    ch.last = value;
+    ch.has_last = true;
+  };
+  bone_changes_from_values(bone);
+  strip(bone.position_keys, bone.transform);
+  strip(bone.angle_keys, bone.turn);
+  bone_values_from_changes(bone);
+  bone_other_channels(bone, strip);
 }
 
 void animation_strip_action_bones(Document &doc)
