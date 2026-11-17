@@ -691,6 +691,21 @@ def select_click(x, y, zoom=100.0):
     _oanim.select_click(float(x), float(y), float(zoom))
 
 
+def bone_rotate_drag(steps, confirm=True, at=(0.0, 0.0), during=None):
+    """R on the picked bones (and the points picked with them) as the drag does it: one update turned each of `steps`
+    degrees from where it began, `during(degrees)` called after each, then confirmed (or cancelled). False when no drag
+    starts."""
+    if not _oanim.bone_rotate_drag_begin(float(at[0]), float(at[1])):
+        return False
+    last = 0.0
+    for d in steps:
+        last = float(d)
+        _oanim.bone_rotate_drag_update(last)
+        if during:
+            during(last)
+    return _oanim.bone_rotate_drag_end(last, bool(confirm))
+
+
 def bone_press(x, y, zoom=100.0, transform_tool=False, shift=False):
     """Test hook: on the active bone layer, the Select tool's press at document point (x, y) on a controller's knob
     (True when it was on one; the drag after is left out), or with transform_tool the Transform tool's click on its

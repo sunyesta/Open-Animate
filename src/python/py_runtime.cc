@@ -1725,6 +1725,11 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return std::string(select_press_takes_test(current_context(), {x, y}, zoom));
   });
   m.def("select_click", [](float x, float y, float zoom) { select_click_test(current_context(), {x, y}, zoom); });
+  m.def("bone_rotate_drag_begin", [](float x, float y) { return bone_rotate_drag_begin_test(current_context(), {x, y}); });
+  m.def("bone_rotate_drag_update", [](float degrees) { return bone_rotate_drag_update_test(current_context(), degrees); });
+  m.def("bone_rotate_drag_end", [](float degrees, bool confirm) {
+    return bone_rotate_drag_end_test(current_context(), degrees, confirm);
+  });
   m.def("bone_press", [](float x, float y, float zoom, bool transform_tool, bool shift) {
     return bone_press_test(current_context(), {x, y}, zoom, transform_tool, shift);
   });

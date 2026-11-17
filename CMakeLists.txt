@@ -717,6 +717,8 @@ add_test(NAME bone_own_actions
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_own_actions.py)
 add_test(NAME line_pick
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_line_pick.py)
+add_test(NAME bone_drag_points
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_drag_points.py)
 add_test(NAME clear_sub_group_bones
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_clear_sub_group_bones.py)
 add_test(NAME knob_distance_copies

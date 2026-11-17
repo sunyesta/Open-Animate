@@ -108,6 +108,9 @@ void select_click_test(Context &C, float2 at, float zoom);
 /* Test hook: the Select tool's press on a bone layer's controller knob (true when it was on one), or the Transform
  * tool's click on its bones (Shift adds), at a document point, on the active bone layer. */
 bool bone_press_test(Context &C, float2 at, float zoom, bool transform_tool, bool shift);
+bool bone_rotate_drag_begin_test(Context &C, float2 at);
+bool bone_rotate_drag_update_test(Context &C, float degrees);
+bool bone_rotate_drag_end_test(Context &C, float degrees, bool confirm);
 std::vector<std::pair<uint64_t, std::vector<int>>> select_press_grab_test(Context &C, float2 at, float zoom,
                                                                           bool shift_or_ctrl, bool drag);
 

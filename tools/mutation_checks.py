@@ -123,6 +123,11 @@ PENDING = [
     # A press in Edges mode grabs the nearest line.
     ('src/editors/viewport.cc', '    const LineHit *take = lines.empty() ? nullptr : &lines.front();',
      '    const LineHit *take = lines.empty() ? nullptr : &lines.back();', 'press grabs the nearest line', 'tests/test_line_pick.py'),
+    # A bone drag with points picked keeps their drawings, so each update starts again from them.
+    ('src/editors/viewport.cc', '  for (const ModalTransform::Item &item : drawings ? r_points.items : std::vector<ModalTransform::Item>()) {',
+     '  for (const ModalTransform::Item &item : drawings && false ? r_points.items : std::vector<ModalTransform::Item>()) {',
+     'drag updates start from the drawings',
+     'tests/test_bone_drag_points.py'),
 ]
 
 def build(root):
