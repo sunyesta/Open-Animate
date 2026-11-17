@@ -35,6 +35,9 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    # The shelf's Poses: a selected collection with no poses is no row.
+    ("src/ops/pose_library.cc", "      if (!row.poses.empty()) {", "      if (true || !row.poses.empty()) {",
+     "no row for a selected tag without poses", "tests/test_pose_library.py"),
 ]
 
 def build(root):

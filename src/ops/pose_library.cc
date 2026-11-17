@@ -284,10 +284,11 @@ std::vector<PoseShelfRow> pose_shelf_rows(Context &C, const std::string &search,
     return rows;
   }
   if (pose_anything_selected(C)) {
-    /* The selection's collections, empty ones too: their + tile saves into them. */
+    /* The selection's collections that have poses (a tag with none, such as the rig's bones', is no row: Save Pose
+     * in the header saves into one). */
     for (const uint64_t id : pose_selection_collections(C)) {
       PoseShelfRow row{id, collection_name(doc, id), poses_in(id, false)};
-      if (needle.empty() || !row.poses.empty()) {
+      if (!row.poses.empty()) {
         rows.push_back(std::move(row));
       }
     }

@@ -177,9 +177,10 @@ select_bones("Leg")
 assert rows() == [], "Leg is in no collection"
 assert ops.armature.collection_add(name="Legs") == {'FINISHED'}
 assert ops.armature.collection_assign(collection="Legs") == {'FINISHED'}
-assert rows() == [("Legs", [])], "the selection's collection shows with nothing in it yet, to save into"
+assert rows() == [], "a selected collection with no poses (as a rig's bones' tag) is no row"
 select_bones("Arm_L", "Leg")
-assert rows() == [("Arms", ["Wave_L"]), ("Legs", [])], rows()
+assert rows() == [("Arms", ["Wave_L"])], "only the selection's collections with poses"
+assert rows("zzz") == [], rows("zzz")
 select_nothing()
 assert rows() == [("Arms", ["Wave_L"])], "with nothing selected only collections with poses"
 assert rows("WAV") == [("Arms", ["Wave_L"])] and rows("zzz") == [], "search, any case"

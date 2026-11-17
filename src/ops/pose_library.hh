@@ -31,7 +31,7 @@ struct PoseShelfRow {
   std::string name;
   std::vector<uint64_t> poses;
 };
-/* While something is selected, a row for each collection it is in (empty ones too, to save into); else every
+/* While something is selected, a row for each collection it is in that has poses; else every
  * collection with poses, and Unsorted. `search` keeps the poses whose name holds it (any case), and the rows with any.
  * `collections` (pinned rows): those collections' rows instead (0 Unsorted), whatever is selected. */
 std::vector<PoseShelfRow> pose_shelf_rows(Context &C, const std::string &search,
