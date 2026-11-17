@@ -558,12 +558,12 @@ log_path = ipad.input_log_path()
 assert os.path.basename(log_path) == "ipad_input_log_background.json", "never the one an iPad sent"
 if os.path.exists(log_path):
     os.remove(log_path)
-got = messages({"t": "input_log", "agent": "test", "page": {"mode": "FREEHAND", "holds": 1},
+got = messages({"t": "input_log", "agent": "test", "page": {"mode": "FREEHAND", "touches": 1},
                 "events": [[k, "touchstart", "direct", 1, 10, 10, 20, 0, 1] for k in range(2500)]})
 with open(log_path, encoding="utf-8") as f:
     saved = json.load(f)
 assert saved["agent"] == "test" and len(saved["events"]) == 2000 and saved["events"][0][0] == 500, len(saved["events"])
-assert saved["page"] == {"mode": "FREEHAND", "holds": 1} and saved["drawing"] is False, (saved["page"], saved["drawing"])
+assert saved["page"] == {"mode": "FREEHAND", "touches": 1} and saved["drawing"] is False, (saved["page"], saved["drawing"])
 # The page is told it got here, so it can say so (or that it didn't).
 assert of("input_log_saved", got) == [{"t": "input_log_saved", "path": log_path, "rows": 2000}], of("input_log_saved", got)
 assert of("input_log_saved", messages({"t": "input_log", "events": "not a list"})) == [], "nothing saved, nothing said"
