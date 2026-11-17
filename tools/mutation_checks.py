@@ -63,6 +63,9 @@ PENDING = [
     ("src/ops/pose_clipboard.cc", "  return rig ? armature_family(*C.document, rig->id) : std::vector<Layer *>();",
      "  return rig ? std::vector<Layer *>{rig} : std::vector<Layer *>();", "poses take sub bone groups' bones",
      "tests/test_pose_library.py"),
+    # G, R and S on bones move the points picked with them too (A picks both).
+    ("src/editors/viewport.cc", "    points_with_bones_apply(C, points, kind, move, degrees * PI / 180.0f, factor, pivot);",
+     "    (void)factor;\n    (void)pivot;", "points move with the bones", "tests/test_move_bones_and_points.py"),
 ]
 
 def build(root):

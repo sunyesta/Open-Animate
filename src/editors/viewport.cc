@@ -10410,6 +10410,11 @@ struct BoneModal {
     BoneCounter counter;
   };
   std::vector<Also> also;
+  /* Points picked with the bones (A picks the drawings' edited with them too): where they showed as the move began,
+   * moved after the bones each update (points_with_bones_apply); `with_points` false: none. */
+  ModalTransform points;
+  bool with_points = false;
+  float2 points_pivot;
 };
 static BoneModal g_bone_modal;
 
@@ -11767,6 +11772,9 @@ static void bone_modal_find_touched(Document &doc)
       wanted.insert(st.id);
     }
   }
+  for (const Layer &l : bm.points.snapshot.layers) {
+    wanted.insert(l.id);
+  }
   const std::unordered_set<uint64_t> action_bone_layers = animation_action_bone_drag_layers();
   const auto walk = [&](auto &&self, std::vector<Layer> &layers) -> void {
     for (Layer &l : layers) {
@@ -11918,6 +11926,71 @@ static std::vector<Layer *> bones_moving(Document &doc, const Layer &armature)
   return moving;
 }
 
+/* The middle of the picked bones' heads over the bone layers `moving` (document space): what R and S turn and scale
+ * about, the points picked with the bones too. */
+static float2 bones_moving_middle(const Document &doc, const std::vector<Layer *> &moving, bool setup_frame)
+{
+  float2 sum;
+  size_t heads = 0;
+  for (const Layer *l : moving) {
+    float2 middle;
+    const Transform2D shown = picked_bones_shown(doc, *l, setup_frame, &middle);
+    const size_t count = armature_picked_heads(*l, setup_frame).size();
+    sum += shown.apply(middle) * float(count);
+    heads += count;
+  }
+  return sum / float(std::max<size_t>(heads, 1));
+}
+
+/* Points picked beside bones being moved (A on a bone layer picks the points of the drawings edited with its bones):
+ * where they show before the bones move. False when none are picked. */
+static bool points_with_bones_capture(Context &C, char kind, ModalTransform &r_points)
+{
+  if ((kind != 'G' && kind != 'R' && kind != 'S') || drawings_points_picked(*C.document).empty()) {
+    return false;
+  }
+  static Area area;
+  return modal_collect(C, area, kind, {}, r_points, false);
+}
+
+/* After the bones have moved: each picked point taken from where it showed by the same move as the bones (`delta`,
+ * `angle` in radians, `factor` about `pivot`), through the bones as they are now, so a point the bones bend moves once,
+ * not with its bone and again by itself, and one they don't bend moves too. */
+static void points_with_bones_apply(Context &C, const ModalTransform &before, char kind, float2 delta, float angle,
+                                    float factor, float2 pivot)
+{
+  ModalTransform now;
+  if (!points_with_bones_capture(C, kind, now) || now.items.size() != before.items.size()) {
+    return;
+  }
+  for (size_t i = 0; i < now.items.size(); i++) {
+    ModalTransform::Item &item = now.items[i];
+    const ModalTransform::Item &was = before.items[i];
+    if (item.layer != was.layer || item.point != was.point || item.curve != was.curve || item.index != was.index) {
+      return;
+    }
+    item.start = was.start;
+    item.origin = was.origin;
+  }
+  now.pivot = pivot;
+  now.about_points = false;
+  ModalLayers layers;
+  if (modal_layers(C, now, layers)) {
+    modal_apply(C, now, layers, kind, delta, angle, float2(factor, factor));
+  }
+}
+
+/* The drawings of the points picked with the bones as they were when the move began, before an update moves them
+ * again. */
+static void points_with_bones_reset(Document &doc, const ModalTransform &points)
+{
+  for (const Layer &was : points.snapshot.layers) {
+    if (Layer *l = layer_find(doc, was.id)) {
+      l->drawing = was.drawing;
+    }
+  }
+}
+
 static bool bone_modal_start(Context &C, Area &area, char kind, float2 mouse_document)
 {
   Document &doc = *C.document;
@@ -11966,6 +12039,8 @@ static bool bone_modal_start(Context &C, Area &area, char kind, float2 mouse_doc
   if (!modal.setup_frame && move_only_bones_on(doc)) {
     modal.counter = bone_counter_capture(doc, armature->id);
   }
+  modal.with_points = points_with_bones_capture(C, kind, modal.points);
+  modal.points_pivot = modal.pivot;
   modal.start_mouse = mouse_document;
   modal.precise.reset(mouse_document);
   modal.last_mouse = mouse_document;
@@ -11997,6 +12072,8 @@ static void bone_modal_end(Context &C, bool confirm)
   g_bone_modal.also.clear();
   g_bone_modal.touch.clear();
   g_bone_modal.edits_known = false;
+  g_bone_modal.points = ModalTransform();
+  g_bone_modal.with_points = false;
   C.wm->modal_running = false;
   C.wm->modal_keys.clear();
 }
@@ -12188,6 +12265,9 @@ static std::string bone_modal_update(Context &C, const ViewMapping &view)
    * the bones they drive: play them again from the bones as they are now, so an action bone being
    * turned moves its bones (and their points) as it turns. And what is worked out from the pose (a Look At's eye shape,
    * turned with the head) from it now, so this update draws with it. */
+  if (bm.with_points) {
+    points_with_bones_reset(*C.document, bm.points);
+  }
   animation_drag_refresh(*C.document);
   if (!g_bone_modal.counter.layers.empty()) {
     bone_counter_apply(*C.document, g_bone_modal.counter);
@@ -12197,6 +12277,11 @@ static std::string bone_modal_update(Context &C, const ViewMapping &view)
       bone_counter_apply(*C.document, also.counter);
     }
   });
+  if (bm.with_points) {
+    /* Scaled along the bones' own axes, or squashed, the points keep their size. */
+    points_with_bones_apply(C, bm.points, bm.kind, delta, degrees * PI / 180.0f,
+                            bm.axis != 0 || bm.squash ? 1.0f : factor, bm.points_pivot);
+  }
   if (g_bone_modal.edits_known) {
     for (Layer *l : g_bone_modal.touch) {
       layer_touch(*l);
@@ -14179,6 +14264,15 @@ static OpStatus bones_transform_exec(Context &C, char kind)
     moved.push_back(std::move(m));
     moved_ids.push_back(l->id);
   }
+  /* Points picked with the bones move with them (after them, below). */
+  ModalTransform points;
+  const bool with_points = points_with_bones_capture(C, kind, points);
+  const float2 pivot = with_points ? bones_moving_middle(doc, moving, setup) : float2();
+  if (with_points) {
+    for (const Layer &l : points.snapshot.layers) {
+      moved_ids.push_back(l.id);
+    }
+  }
   const SetupSnapshot kept = keep_poses_begin(C, moved_ids);
   const float2 move(op_arg_float(C, "move_x", 0.0f), op_arg_float(C, "move_y", 0.0f));
   const float degrees = op_arg_float(C, "angle", 0.0f);
@@ -14228,6 +14322,13 @@ static OpStatus bones_transform_exec(Context &C, char kind)
     if (!m.counter.layers.empty()) {
       bone_counter_apply(doc, m.counter);
     }
+  }
+  if (with_points) {
+    const bool squash = op_arg_bool(C, "squash") && !setup;
+    const float factor = kind == 'S' && !squash && op_arg_int(C, "axis", 0) == 0
+                             ? std::clamp(op_arg_float(C, "scale", 1.0f), -1e3f, 1e3f)
+                             : 1.0f;
+    points_with_bones_apply(C, points, kind, move, degrees * PI / 180.0f, factor, pivot);
   }
   keep_poses_end(C, kept);
   return OpStatus::Finished;
