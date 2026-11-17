@@ -9,6 +9,11 @@ const $ = (id) => document.getElementById(id);
 const art = $('art'), overlay = $('overlay'), dabsCanvas = $('dabs'), view = $('view');
 const toolStrip = $('tool-strip'), sharedStrip = $('shared-strip'), shelfTabs = $('shelf-tabs'), shelfTiles = $('shelf-tiles');
 const popoverLayer = $('popover-layer');
+/* Where a canvas's new pictures wait to go in (see canvasApply). */
+const staging = document.createElement('div');
+staging.id = 'art-staging';
+staging.setAttribute('aria-hidden', 'true');
+view.insertBefore(staging, art);
 
 /* ---------------------------------------------------------------------------------------------------------------
  * The connection: the one-time key from the QR code's address. */
@@ -79,6 +84,7 @@ function fitView() {
 
 function applyView() {
   art.style.transform = `matrix(${V.a},${V.b},${V.c},${V.d},${V.e},${V.f})`;
+  staging.style.transform = art.style.transform;
   dirty();
 }
 
@@ -816,21 +822,43 @@ function syncChildren(parent, nodes, start) {
   while (parent.childNodes.length > start + nodes.length) parent.removeChild(parent.lastChild);
 }
 
-/* False when it was sent against a canvas this page doesn't have (the whole one is asked for). */
-function canvasApply(m) {
+/* Where a canvas's new pictures (a brushed line comes back as one) load before they go in: an <image> shows nothing
+ * until its picture has loaded and decoded (Safari decodes a big one only once it's drawn, a frame or more later), so
+ * swapped straight in, the line just drawn blinked out between the line drawn here going and its picture showing.
+ * Under the canvas, placed as it is: drawn (so decoded) but out of sight behind the canvas's white (made at the
+ * top, with the art). */
+
+/* Resolves when `img` has loaded and decoded (or failed, or two seconds have gone: the canvas never waits for ever). */
+function pictureReady(img) {
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = () => { if (!finished) { finished = true; clearTimeout(timer); resolve(); } };
+    const timer = setTimeout(finish, 2000);
+    const decode = () => {
+      if (typeof img.decode === 'function') img.decode().then(finish, finish);
+      else finish();
+    };
+    img.addEventListener('load', decode, { once: true });
+    img.addEventListener('error', finish, { once: true });
+  });
+}
+
+/* Canvases go in one at a time, in the order sent (each is sent against the one before). */
+let canvasQueue = Promise.resolve();
+function canvasReceive(m) {
+  canvasQueue = canvasQueue.then(() => canvasApply(m)).then((ok) => { if (ok) canvasShown(m); }, () => {});
+  return canvasQueue;
+}
+
+/* False when it was sent against a canvas this page doesn't have (the whole one is asked for). Waits for the
+ * pictures it brings (see staging) before anything of it goes in, so the canvas shown stays whole until then. */
+async function canvasApply(m) {
   if (m.base !== 0 && m.base !== canvasSeq) {
     send({ t: 'canvas_full' });
     return false;
   }
-  if (m.base === 0 || !svgRoot) {
-    canvasHead = m.head;
-    art.innerHTML = m.head.replace(/^<\?xml[^>]*>\s*/, '') + '</svg>';
-    svgRoot = art.firstElementChild;
-    defsEl = document.createElementNS(SVG_NS, 'defs');
-    svgRoot.appendChild(defsEl);
-    defsNodes = [];
-    bodyNodes = [];
-  }
+  const whole = m.base === 0 || !svgRoot;
+  if (whole) canvasHead = m.head;
   const build = (list, before) => {
     const fresh = parsePieces(list.filter((v) => typeof v === 'string'));
     const used = new Set();
@@ -843,13 +871,52 @@ function canvasApply(m) {
       return n;
     });
   };
-  defsNodes = build(m.defs, defsNodes);
-  bodyNodes = build(m.body, bodyNodes);
+  const defsNew = build(m.defs, whole ? [] : defsNodes);
+  const bodyNew = build(m.body, whole ? [] : bodyNodes);
+  /* The elements not on the canvas already, and the pictures in them. */
+  const kept = new Set(whole ? [] : defsNodes.concat(bodyNodes));
+  const added = defsNew.concat(bodyNew).filter((n) => !kept.has(n));
+  const pictures = [];
+  for (const n of added) {
+    if (n.localName === 'image') pictures.push(n);
+    if (n.querySelectorAll) pictures.push(...n.querySelectorAll('image'));
+  }
+  if (pictures.length) {
+    /* The canvas's white sized first, so it hides them. */
+    art.style.width = staging.style.width = m.w + 'px';
+    art.style.height = staging.style.height = m.h + 'px';
+    staging.innerHTML = canvasHead.replace(/^<\?xml[^>]*>\s*/, '') + '</svg>';
+    for (const n of added) staging.firstElementChild.appendChild(n);
+    await Promise.all(pictures.map(pictureReady));
+    /* Drawn there once. */
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  }
+  if (whole) {
+    art.innerHTML = m.head.replace(/^<\?xml[^>]*>\s*/, '') + '</svg>';
+    svgRoot = art.firstElementChild;
+    defsEl = document.createElementNS(SVG_NS, 'defs');
+    svgRoot.appendChild(defsEl);
+  }
+  defsNodes = defsNew;
+  bodyNodes = bodyNew;
   syncChildren(defsEl, defsNodes, 0);
   if (svgRoot.firstChild !== defsEl) svgRoot.insertBefore(defsEl, svgRoot.firstChild);
   syncChildren(svgRoot, bodyNodes, 1);
   canvasSeq = m.seq;
   return true;
+}
+
+/* A canvas just put in: its size, onion skins, and the lines drawn here that it shows now. */
+function canvasShown(m) {
+  const changed = m.w !== canvasW || m.h !== canvasH;
+  canvasW = m.w;
+  canvasH = m.h;
+  art.style.width = m.w + 'px';
+  art.style.height = m.h + 'px';
+  onion = m.onion || [];
+  if (changed || !fitted) { fitted = true; fitView(); }
+  if (m.strokes !== undefined) strokes = strokes.filter((s) => s.done === null || s.done > m.strokes);
+  dirty();
 }
 
 /* ---------------------------------------------------------------------------------------------------------------
@@ -874,20 +941,9 @@ function receive(m) {
       if (m.preview.kind === 'dabs') addPngs(m.preview.pngs || {});
       renderBrushButton();
       break;
-    case 'canvas': {
-      const changed = m.w !== canvasW || m.h !== canvasH;
-      canvasW = m.w;
-      canvasH = m.h;
-      art.style.width = m.w + 'px';
-      art.style.height = m.h + 'px';
-      if (!canvasApply(m)) break;
-      onion = m.onion || [];
-      if (changed || !fitted) { fitted = true; fitView(); }
-      /* The lines it has made show in it now. */
-      if (m.strokes !== undefined) strokes = strokes.filter((s) => s.done === null || s.done > m.strokes);
-      dirty();
+    case 'canvas':
+      canvasReceive(m);
       break;
-    }
     case 'live': {
       const s = strokeById(m.id);
       if (!s) break;
