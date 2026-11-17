@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 
 #pragma warning(push, 0)
@@ -195,6 +196,21 @@ struct VectorSceneCache::Impl {
     bool used = false;
   };
   std::map<uint64_t, std::vector<Entry>> layers;
+  /* Lines made one outline (Clipper's union of their triangles, most of a drawing's time), by what they were made
+   * from: when one line of a drawing changes, the others are found here. Kept while their call (a layer's colour or
+   * coverage, `owner`) is reused or uses them again. */
+  struct Line {
+    std::vector<float2> points;
+    std::vector<float> half_widths;
+    std::vector<StrokeJoin> joins;
+    bool closed = false;
+    Transform2D to_px;
+    VectorPath path;
+    uint64_t owner = 0;
+    bool used = false;
+  };
+  std::map<uint64_t, std::vector<Line>> lines;
+  std::set<uint64_t> worked_out;  // the owners worked out afresh in this scene
 };
 
 VectorSceneCache::VectorSceneCache() : impl(std::make_unique<Impl>()) {}
@@ -245,6 +261,7 @@ class SceneWalker {
   const VectorSceneOptions &options_;
   VectorScene &scene_;
   VectorSceneCache::Impl *cache_ = nullptr;
+  uint64_t owner_ = 0;  // the call now making lines (line_path): a layer id times 2, plus 1 for coverage
   Transform2D to_px_;
   int quality_ = 32;
   std::map<std::pair<uint64_t, int>, int> card_ids_;
@@ -295,6 +312,50 @@ class SceneWalker {
       }
     }
     return nullptr;
+  }
+
+  /* A line's outline (stroke_path), found again if the cache has one made from the same. */
+  VectorPath line_path(const std::vector<float2> &points, const std::vector<float> &half_widths, bool closed,
+                       const std::vector<StrokeJoin> &joins, const Transform2D &to_px)
+  {
+    if (!cache_) {
+      return stroke_path(points, half_widths, closed, joins, to_px);
+    }
+    uint64_t h = 1469598103934665603ull;
+    const auto mix = [&](const void *data, size_t size) {
+      const auto *bytes = static_cast<const unsigned char *>(data);
+      for (size_t i = 0; i < size; i++) {
+        h = (h ^ bytes[i]) * 1099511628211ull;
+      }
+    };
+    mix(points.data(), points.size() * sizeof(float2));
+    mix(half_widths.data(), half_widths.size() * sizeof(float));
+    mix(joins.data(), joins.size() * sizeof(StrokeJoin));
+    mix(&closed, sizeof(closed));
+    mix(&to_px, sizeof(to_px));
+    std::vector<VectorSceneCache::Impl::Line> &list = cache_->lines[h];
+    for (VectorSceneCache::Impl::Line &line : list) {
+      if (line.closed == closed && line.to_px == to_px && line.points == points && line.half_widths == half_widths &&
+          line.joins == joins)
+      {
+        line.used = true;
+        line.owner = owner_;
+        options_.cache->lines_reused++;
+        return line.path;
+      }
+    }
+    VectorSceneCache::Impl::Line line;
+    line.points = points;
+    line.half_widths = half_widths;
+    line.joins = joins;
+    line.closed = closed;
+    line.to_px = to_px;
+    line.path = stroke_path(points, half_widths, closed, joins, to_px);
+    line.owner = owner_;
+    line.used = true;
+    list.push_back(line);
+    options_.cache->lines_made++;
+    return std::move(line.path);
   }
 
   /* An entry's shapes put in again, as the call that made them did. */
@@ -592,6 +653,10 @@ class SceneWalker {
     }
     const size_t first = to.size();
     const int fills_before = scene_.fills, lines_before = scene_.lines;
+    owner_ = layer.id * 2;
+    if (cache_) {
+      cache_->worked_out.insert(owner_);
+    }
     /* The drawing as on the setup frame, which brushed lines lay their stamps out on (made when one needs it). */
     VectorDrawing setup;
     bool setup_made = false;
@@ -659,7 +724,7 @@ class SceneWalker {
         line_runs(outline, radii, visible, joins, closed, cutter.empty() ? nullptr : &cutter, transform,
                   [&](const std::vector<float2> &pts, const std::vector<float> &half, bool is_closed,
                       const std::vector<StrokeJoin> &stroke_joins, const std::vector<float> &) {
-                    element(to, stroke_path(pts, half, is_closed, stroke_joins, to_px), run.style.line, opacity, false, line_mask);
+                    element(to, line_path(pts, half, is_closed, stroke_joins, to_px), run.style.line, opacity, false, line_mask);
                     scene_.lines++;
                   });
       }
@@ -1062,6 +1127,10 @@ class SceneWalker {
       }
     }
     const size_t first = to.size();
+    owner_ = layer.id * 2 + 1;
+    if (cache_) {
+      cache_->worked_out.insert(owner_);
+    }
     covered(drawing, pass, to_px, transform, to);
     if (cache_) {
       remember(layer, true, 1.0f, -1, -1, pass, to_px, drawn, to, first, 0, 0);
@@ -1108,7 +1177,7 @@ class SceneWalker {
                 band[k] = std::max(r - grow, 0.0f);
               }
             }
-            element(to, stroke_path(outline, band, true, std::vector<StrokeJoin>(outline.size()), to_px), paint, 1.0f);
+            element(to, line_path(outline, band, true, std::vector<StrokeJoin>(outline.size()), to_px), paint, 1.0f);
           }
           if (!(is_area && inside_stroke)) {
             continue;
@@ -1147,7 +1216,7 @@ class SceneWalker {
           if (grow > 0.0f && !inside_stroke) {
             /* Grow: a rim that wide around the area. */
             element(to,
-                    stroke_path(outline, std::vector<float>(outline.size(), grow), true,
+                    line_path(outline, std::vector<float>(outline.size(), grow), true,
                                 std::vector<StrokeJoin>(outline.size()), to_px),
                     paint, 1.0f);
           }
@@ -1169,7 +1238,7 @@ class SceneWalker {
           line_runs(outline, radii, visible, joins, closed, nullptr, transform,
                     [&](const std::vector<float2> &pts, const std::vector<float> &half, bool is_closed,
                         const std::vector<StrokeJoin> &stroke_joins, const std::vector<float> &) {
-                      element(to, stroke_path(pts, half, is_closed, stroke_joins, to_px), paint, 1.0f);
+                      element(to, line_path(pts, half, is_closed, stroke_joins, to_px), paint, 1.0f);
                     });
         }
       }
@@ -1222,11 +1291,18 @@ VectorScene vector_scene(const Document &doc, const VectorSceneOptions &options)
   OANIM_PROFILE("vector_scene");
   if (options.cache) {
     options.cache->reused = options.cache->made = 0;
+    options.cache->lines_reused = options.cache->lines_made = 0;
     for (auto &[id, list] : options.cache->impl->layers) {
       for (VectorSceneCache::Impl::Entry &e : list) {
         e.used = false;
       }
     }
+    for (auto &[key, list] : options.cache->impl->lines) {
+      for (VectorSceneCache::Impl::Line &line : list) {
+        line.used = false;
+      }
+    }
+    options.cache->impl->worked_out.clear();
   }
   SceneWalker(doc, options, scene).walk();
   /* What this scene didn't use goes (a layer deleted, a drawing changed). */
@@ -1235,6 +1311,15 @@ VectorScene vector_scene(const Document &doc, const VectorSceneOptions &options)
     for (auto it = layers.begin(); it != layers.end();) {
       std::erase_if(it->second, [](const VectorSceneCache::Impl::Entry &e) { return !e.used; });
       it = it->second.empty() ? layers.erase(it) : std::next(it);
+    }
+    /* A line goes when its call was worked out again without it, or its layer went. */
+    const VectorSceneCache::Impl &impl = *options.cache->impl;
+    auto &lines = options.cache->impl->lines;
+    for (auto it = lines.begin(); it != lines.end();) {
+      std::erase_if(it->second, [&](const VectorSceneCache::Impl::Line &line) {
+        return !line.used && (impl.worked_out.count(line.owner) || !layers.count(line.owner / 2));
+      });
+      it = it->second.empty() ? lines.erase(it) : std::next(it);
     }
   }
   return scene;

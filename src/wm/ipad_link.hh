@@ -26,7 +26,7 @@ Transform2D ipad_canvas_transform(const Document &doc, int width, int height);
  * canvas are taken from it (VectorSceneCache) unless `cached` is off. */
 std::string ipad_canvas_message(Context &C, int width, int height, bool cached = true);
 /* In the last canvas made with the cache: layers' shapes taken from it, and worked out. */
-void ipad_canvas_cache_counts(int *r_reused, int *r_made);
+void ipad_canvas_cache_counts(int *r_reused, int *r_made, int *r_lines_reused = nullptr, int *r_lines_made = nullptr);
 
 /* One of the Pencil's samples: canvas pixels, pressure 0-1, tilt in degrees (across, up), seconds. */
 struct IpadSample {

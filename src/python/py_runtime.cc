@@ -509,6 +509,12 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     ipad_canvas_cache_counts(&reused, &made);
     return py::make_tuple(reused, made);
   });
+  /* In the last canvas: (lines' outlines found again, made). */
+  m.def("ipad_canvas_lines", []() {
+    int reused = 0, made = 0, lines_reused = 0, lines_made = 0;
+    ipad_canvas_cache_counts(&reused, &made, &lines_reused, &lines_made);
+    return py::make_tuple(lines_reused, lines_made);
+  });
   m.def("ipad_draw_refused", []() { return ipad_draw_refused(current_context()); });
   /* Changes whenever the canvas may have: an edit or selection (onion skins follow it), the frame, the active layer,
    * Python having run. */

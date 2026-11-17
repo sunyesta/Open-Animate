@@ -78,6 +78,12 @@ PENDING = [
      "The iPad's canvas works out again a layer whose drawing changed", 'tests/test_ipad.py'),
     ('src/io/vector_export.cc', 'e.pass == pass && e.to_px == to_px && e.quality', 'e.pass == pass && e.quality',
      "The iPad's canvas works out again a layer moved or seen through another camera", 'tests/test_ipad.py'),
+    ('src/io/vector_export.cc', 'std::vector<VectorSceneCache::Impl::Line> &list = cache_->lines[h];',
+     'std::vector<VectorSceneCache::Impl::Line> list;',
+     "An undo on the iPad of one line among many on a layer works out none of the others again", 'tests/test_ipad.py'),
+    ('src/io/vector_export.cc', 'return !line.used && (impl.worked_out.count(line.owner) || !layers.count(line.owner / 2));',
+     'return !line.used;',
+     "The iPad's canvas keeps a layer's lines while the layer is taken whole from the last canvas", 'tests/test_ipad.py'),
 ]
 
 def build(root):

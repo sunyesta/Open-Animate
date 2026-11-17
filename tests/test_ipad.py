@@ -489,4 +489,34 @@ canvas_same("redone")
 ops.layer.delete()
 canvas_same("a layer deleted")
 
+# Every line on one layer: an undo works out no line again, only the canvas without the line taken back, and a line
+# drawn works out only itself, also after the layer was taken whole from the last canvas.
+def lines_after(got):
+    """(lines' outlines found again, made) in the canvas that came with what the page sent, or the next."""
+    if not any(m["t"] == "canvas" for m in got):
+        _oanim.ipad_canvas(W, H)
+    return _oanim.ipad_canvas_lines()
+
+
+ops.layer.new()
+one = layers.active
+for k in range(6):
+    stroke([[x + W * 0.05 * k, y + H * 0.04 * k, p, a, b, t] for x, y, p, a, b, t in wave()])
+canvas_same("six lines on one layer")
+time.sleep(0.11)
+lines_reused, lines_made = lines_after(messages({"t": "undo"}))
+canvas_same("one of the six undone")
+assert lines_made == 0 and lines_reused >= 5, (lines_reused, lines_made)
+messages({"t": "redo"})
+canvas_same("redone, the six again")
+ops.layer.new()
+time.sleep(0.11)
+assert lines_after(stroke([[x, y - H * 0.2, p, a, b, t] for x, y, p, a, b, t in wave()]))[1] >= 1
+canvas_same("a line on another layer")
+layers.active = one
+time.sleep(0.11)
+lines_reused, lines_made = lines_after(stroke([[x, y + H * 0.3, p, a, b, t] for x, y, p, a, b, t in wave()]))
+canvas_same("a seventh line")
+assert lines_reused >= 6 and 1 <= lines_made <= 2, (lines_reused, lines_made)
+
 print("ipad: ok")

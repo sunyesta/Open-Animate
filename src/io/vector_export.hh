@@ -81,6 +81,8 @@ class VectorSceneCache {
   std::unique_ptr<Impl> impl;
   /* In the last scene: layers' shapes taken from it, and worked out. */
   int reused = 0, made = 0;
+  /* Lines' outlines in the last scene: found again, made. */
+  int lines_reused = 0, lines_made = 0;
 };
 
 struct VectorSceneOptions {

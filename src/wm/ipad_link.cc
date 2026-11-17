@@ -323,10 +323,14 @@ static VectorSceneCache &canvas_cache()
   return cache;
 }
 
-void ipad_canvas_cache_counts(int *r_reused, int *r_made)
+void ipad_canvas_cache_counts(int *r_reused, int *r_made, int *r_lines_reused, int *r_lines_made)
 {
   *r_reused = canvas_cache().reused;
   *r_made = canvas_cache().made;
+  if (r_lines_reused) {
+    *r_lines_reused = canvas_cache().lines_reused;
+    *r_lines_made = canvas_cache().lines_made;
+  }
 }
 
 std::string ipad_canvas_message(Context &C, int width, int height, bool cached)
