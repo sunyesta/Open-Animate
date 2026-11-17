@@ -968,6 +968,14 @@ static void bone_clipboard_register()
       root["bones_document"] = json::parse(oanim_document_to_json(mini));
       root["parents"] = std::move(parents);
       root["names"] = std::move(names);
+      /* Their own actions, with the keys everything in the bone layer has in them, for Paste's Actions. */
+      const std::vector<std::string> own = bones_own_actions(armature, picked);
+      if (!own.empty()) {
+        Document with;
+        with.layers.push_back(bones_actions_source(*C.document, armature, own));
+        root["actions_document"] = json::parse(oanim_document_to_json(with));
+        root["actions"] = own;
+      }
       clipboard_text_set(root.dump());
       const size_t count = picked.size();
       report(ReportType::Info, "Copied " + std::to_string(count) + (count == 1 ? " bone" : " bones"));
@@ -981,7 +989,7 @@ static void bone_clipboard_register()
     ot.name = "Paste Bones";
     ot.description = "Paste copied bones into the active bone layer (Ctrl V over the viewport on the setup frame), "
                      "where they rested, selected; each whose parent wasn't copied hangs from a bone of that name here "
-                     "if there is one. keyframes=1 brings their keys too";
+                     "if there is one. keyframes=1 brings their keys too; actions=1 their own copies of the bones' actions";
     ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
     ot.poll = [](Context &C) {
       return bone_layer_active(C) && C.document->frame_current == 0 &&
@@ -990,6 +998,11 @@ static void bone_clipboard_register()
     ot.props = {op_bool_property("keyframes", "Keyframes",
                                  "Bring their keys too, on the mainline and in the actions this bone layer has. Off, "
                                  "they have none and rest in their setup pose",
+                                 "0"),
+                op_bool_property("actions", "Actions",
+                                 "Give them their own copies of the copied bones' actions: a 2 Axis Controller's "
+                                 "sides, the actions named after a bone that turn it, and the fixes following them, "
+                                 "with keys on what this bone layer has of what they moved",
                                  "0")};
     ot.exec = [](Context &C) {
       Document &doc = *C.document;
@@ -1085,6 +1098,18 @@ static void bone_clipboard_register()
         armature.bones.push_back(std::move(copy));
       }
       armature.active_bone = first;
+      if (op_arg_bool(C, "actions") && root.contains("actions_document")) {
+        Document with;
+        if (oanim_document_from_json(root["actions_document"].dump(), with, &error) && !with.layers.empty()) {
+          std::vector<std::string> own;
+          for (const json &name : root.value("actions", json::array())) {
+            if (name.is_string()) {
+              own.push_back(name.get<std::string>());
+            }
+          }
+          bones_actions_copy(doc, armature, with.layers.front(), ids, own);
+        }
+      }
       const size_t count = from.bones.size();
       report(ReportType::Info, "Pasted " + std::to_string(count) + (count == 1 ? " bone" : " bones"));
       return OpStatus::Finished;
@@ -3425,7 +3450,8 @@ void rig_operators_register()
 
   rig_operator("armature.duplicate_move", "Duplicate Bones",
                "Copy the selected bones, then move the copies (Shift D, as in Blender). keyframes=1 gives the copies "
-               "the originals' keys (Duplicate with Keys); move_x= and move_y= move them by that much at once (what a "
+               "the originals' keys (Duplicate with Keys); actions=1 gives them their own copies of the originals' "
+               "actions (a controller's sides, turn actions, fixes following them); move_x= and move_y= move them by that much at once (what a "
                "Shift D drag ends as)",
                bone_layer_active,
                [](Context &C) {
@@ -3479,6 +3505,16 @@ void rig_operators_register()
                  if (auto it = copies.find(active); it != copies.end()) {
                    armature.active_bone = it->second;
                  }
+                 /* With Actions the copies get their own copies of the originals' sides, turn actions and fixes. */
+                 if (op_arg_bool(C, "actions")) {
+                   std::set<uint64_t> copied;
+                   for (const auto &[from, to] : copies) {
+                     copied.insert(from);
+                   }
+                   const std::vector<std::string> own = bones_own_actions(armature, copied);
+                   Layer source = bones_actions_source(*C.document, armature, own);
+                   bones_actions_copy(*C.document, armature, source, copies, own);
+                 }
                  /* A move given (the drag ended, or adjusted afterwards): made here, so Duplicate stays the last
                   * operation and its Keyframes can be changed. Else the drag starts. */
                  if (op_has_arg(C, "move_x") || op_has_arg(C, "move_y")) {
@@ -3500,6 +3536,11 @@ void rig_operators_register()
                {op_bool_property("keyframes", "Keyframes",
                                  "Give the copies the originals' keys, on the mainline and in every action. Off, they "
                                  "have none and rest in their setup pose",
+                                 "0"),
+                op_bool_property("actions", "Actions",
+                                 "Give the copies their own copies of the originals' actions: a 2 Axis Controller's "
+                                 "sides, the actions named after a bone that turn it, and the fixes following them, "
+                                 "moving what the originals' move",
                                  "0"),
                 op_float_property("move_x", "Move X", "How far the copies moved across", "0", -1e6f, 1e6f, 0.01f),
                 op_float_property("move_y", "Move Y", "How far the copies moved up", "0", -1e6f, 1e6f, 0.01f)});

@@ -257,6 +257,20 @@ void bone_fixes_tidy(Document &doc);
 /* A 2 Axis Controller's spots outside its box (a side's action made shorter, or taken off) are deleted, on every undo
  * step and on opening a file. Returns how many went. */
 int controller_spots_tidy(Document &doc);
+/* The actions bones `bones` of `owner` have of their own: a 2 Axis Controller's sides, a bone's turn actions (named
+ * after it) and the fixes following any of them, in the order `owner` lists them. */
+std::vector<std::string> bones_own_actions(const Layer &owner, const std::set<uint64_t> &bones);
+/* A copy of `owner`, bones, layers inside and all, keeping only actions `names` (the one being edited put away first):
+ * where Duplicate's and Paste's Actions copy them from. */
+Layer bones_actions_source(const Document &doc, const Layer &owner, const std::vector<std::string> &names);
+/* Duplicate's and Paste's Actions: in `target`, a copy of each of `source`'s actions `names` for the copied bones
+ * (`copies`: a source bone's id, its copy's here). A copy is named after the copy of the bone it is named after
+ * ("JawDown Down" for JawDown.001 is "JawDown.001 Down"), else numbered; the keys a copied bone has in it go on its copy,
+ * every other bone's and layer's on the bone or layer of its name here (by id first for layers, and only one drawn
+ * alike). A copied knob's sides are the copies; a fix follows the copies in place of the bones copied, and is left out
+ * where it follows a bone this bone layer hasn't. Returns how many were made. */
+int bones_actions_copy(Document &doc, Layer &target, Layer &source, const std::map<uint64_t, uint64_t> &copies,
+                       const std::vector<std::string> &names);
 /* Renames action `from` of `owner`: its keys, its fix or controller side and, edited, the timeline's name. */
 bool document_action_rename(Document &doc, uint64_t owner, const std::string &from, const std::string &to);
 /* Bone `from` of `owner` renamed `to`: its action bone actions take the new name. */

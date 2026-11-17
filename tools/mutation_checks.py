@@ -69,6 +69,36 @@ PENDING = [
     # Adding a spot outside the box is refused.
     ("src/ops/rig_ops.cc", "                 if (spot_outside(*knob, at)) {\n                   return OpStatus::Cancelled;\n                 }\n                 std::string name",
      "                 std::string name", "a spot added outside the box is refused", "tests/test_controller_spots_range.py"),
+    # Shift D's Actions copies the bones' own actions.
+    ('src/ops/rig_ops.cc', '                   bones_actions_copy(*C.document, armature, source, copies, own);',
+     '                   (void)source;', 'duplicate with actions copies them', 'tests/test_bone_duplicate_actions.py'),
+    # Paste's Actions too.
+    ('src/ops/rig_ops.cc', '          bones_actions_copy(doc, armature, with.layers.front(), ids, own);',
+     '          (void)own;', 'paste with actions copies them', 'tests/test_bone_duplicate_actions.py'),
+    # Copy Bones puts the actions on the clipboard.
+    ('src/ops/rig_ops.cc', '        root["actions_document"] = json::parse(oanim_document_to_json(with));',
+     '        (void)with;', 'copy puts the actions on the clipboard', 'tests/test_bone_duplicate_actions.py'),
+    # A copied knob's sides are the copies.
+    ('src/anim/animation.cc', '          c->controller_actions[size_t(side)] = n;',
+     '          (void)n;', "copied knob's sides are the copies", 'tests/test_bone_duplicate_actions.py'),
+    # A copied fix follows the copies.
+    ('src/anim/animation.cc', '        id = here(id)->id;',
+     '        (void)id;', 'copied fix follows the copies', 'tests/test_bone_duplicate_actions.py'),
+    # A copied bone's keys go on its copy.
+    ('src/anim/animation.cc', '      s = bone_find(source, it->second);',
+     '      s = nullptr;', "copied bone's keys go on its copy", 'tests/test_bone_duplicate_actions.py'),
+    # The bone copied gets none in the copy.
+    ('src/anim/animation.cc', '        s = !copied.count(b.id) && b.name == t.name ? &b : s;',
+     '        s = b.name == t.name ? &b : s;', 'bone copied gets no keys in the copy', 'tests/test_bone_duplicate_actions.py'),
+    # Named after the copy.
+    ('src/anim/animation.cc', '          name = action.substr(0, at) + c->name + action.substr(at + b->name.size());',
+     '          (void)at;', 'copied action named after the copy', 'tests/test_bone_duplicate_actions.py'),
+    # A fix following a bone the bone layer hasn't is left out.
+    ('src/anim/animation.cc', "      continue; /* it follows a bone this bone layer hasn't */",
+     '      (void)0;', 'fix following a missing bone left out', 'tests/test_bone_duplicate_actions.py'),
+    # The action being edited is copied too.
+    ('src/anim/animation.cc', '    owner_for_each_channel(source, [&](auto &ch, auto &value) { swap_timeline(ch, value, doc.action, std::string()); });',
+     '    (void)0;', 'action being edited is copied too', 'tests/test_bone_duplicate_actions.py'),
 ]
 
 def build(root):

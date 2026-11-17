@@ -19,6 +19,7 @@
 #include <type_traits>
 #include <typeinfo>
 #include <unordered_set>
+#include <variant>
 
 #include "anim/action_mirror.hh"
 #include "anim/controller.hh"
@@ -4909,6 +4910,304 @@ int bone_fix_names_follow(Document &doc, uint64_t owner_id)
     }
   }
   return count;
+}
+
+/* --- Duplicate's and Paste's Actions: the bones' own actions copied for their copies ---------------------------- */
+
+std::vector<std::string> bones_own_actions(const Layer &owner, const std::set<uint64_t> &bones)
+{
+  std::vector<std::string> own;
+  for (const std::string &action : owner.actions) {
+    bool mine = false;
+    for (const Bone &b : owner.bones) {
+      if (!bones.count(b.id)) {
+        continue;
+      }
+      if (bone_is_controller(b)) {
+        mine = mine || std::find(b.controller_actions.begin(), b.controller_actions.end(), action) !=
+                           b.controller_actions.end();
+      }
+      else if ((action == b.name || action == b.name + " 2") && controller_dial_of_action(owner, action) == &b) {
+        mine = true;
+      }
+    }
+    if (const BoneFix *fix = bone_fix_find(owner, action)) {
+      mine = mine || std::any_of(fix->follows.begin(), fix->follows.end(), [&](uint64_t id) { return bones.count(id); });
+    }
+    if (mine) {
+      own.push_back(action);
+    }
+  }
+  return own;
+}
+
+Layer bones_actions_source(const Document &doc, const Layer &owner, const std::vector<std::string> &names)
+{
+  Layer source = owner;
+  /* The action being edited has its keys out in the channels: away under its name first, as on leaving it. */
+  if (!doc.action.empty() && doc.action_layer == owner.id) {
+    owner_for_each_channel(source, [&](auto &ch, auto &value) { swap_timeline(ch, value, doc.action, std::string()); });
+  }
+  const std::set<std::string> kept(names.begin(), names.end());
+  const auto keep = [&](const std::string &name) -> std::optional<std::string> {
+    return kept.count(name) ? std::optional<std::string>(name) : std::nullopt;
+  };
+  const auto tidy = [&](auto &self, Layer &l) -> void {
+    layer_actions_rename(l, keep);
+    std::erase_if(l.action_plays, [&](const ActionPlay &a) { return !kept.count(a.name); });
+    std::erase_if(l.key_together_frames, [&](const auto &f) { return !kept.count(f.first); });
+    for (Layer &c : l.children) {
+      self(self, c);
+    }
+  };
+  tidy(tidy, source);
+  std::erase_if(source.actions, [&](const std::string &a) { return !kept.count(a); });
+  std::erase_if(source.bone_fixes, [&](const BoneFix &f) { return !kept.count(f.name); });
+  return source;
+}
+
+using ChannelPtr = std::variant<Channel<float> *, Channel<float2> *>;
+
+static void bone_channel_list(Bone &bone, std::vector<ChannelPtr> &out)
+{
+  const auto add = [&](auto &ch, auto & /*value*/) { out.push_back(&ch); };
+  add(bone.position_keys, bone.transform);
+  add(bone.angle_keys, bone.turn);
+  bone_other_channels(bone, add);
+}
+
+/* A layer's channels besides its bones', in the order layer_for_each_channel walks them. */
+static void layer_channel_list(Layer &layer, std::vector<ChannelPtr> &out)
+{
+  std::set<const void *> of_bones;
+  for (Bone &b : layer.bones) {
+    std::vector<ChannelPtr> list;
+    bone_channel_list(b, list);
+    for (const ChannelPtr &c : list) {
+      std::visit([&](auto *ch) { of_bones.insert(ch); }, c);
+    }
+  }
+  layer_for_each_channel<false>(layer, [&](auto &ch, auto & /*value*/) {
+    if (!of_bones.count(&ch)) {
+      out.push_back(&ch);
+    }
+  });
+}
+
+/* Each of `names`' keys (first: the source's name, second: the copy's) from channel i of `from` onto channel i of `to`;
+ * nothing unless the two are alike channel for channel. */
+static void channels_actions_copy(const std::vector<ChannelPtr> &from, const std::vector<ChannelPtr> &to,
+                                  const std::vector<std::pair<std::string, std::string>> &names)
+{
+  if (from.size() != to.size()) {
+    return;
+  }
+  for (size_t i = 0; i < from.size(); i++) {
+    std::visit(
+        [&](auto *s) {
+          using C = std::remove_pointer_t<decltype(s)>;
+          C *const *t = std::get_if<C *>(&to[i]);
+          if (!t) {
+            return;
+          }
+          for (const auto &[a, b] : names) {
+            if (const auto it = s->actions.find(a); it != s->actions.end()) {
+              auto keys = it->second;
+              (*t)->actions[b] = std::move(keys);
+            }
+            if (const auto it = s->action_setup.find(a); it != s->action_setup.end()) {
+              auto key = it->second;
+              (*t)->action_setup[b] = std::move(key);
+            }
+          }
+        },
+        from[i]);
+  }
+}
+
+static void layer_tree(Layer &layer, std::vector<Layer *> &out)
+{
+  for (Layer &c : layer.children) {
+    out.push_back(&c);
+    layer_tree(c, out);
+  }
+}
+
+/* Two drawings alike point for point (the same layer in another file, or one of its name drawn the same). */
+static bool layers_alike(const Layer &a, const Layer &b)
+{
+  if (a.type != b.type || a.drawing.points.size() != b.drawing.points.size() ||
+      a.drawing.curves.size() != b.drawing.curves.size() || a.bones.size() != b.bones.size())
+  {
+    return false;
+  }
+  for (size_t i = 0; i < a.drawing.points.size(); i++) {
+    if (a.drawing.points[i].id != b.drawing.points[i].id) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int bones_actions_copy(Document &doc, Layer &target, Layer &source, const std::map<uint64_t, uint64_t> &copies,
+                       const std::vector<std::string> &wanted)
+{
+  if (wanted.empty() || copies.empty()) {
+    return 0;
+  }
+  /* Made on the mainline: the action being edited is put away and brought back after. */
+  const std::string open = doc.action_layer == target.id ? doc.action : std::string();
+  if (!open.empty()) {
+    document_set_action(doc, target.id, "");
+  }
+  std::map<uint64_t, uint64_t> back; /* a copy's id here: the source bone it copies */
+  for (const auto &[from, to] : copies) {
+    back[to] = from;
+  }
+  /* The bone here a source bone is: its copy, else (not copied) the bone of its name. */
+  const auto here = [&](uint64_t id) -> const Bone * {
+    if (const auto it = copies.find(id); it != copies.end()) {
+      return bone_find(target, it->second);
+    }
+    const Bone *was = bone_find(source, id);
+    return was ? bone_find_by_name(target, was->name) : nullptr;
+  };
+  /* Each action's copy, named after the copy of the bone it is named after, else numbered. */
+  std::vector<std::pair<std::string, std::string>> names;
+  for (const std::string &action : wanted) {
+    const BoneFix *fix = bone_fix_find(source, action);
+    if (fix && std::any_of(fix->follows.begin(), fix->follows.end(), [&](uint64_t id) { return !here(id); })) {
+      continue; /* it follows a bone this bone layer hasn't */
+    }
+    std::string name = action;
+    bool turn = false;
+    for (const auto &[from, to] : copies) {
+      const Bone *b = bone_find(source, from);
+      const Bone *c = bone_find(target, to);
+      if (!b || !c) {
+        continue;
+      }
+      const bool side = bone_is_controller(*b) && std::find(b->controller_actions.begin(), b->controller_actions.end(),
+                                                            action) != b->controller_actions.end();
+      turn = !bone_is_controller(*b) && (action == b->name || action == b->name + " 2");
+      if (side || turn) {
+        if (const size_t at = action.find(b->name); at != std::string::npos) {
+          name = action.substr(0, at) + c->name + action.substr(at + b->name.size());
+        }
+        break;
+      }
+    }
+    const bool taken = std::find(target.actions.begin(), target.actions.end(), name) != target.actions.end();
+    if (!turn || taken) {
+      name = controller_action_name_free(target, name);
+    }
+    target.actions.push_back(name);
+    names.push_back({action, name});
+  }
+  /* The keys: a copied bone's onto its copy (the bone copied gets none), every other bone's and layer's onto itself. */
+  std::set<uint64_t> copied;
+  for (const auto &[from, to] : copies) {
+    copied.insert(from);
+  }
+  for (Bone &t : target.bones) {
+    Bone *s = nullptr;
+    if (const auto it = back.find(t.id); it != back.end()) {
+      s = bone_find(source, it->second);
+    }
+    else {
+      for (Bone &b : source.bones) {
+        s = !copied.count(b.id) && b.name == t.name ? &b : s;
+      }
+    }
+    if (s) {
+      std::vector<ChannelPtr> from, to;
+      bone_channel_list(*s, from);
+      bone_channel_list(t, to);
+      channels_actions_copy(from, to, names);
+    }
+  }
+  std::vector<std::pair<Layer *, Layer *>> layers = {{&source, &target}};
+  {
+    std::vector<Layer *> ours, theirs;
+    layer_tree(target, ours);
+    layer_tree(source, theirs);
+    std::set<const Layer *> used;
+    for (Layer *t : ours) {
+      Layer *match = nullptr;
+      for (Layer *s : theirs) {
+        match = !match && s->id == t->id ? s : match;
+      }
+      for (Layer *s : theirs) {
+        match = !match && !used.count(s) && s->name == t->name ? s : match;
+      }
+      if (match && layers_alike(*match, *t)) {
+        used.insert(match);
+        layers.push_back({match, t});
+      }
+    }
+  }
+  for (const auto &[s, t] : layers) {
+    std::vector<ChannelPtr> from, to;
+    layer_channel_list(*s, from);
+    layer_channel_list(*t, to);
+    channels_actions_copy(from, to, names);
+    for (const auto &[a, b] : names) {
+      if (const auto it = s->key_together_frames.find(a); it != s->key_together_frames.end()) {
+        auto frames = it->second;
+        t->key_together_frames[b] = std::move(frames);
+      }
+    }
+    if (s != &source) {
+      for (Bone &tb : t->bones) {
+        for (Bone &sb : s->bones) {
+          if (sb.name == tb.name) {
+            std::vector<ChannelPtr> bf, bt;
+            bone_channel_list(sb, bf);
+            bone_channel_list(tb, bt);
+            channels_actions_copy(bf, bt, names);
+          }
+        }
+      }
+    }
+  }
+  /* How each plays, the copied knobs' sides and the fixes, following the copies. */
+  for (const auto &[a, b] : names) {
+    for (const ActionPlay &p : source.action_plays) {
+      if (p.name == a) {
+        ActionPlay play = p;
+        play.name = b;
+        target.action_plays.push_back(std::move(play));
+      }
+    }
+    if (const BoneFix *fix = bone_fix_find(source, a)) {
+      BoneFix made = *fix;
+      made.name = b;
+      for (uint64_t &id : made.follows) {
+        id = here(id)->id;
+      }
+      target.bone_fixes.push_back(std::move(made));
+    }
+  }
+  for (const auto &[from, to] : copies) {
+    const Bone *b = bone_find(source, from);
+    Bone *c = bone_find(target, to);
+    if (!b || !c || !bone_is_controller(*b)) {
+      continue;
+    }
+    for (int side = 0; side < CONTROLLER_SIDES; side++) {
+      for (const auto &[a, n] : names) {
+        if (!a.empty() && b->controller_actions[size_t(side)] == a) {
+          c->controller_actions[size_t(side)] = n;
+        }
+      }
+    }
+  }
+  bone_fix_names_follow(doc, target.id);
+  controllers_update(doc);
+  if (!open.empty()) {
+    document_set_action(doc, target.id, open);
+  }
+  return int(names.size());
 }
 
 std::vector<std::pair<Layer *, std::string>> layers_keyed_at(const std::vector<Layer *> &layers,

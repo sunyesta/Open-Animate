@@ -10377,6 +10377,7 @@ struct BoneModal {
   /* Following Duplicate Bones (Shift D): it ends as that operator with the move, its Keyframes as given. */
   bool duplicate = false;
   std::string duplicate_keyframes = "0";
+  std::string duplicate_actions = "0";
   int area = 0;
   char kind = 'G';
   uint64_t armature = 0;
@@ -12127,6 +12128,7 @@ static void bone_modal_confirm(Context &C, float2 delta, float degrees, float fa
     args["move_y"] = num_arg(delta.y);
     args["knob_snap"] = bm.knob_snap ? "1" : "0";
     args["keyframes"] = bm.duplicate_keyframes;
+    args["actions"] = bm.duplicate_actions;
     operator_call(C, "armature.duplicate_move", args);
   }
   else if (bm.kind == 'G') {
@@ -18467,6 +18469,8 @@ static void viewport_draw_contents(Area &area, Context &C)
           const auto keyframes = was_dup ? dup->args.find("keyframes") : OpArgs::const_iterator();
           g_bone_modal.duplicate = true;
           g_bone_modal.duplicate_keyframes = was_dup && keyframes != dup->args.end() ? keyframes->second : "0";
+          const auto actions = was_dup ? dup->args.find("actions") : OpArgs::const_iterator();
+          g_bone_modal.duplicate_actions = was_dup && actions != dup->args.end() ? actions->second : "0";
         }
       }
       else {
