@@ -517,11 +517,12 @@ void mirror_bone_keys(Layer &target, const Layer &source_layer, const Transform2
       continue;
     }
     const Transform2D across = to_pose->setup.inverted() * flip * from_pose->setup;
-    /* A knob's place is in frames of its box, which mirrors with Left and Right swapped (as its spots): through the
-     * bones' setups it would turn over. */
+    /* A knob's box mirrors with Left and Right swapped (as its spots): through the bones' setups it would turn over.
+     * Its keys are distances, its frames times its box's size: the same frames of the other's box. */
     const bool knobs = bone_is_controller(bone) && bone_is_controller(*source);
+    const float sized = knobs ? controller_unit(bone) / controller_unit(*source) : 1.0f;
     mirror_keys(source->position_keys, bone.position_keys, from, to,
-                [&](float2 v) { return knobs ? float2(-v.x, v.y) : across.apply_vector(v); });
+                [&](float2 v) { return knobs ? float2(-v.x, v.y) * sized : across.apply_vector(v); });
     mirror_keys(source->angle_keys, bone.angle_keys, from, to, [](float v) { return -v; });
     mirror_keys(source->scale_keys, bone.scale_keys, from, to, [](float2 v) { return v; });
     mirror_keys(source->depth_keys, bone.depth_keys, from, to, [](float v) { return v; });

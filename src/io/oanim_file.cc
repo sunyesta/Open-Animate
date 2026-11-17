@@ -3,6 +3,7 @@
 #include <numeric>
 #include <execution>
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -1825,9 +1826,103 @@ static void controllers_keys_to_distance(Document &doc)
             }
           }
         }
+        bj["frame_size"] = controller_unit(*b);
       }
     }
     p.pose = pose.dump();
+  }
+  /* Drivers: one reading a knob's place read its frames, and one setting it set frames. Each read is divided back
+   * into frames and what sets one multiplied out to its distance, so they drive as they did. */
+  const auto knob_size = [&](const DriverRef &r) -> float {
+    constexpr const char *HEAD = "bones[\"";
+    if (r.path.rfind(HEAD, 0) != 0) {
+      return 0.0f;
+    }
+    const size_t end = r.path.find("\"]", 8);
+    const Layer *layer = layer_find(doc, r.layer);
+    if (end == std::string::npos || r.path.substr(end + 2) != ".position" || !layer) {
+      return 0.0f;
+    }
+    const Bone *b = bone_find_by_name(*layer, r.path.substr(7, end - 7));
+    return b && bone_is_controller(*b) ? controller_unit(*b) : 0.0f;
+  };
+  const auto number = [](float v) {
+    char text[32];
+    std::snprintf(text, sizeof(text), "%.9g", double(v));
+    return std::string(text);
+  };
+  /* `name` in `expression`, as a whole word, written `with`. */
+  const auto replaced = [](const std::string &expression, const std::string &name, const std::string &with) {
+    const auto word = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+    std::string out;
+    for (size_t i = 0; i < expression.size();) {
+      if (expression.compare(i, name.size(), name) == 0 && (i == 0 || !word(expression[i - 1])) &&
+          (i + name.size() >= expression.size() || !word(expression[i + name.size()])))
+      {
+        out += with;
+        i += name.size();
+      }
+      else {
+        out += expression[i++];
+      }
+    }
+    return out;
+  };
+  for (Driver &d : doc.drivers) {
+    const float target = knob_size(d.target);
+    if (d.two_way) {
+      /* target = target_rest + factor (source - source_rest), each side now its distance. */
+      if (d.vars.size() == 1) {
+        if (const float source = knob_size(d.vars[0].source); source > 0.0f) {
+          d.factor /= source;
+          d.source_rest *= source;
+        }
+      }
+      if (target > 0.0f) {
+        d.factor *= target;
+        d.target_rest *= target;
+      }
+      continue;
+    }
+    bool reads = false;
+    for (const DriverVar &v : d.vars) {
+      reads = reads || knob_size(v.source) > 0.0f;
+    }
+    if (!reads && target <= 0.0f) {
+      continue;
+    }
+    /* What it works out, as an expression of its variables (an average, sum, smallest or largest written out). */
+    std::string expression = d.expression;
+    if (d.type != DriverType::Expression) {
+      std::string list;
+      for (const DriverVar &v : d.vars) {
+        list += (list.empty() ? "" : ", ") + v.name;
+      }
+      std::string sum;
+      for (const DriverVar &v : d.vars) {
+        sum += (sum.empty() ? "" : " + ") + v.name;
+      }
+      expression = d.type == DriverType::Sum       ? sum
+                   : d.type == DriverType::Average ? "(" + sum + ") / " + std::to_string(std::max<size_t>(d.vars.size(), 1))
+                   : d.type == DriverType::Min     ? "min(" + list + ")"
+                                                   : "max(" + list + ")";
+    }
+    for (const DriverVar &v : d.vars) {
+      if (const float source = knob_size(v.source); source > 0.0f) {
+        expression = replaced(expression, v.name, "(" + v.name + " / " + number(source) + ")");
+      }
+    }
+    if (target > 0.0f) {
+      if (d.remap) {
+        d.to_min *= target;
+        d.to_max *= target;
+      }
+      else {
+        expression = "(" + expression + ") * " + number(target);
+      }
+    }
+    d.type = DriverType::Expression;
+    d.expression = expression;
   }
 }
 

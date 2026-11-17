@@ -385,6 +385,15 @@ void keep_layer(Layer &now, const Layer &old)
       }
       bone_of[was->id] = b.id;
       b.position_keys = was->position_keys;
+      if (bone_is_controller(b) && bone_is_controller(*was)) {
+        /* Its keys are distances at the partner's box size: rescaled to this box's, as zooming it does. */
+        const float size = b.controller_frame_size;
+        const float2 position = b.position, transform = b.transform;
+        b.controller_frame_size = was->controller_frame_size;
+        controller_frame_size_set(b, size);
+        b.position = position;
+        b.transform = transform;
+      }
       b.angle_keys = was->angle_keys;
       b.scale_keys = was->scale_keys;
       b.depth_keys = was->depth_keys;

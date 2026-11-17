@@ -133,13 +133,19 @@ json pose_record(Document &doc, const std::vector<Layer *> &rigs, const std::vec
         continue;
       }
       bone_changes_from_values(b);
-      bones.push_back({{"name", b.name},
-                       {"transform", json_of(b.transform - b.position_keys.from_action_bones)},
-                       {"turn", b.turn - b.angle_keys.from_action_bones},
-                       {"scale", json_of(b.scale - b.scale_keys.from_action_bones)},
-                       {"transform_add", json_of(b.position_keys.from_action_bones)},
-                       {"turn_add", b.angle_keys.from_action_bones},
-                       {"scale_add", json_of(b.scale_keys.from_action_bones)}});
+      json bj = {{"name", b.name},
+                 {"transform", json_of(b.transform - b.position_keys.from_action_bones)},
+                 {"turn", b.turn - b.angle_keys.from_action_bones},
+                 {"scale", json_of(b.scale - b.scale_keys.from_action_bones)},
+                 {"transform_add", json_of(b.position_keys.from_action_bones)},
+                 {"turn_add", b.angle_keys.from_action_bones},
+                 {"scale_add", json_of(b.scale_keys.from_action_bones)}};
+      /* A knob's place is a distance, its frames times its box's size: kept with it, so it goes back on the same
+       * frames of a knob whose size is another (its other side's, or its own after the box is zoomed). */
+      if (bone_is_controller(b)) {
+        bj["frame_size"] = controller_unit(b);
+      }
+      bones.push_back(std::move(bj));
     }
     if (!bones.empty()) {
       *r_bones += int(bones.size());
@@ -621,11 +627,14 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
       bone_changes_from_values(*b);
       float2 copied_transform = copied2(*bj, "transform", "transform_add", look);
       float copied_turn = copied1(*bj, "turn", "turn_add", look);
+      if (bone_is_controller(*b) && float_of(*bj, "frame_size") > 0.0f) {
+        copied_transform = copied_transform * (controller_unit(*b) / float_of(*bj, "frame_size"));
+      }
       if (flipped) {
         const Bone *from_bone = bone_named(*rig, bj->value("name", std::string()));
         const BonePose *from = from_bone ? bone_pose_find(setups, from_bone->id) : nullptr;
         const BonePose *to = bone_pose_find(setups, b->id);
-        /* A knob's place is in frames of its box, which mirrors with Left and Right swapped (as Symmetrize's). */
+        /* A knob's box mirrors with Left and Right swapped (as Symmetrize's). */
         if (bone_is_controller(*b) && from_bone && bone_is_controller(*from_bone)) {
           copied_transform.x = -copied_transform.x;
         }

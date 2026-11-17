@@ -157,8 +157,18 @@ static void bone_symmetrize_settings(Document &doc, Layer &armature, const Bone 
   dst.shape_layer = layer_mirror_id(doc, src.shape_layer);
   dst.full_turn = src.full_turn;
   dst.depth = src.depth;
+  /* A knob already there keeps what its keys play (they are distances: rescaled with its box's new size). */
+  const bool was_knob = bone_is_controller(dst);
   dst.type = src.type;
-  dst.controller_frame_size = src.controller_frame_size;
+  if (was_knob && bone_is_controller(dst)) {
+    const float2 position = dst.position, transform = dst.transform;
+    controller_frame_size_set(dst, src.controller_frame_size);
+    dst.position = position;
+    dst.transform = transform;
+  }
+  else {
+    dst.controller_frame_size = src.controller_frame_size;
+  }
   dst.controller_size_auto = src.controller_size_auto;
   dst.controller_box_show = src.controller_box_show;
   dst.controller_contain_knob = src.controller_contain_knob;
@@ -4830,9 +4840,19 @@ void rig_operators_register()
                        existing->length = copy.length;
                        existing->scale = copy.scale;
                        existing->strength = copy.strength;
+                       const bool was_knob = bone_is_controller(*existing);
                        existing->type = copy.type;
                        existing->controller_actions = copy.controller_actions;
-                       existing->controller_frame_size = copy.controller_frame_size;
+                       if (was_knob && bone_is_controller(*existing)) {
+                         /* Its keys play the same frames of the box at its new size (its place as set). */
+                         const float2 position = existing->position, transform = existing->transform;
+                         controller_frame_size_set(*existing, copy.controller_frame_size);
+                         existing->position = position;
+                         existing->transform = transform;
+                       }
+                       else {
+                         existing->controller_frame_size = copy.controller_frame_size;
+                       }
                        existing->controller_size_auto = copy.controller_size_auto;
                        existing->controller_spots = copy.controller_spots;
                        existing->controller_box_show = copy.controller_box_show;

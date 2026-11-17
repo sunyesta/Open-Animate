@@ -96,6 +96,30 @@ PENDING = [
     ("src/anim/animation.cc", "    for (size_t i = 0; i < owner.bone_fixes.size(); i++) {\n      const BoneFix &fix = owner.bone_fixes[i];\n      /* The fix being edited has its keys out in the channels: it is named as it is left. */\n      if (!fix.auto_name || (doc.action == fix.name && doc.action_layer == owner.id)) {\n        continue;\n      }\n      const std::string from = fix.name;\n      const std::string renamed = bone_fix_unique(owner, bone_fix_name(owner, fix), from);\n      if (renamed != from) {\n        count += document_action_rename(doc, owner.id, from, renamed) ? 1 : 0;\n      }\n    }",
      "    std::vector<std::pair<std::string, std::string>> later;\n    for (size_t i = 0; i < owner.bone_fixes.size(); i++) {\n      const BoneFix &fix = owner.bone_fixes[i];\n      /* The fix being edited has its keys out in the channels: it is named as it is left. */\n      if (!fix.auto_name || (doc.action == fix.name && doc.action_layer == owner.id)) {\n        continue;\n      }\n      const std::string from = fix.name;\n      const std::string renamed = bone_fix_unique(owner, bone_fix_name(owner, fix), from);\n      if (renamed != from) {\n        later.push_back({from, renamed});\n      }\n    }\n    for (const auto &[x, y] : later) {\n      count += document_action_rename(doc, owner.id, x, y) ? 1 : 0;\n    }",
      "fixes renamed in turn", "tests/test_bone_fix_names.py"),
+    # Knob keys carried over through their frames.
+    ('src/ops/pose_clipboard.cc',
+     '        bj["frame_size"] = controller_unit(b);',
+     '        (void)b;', "poses keep the knob's frame size", 'tests/test_knob_distance_copies.py'),
+    # Knob keys carried over through their frames.
+    ('src/ops/pose_clipboard.cc',
+     '        copied_transform = copied_transform * (controller_unit(*b) / float_of(*bj, "frame_size"));',
+     '        (void)copied_transform;', "paste through the knob's frames", 'tests/test_knob_distance_copies.py'),
+    # Knob keys carried over through their frames.
+    ('src/anim/action_mirror.cc',
+     '    const float sized = knobs ? controller_unit(bone) / controller_unit(*source) : 1.0f;',
+     '    const float sized = 1.0f;', 'mirrored knob keys sized', 'tests/test_knob_distance_copies.py'),
+    # Knob keys carried over through their frames.
+    ('src/ops/rig_ops.cc',
+     '                       if (was_knob && bone_is_controller(*existing)) {',
+     '                       if (false && was_knob && bone_is_controller(*existing)) {', "symmetrize keeps the partner knob's frames", 'tests/test_knob_distance_copies.py'),
+    # Knob keys carried over through their frames.
+    ('src/anim/symmetrize_keys.cc',
+     '        controller_frame_size_set(b, size);',
+     '        b.controller_frame_size = size;', "keep partner's knob frames", 'tests/test_knob_distance_copies.py'),
+    # Knob keys carried over through their frames.
+    ('src/io/oanim_file.cc',
+     '        expression = replaced(expression, v.name, "(" + v.name + " / " + number(source) + ")");',
+     '        (void)replaced;\n        (void)number;', 'old drivers read knob frames', 'tests/test_knob_distance_copies.py'),
 ]
 
 def build(root):
