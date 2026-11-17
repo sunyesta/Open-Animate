@@ -616,7 +616,25 @@ std::string ipad_brush_preview_json(Context &C, float width, float height)
     const std::vector<BrushImage> *images = nullptr;
     bool own = false;
     if (line_dabs(doc, 0, live, 1.0f, dabs, &images, &own)) {
-      return "{" + dabs_json(dabs, *images, own, identity, nullptr, nullptr) + "}";
+      /* With how the brush lays its stamps, so the page can stamp the tip it draws ahead of the line sent back. */
+      const BrushSettings &brush = ts.style.brush;
+      std::string tip = ",\"tip\":{\"spacing\":";
+      num(tip, std::max(brush.spacing, 0.01f), 4);
+      tip += ",\"angle\":";
+      num(tip, brush.tip_angle, 4);
+      tip += ",\"roundness\":";
+      num(tip, brush.roundness, 4);
+      tip += std::string(",\"align\":") + (brush.align ? "true" : "false") + ",\"flip_x\":" +
+             (brush.flip_x ? "true" : "false") + ",\"flip_y\":" + (brush.flip_y ? "true" : "false") + ",\"aspects\":[";
+      for (size_t i = 0; i < images->size(); i++) {
+        if (i > 0) {
+          tip += ',';
+        }
+        const BrushImage &image = (*images)[i];
+        num(tip, float(image.width) / float(std::max(image.height, 1)), 4);
+      }
+      tip += "]}";
+      return "{" + dabs_json(dabs, *images, own, identity, nullptr, nullptr) + tip + "}";
     }
   }
   std::vector<InkPoint> line = stroke.points();

@@ -181,6 +181,50 @@ function penHalfWidth() {
   return Math.max(px * 0.5, 0.5);
 }
 
+/* A brushed line's tip ([x, y, half width, opacity] in canvas pixels) as stamps of the brush (the brush button's
+ * preview says which images and how they're laid), added to `out` as a line of dabs; false for a plain line. */
+function stampsTip(s, tip, out) {
+  const b = brushPreview;
+  if (!state || state.mode !== 'FREEHAND' || !b || b.kind !== 'dabs' || !b.tip || !b.images.length) return false;
+  const t = b.tip, ids = b.images.map((im) => String(im.id));
+  const c = state.settings.line_color, alpha = c[3];
+  const col = b.own ? [alpha, alpha, alpha, alpha] : [c[0] * alpha, c[1] * alpha, c[2] * alpha, alpha];
+  const dabs = new Map();
+  const u0 = t.flip_x ? 1 : 0, u1 = 1 - u0, v0 = t.flip_y ? 1 : 0, v1 = 1 - v0;
+  /* `since`: how far the line has gone since the last stamp (the line sent back has the ones before the tip). */
+  let k = 0, since = s.n > 0 ? 0 : Infinity;
+  const stamp = (x, y, h, angle) => {
+    const i = k++ % ids.length, aspect = t.aspects[i] > 0 ? t.aspects[i] : 1, size = 2 * h;
+    const hx = aspect >= 1 ? size * 0.5 : size * 0.5 * aspect;
+    const hy = (aspect >= 1 ? size * 0.5 / aspect : size * 0.5) * t.roundness;
+    const ca = Math.cos(angle), sa = Math.sin(angle);
+    const ax = [ca * hx, sa * hx], ay = [-sa * hy, ca * hy];
+    const v = (px, py, u, w) => [px, py, u, w, ...col];
+    const tl = v(x - ax[0] + ay[0], y - ax[1] + ay[1], u0, v0), tr = v(x + ax[0] + ay[0], y + ax[1] + ay[1], u1, v0);
+    const br = v(x + ax[0] - ay[0], y + ax[1] - ay[1], u1, v1), bl = v(x - ax[0] - ay[0], y - ax[1] - ay[1], u0, v1);
+    const list = dabs.get(ids[i]) || [];
+    list.push(...tl, ...tr, ...br, ...tl, ...br, ...bl);
+    dabs.set(ids[i], list);
+  };
+  for (let j = 0; j + 4 <= tip.length; j += 4) {
+    const x = tip[j], y = tip[j + 1], h = tip[j + 2];
+    const nx = j + 8 <= tip.length ? tip[j + 4] : x, ny = j + 8 <= tip.length ? tip[j + 5] : y;
+    const len = Math.hypot(nx - x, ny - y), dir = Math.atan2(ny - y, nx - x);
+    const angle = t.angle + (t.align ? dir : 0);
+    const step = Math.max(t.spacing * 2 * h, 0.5);
+    if (since >= step) { stamp(x, y, h, angle); since = 0; }
+    /* Along the segment to the next sample, a stamp each step. */
+    let last = -since;
+    for (let d = step - since; d < len; d += step) {
+      stamp(x + (nx - x) * d / len, y + (ny - y) * d / len, h, angle);
+      last = d;
+    }
+    since = len - last;
+  }
+  out.push({ dabs, own: b.own });
+  return true;
+}
+
 function redraw() {
   drawQueued = false;
   const dpr = devicePixelRatio || 1;
@@ -204,11 +248,12 @@ function redraw() {
   }
   /* The lines drawn, as Open Animate makes them. */
   for (const s of strokes) if (s.kind === 'line') drawVarLine(ctx, s.pts, s.color, V);
-  drawDabs(dabRenderer, strokes.filter((s) => s.kind === 'dabs'), V, innerWidth, innerHeight);
-  /* What the pen has drawn since: the samples Open Animate hasn't answered yet, at the line's width. */
+  /* What the pen has drawn since: the samples Open Animate hasn't answered yet, at the line's width; a brushed line's
+   * stamped as the brush stamps, so it doesn't show as a plain line until the line comes back. */
   const half = penHalfWidth();
   const usePressure = state && state.settings.use_pressure;
   const minSize = state ? state.settings.min_size : 0;
+  const tipDabs = [];
   for (const s of strokes) {
     if (s.done !== null || s.raw.length === 0) continue;
     const tip = [];
@@ -216,9 +261,11 @@ function redraw() {
       const p = s.raw[i];
       tip.push(p[0], p[1], half * (usePressure ? Math.max(p[2], minSize) : 1), 1);
     }
+    if (!s.erasing && stampsTip(s, tip, tipDabs)) continue;
     const c = state ? (s.erasing ? [0.9, 0.3, 0.3, 0.4] : state.mode === 'FILL_PEN' ? state.settings.fill_color : state.settings.line_color) : [0, 0, 0, 1];
     drawVarLine(ctx, tip, c, V);
   }
+  drawDabs(dabRenderer, strokes.filter((s) => s.kind === 'dabs').concat(tipDabs), V, innerWidth, innerHeight);
   /* The width circle round the hovering Pencil. */
   if (hover && state && state.settings.cursor_circle && !penDown) {
     const r = penHalfWidth() * zoomOf(V);

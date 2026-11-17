@@ -327,6 +327,9 @@ assert of("tiles", got), "the tiles follow the settings"
 doc, _ = fresh()
 preview = of("brush", messages({"t": "brush", "name": "Round"}))[0]["preview"]
 assert preview["kind"] == "dabs" and preview["pngs"], "the brush button's picture, stamped with the brush"
+# With how the brush lays its stamps: the page stamps the tip it draws ahead of the line sent back (app.js stampsTip).
+tip = preview["tip"]
+assert tip["spacing"] == 0.25 and tip["roundness"] == 1 and tip["align"] is False and tip["aspects"] == [1], tip
 got = messages({"t": "down", "zoom": 1, "s": wave()[:20]})
 got += messages({"t": "move", "s": wave()[20:40]})
 dabs = of("live", got)
