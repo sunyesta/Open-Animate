@@ -99,6 +99,15 @@ PENDING = [
     # The action being edited is copied too.
     ('src/anim/animation.cc', '    owner_for_each_channel(source, [&](auto &ch, auto &value) { swap_timeline(ch, value, doc.action, std::string()); });',
      '    (void)0;', 'action being edited is copied too', 'tests/test_bone_duplicate_actions.py'),
+    # Deleting bones deletes their own actions.
+    ('src/ops/rig_ops.cc', '                   document_action_delete(*C.document, owner_id, action);',
+     '                   (void)action;', 'deleting a bone deletes its actions', 'tests/test_bone_own_actions.py'),
+    # A fix following other bones too stays.
+    ('src/ops/rig_ops.cc', '                   if (!fix || std::all_of(fix->follows.begin(), fix->follows.end(), gone)) {',
+     '                   if (true) {', 'fix following others too stays', 'tests/test_bone_own_actions.py'),
+    # A knob's sides follow its rename.
+    ('src/anim/animation.cc', '      document_action_rename(doc, owner_id, action, controller_action_name_free(*owner, to + action.substr(from.size())));',
+     '      (void)action;', "sides follow the knob's rename", 'tests/test_bone_own_actions.py'),
 ]
 
 def build(root):

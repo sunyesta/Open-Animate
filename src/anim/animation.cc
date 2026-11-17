@@ -3397,6 +3397,18 @@ void armature_bone_renamed(Document &doc, uint64_t owner_id, const std::string &
   for (const char *other : {"", " 2"}) {
     document_action_rename(doc, owner_id, from + other, to + other);
   }
+  /* A knob's sides named after it ("Jaw Right") take its new name. */
+  Layer *owner = layer_find(doc, owner_id);
+  const Bone *knob = owner ? bone_find_by_name(*owner, to) : nullptr;
+  if (!knob || !bone_is_controller(*knob)) {
+    return;
+  }
+  const std::array<std::string, CONTROLLER_SIDES> sides = knob->controller_actions;
+  for (const std::string &action : sides) {
+    if (action.size() > from.size() && action.compare(0, from.size() + 1, from + " ") == 0) {
+      document_action_rename(doc, owner_id, action, controller_action_name_free(*owner, to + action.substr(from.size())));
+    }
+  }
 }
 
 /* --- Fix actions that follow bones (BoneFix) ------------------------------------------------------------------ */

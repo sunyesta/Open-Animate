@@ -498,10 +498,75 @@ static void pencil_icon(ImDrawList *dl, ImVec2 center, float size, ImU32 color)
               std::max(1.0f, size * 0.10f));
 }
 
-/* A side of a 2 Axis Controller: its action, a list of the bone layer's (New Action at the bottom), and a button: the
- * pencil opens its action (pressed while it is open; again, back to the mainline), + makes one for an empty side, and
- * Left and Right can be made from each other. Picking an action whose bone has keys where the knob has too asks whose
- * stay. */
+/* A bone's own action in a row (a knob's side, a way a bone turns): its name, and buttons. Empty, + makes one (and M
+ * mirrors the other side's, where `mirror` is given); else the pencil opens it (pressed while it is open; again, back
+ * to the mainline) and x deletes it. Nothing is picked from a list: the action is the bone's alone. */
+static void own_action_row(Context &C, Layer &armature, const std::string &now, const char *field_tip,
+                           const std::function<void()> &add, const char *add_tip, const std::function<void()> &mirror,
+                           const char *mirror_tip)
+{
+  const float h = ImGui::GetFrameHeight();
+  const float spacing = ImGui::GetStyle().ItemSpacing.x;
+  const int buttons = now.empty() ? (mirror ? 2 : 1) : 2;
+  ImGui::SetNextItemWidth(-(h + spacing) * float(buttons));
+  std::string shown = now;
+  ImGui::InputTextWithHint("##action", "None", &shown, ImGuiInputTextFlags_ReadOnly);
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("%s", field_tip);
+  }
+  ImGui::SameLine();
+  if (now.empty()) {
+    if (ImGui::Button("+", ImVec2(h, 0))) {
+      add();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("%s", add_tip);
+    }
+    if (mirror) {
+      ImGui::SameLine();
+      if (ImGui::Button("M", ImVec2(h, 0))) {
+        mirror();
+      }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip("%s", mirror_tip);
+      }
+    }
+    return;
+  }
+  const Document &doc = *C.document;
+  const bool open = doc.action == now && doc.action_layer == armature.id;
+  const ImVec2 at = ImGui::GetCursorScreenPos();
+  if (open) {
+    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  }
+  const bool clicked = ImGui::Button("##edit", ImVec2(h, h));
+  if (open) {
+    ImGui::PopStyleColor();
+  }
+  pencil_icon(ImGui::GetWindowDrawList(), ImVec2(at.x + h * 0.5f, at.y + h * 0.5f), h * 0.5f,
+              ImGui::GetColorU32(ImGuiCol_Text));
+  if (clicked) {
+    operator_call(C, "anim.action_set", {{"layer", std::to_string(armature.id)}, {"name", open ? std::string() : now}});
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    if (open) {
+      ImGui::SetTooltip("Editing %s: click to go back to the mainline", now.c_str());
+    }
+    else {
+      ImGui::SetTooltip("Edit %s", now.c_str());
+    }
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("x##delete", ImVec2(h, h))) {
+    operator_call(C, "anim.action_delete", {{"layer", std::to_string(armature.id)}, {"name", now}});
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("Delete %s and its keys", now.c_str());
+  }
+}
+
+/* A side of a 2 Axis Controller: its own action, made, edited and deleted here (own_action_row); Left and Right can be
+ * made from each other. */
 static void controller_side_row(Context &C, Layer &armature, const Bone &knob, int side)
 {
   const std::string now = knob.controller_actions[side];
@@ -509,85 +574,13 @@ static void controller_side_row(Context &C, Layer &armature, const Bone &knob, i
   ImGui::PushID(id);
   const bool can_mirror = (side == CONTROLLER_LEFT || side == CONTROLLER_RIGHT) && now.empty() &&
                           !knob.controller_actions[controller_side_opposite(side)].empty();
-  const float buttons = ImGui::GetFrameHeight() * (can_mirror ? 2.0f : 1.0f) + ImGui::GetStyle().ItemSpacing.x * (can_mirror ? 2.0f : 1.0f);
-  ImGui::SetNextItemWidth(-buttons);
-  const auto pick = [&](const std::string &action) {
-    operator_call(C, "armature.controller_side", {{"side", id}, {"action", action}});
-  };
-  if (ImGui::BeginCombo("##action", now.empty() ? "None" : now.c_str(), ImGuiComboFlags_HeightLarge)) {
-    if (ImGui::Selectable("None", now.empty())) {
-      pick("");
-    }
-    for (const std::string &action : armature.actions) {
-      if (bone_fix_find(armature, action)) {
-        continue;
-      }
-      /* Another side's, or a bone's own action (it plays as that bone turns). */
-      int in_side = 0;
-      const Bone *in = controller_of_action(armature, action, &in_side);
-      const bool taken = (in && !(in == &knob && in_side == side)) || controller_dial_of_action(armature, action);
-      if (ImGui::Selectable(action.c_str(), action == now, taken ? ImGuiSelectableFlags_Disabled : 0)) {
-        pick(action);
-      }
-    }
-    ImGui::Separator();
-    if (ImGui::Selectable("New Action")) {
-      operator_call(C, "armature.controller_action_new", {{"side", id}});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Make a new action, put it in this side and open it");
-    }
-    ImGui::EndCombo();
-  }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip("The action the knob plays on this side. Its last key is the edge of the box. An action bone action "
-                      "stays its bone's: the bone and the knob are linked, one set of keys");
-  }
-  ImGui::SameLine();
-  if (now.empty()) {
-    if (ImGui::Button("+", ImVec2(ImGui::GetFrameHeight(), 0))) {
-      operator_call(C, "armature.controller_action_new", {{"side", id}});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Make a new action for this side and open it");
-    }
-  }
-  else {
-    const Document &doc = *C.document;
-    const bool open = doc.action == now && doc.action_layer == armature.id;
-    const float h = ImGui::GetFrameHeight();
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    if (open) {
-      ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    }
-    const bool clicked = ImGui::Button("##edit", ImVec2(h, h));
-    if (open) {
-      ImGui::PopStyleColor();
-    }
-    pencil_icon(ImGui::GetWindowDrawList(), ImVec2(at.x + h * 0.5f, at.y + h * 0.5f), h * 0.5f,
-                ImGui::GetColorU32(ImGuiCol_Text));
-    if (clicked) {
-      operator_call(C, "anim.action_set",
-                    {{"layer", std::to_string(armature.id)}, {"name", open ? std::string() : now}});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      if (open) {
-        ImGui::SetTooltip("Editing %s: click to go back to the mainline", now.c_str());
-      }
-      else {
-        ImGui::SetTooltip("Edit %s", now.c_str());
-      }
-    }
-  }
-  if (can_mirror) {
-    ImGui::SameLine();
-    if (ImGui::Button("M", ImVec2(ImGui::GetFrameHeight(), 0))) {
-      operator_call(C, "armature.controller_mirror", {{"side", id}});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Make this side from the other, as a mirrored action");
-    }
-  }
+  own_action_row(
+      C, armature, now, "The action the knob plays on this side. Its last key is the edge of the box",
+      [&] { operator_call(C, "armature.controller_action_new", {{"side", id}}); },
+      "Make a new action for this side and open it",
+      can_mirror ? std::function<void()>([&] { operator_call(C, "armature.controller_mirror", {{"side", id}}); })
+                 : std::function<void()>(),
+      "Make this side from the other, as a mirrored action");
   ImGui::PopID();
 }
 
@@ -1503,90 +1496,23 @@ static void bones_panel(Context &C, Layer &armature)
 
 /* Blender's Bone tab: the active bone's own settings (its name, where it is on the setup frame or how
  * it is posed on others, its IK). */
-/* A way a regular or pin bone turns (slot 0 counterclockwise, 1 clockwise): its action, a list of the bone layer's
- * that can be (New Action at the bottom), and a button: the pencil opens it (pressed while it is open; again, back to
- * the mainline), + makes one; an empty way can be mirrored from the other. */
-static void bone_turn_row(Context &C, Layer &armature, const Bone &bone, const BoneTurnSlots &slots, int slot)
+/* A way a regular or pin bone turns (slot 0 counterclockwise, 1 clockwise): its own action, made, edited and deleted
+ * here (own_action_row); an empty way can be mirrored from the other. */
+static void bone_turn_row(Context &C, Layer &armature, const BoneTurnSlots &slots, int slot)
 {
   const std::string now = slots.action[size_t(slot)];
   const OpArgs::value_type way = {"direction", slot == 0 ? "CCW" : "CW"};
   ImGui::PushID(slot);
   const bool can_mirror = !slots.full_turn && now.empty() && !slots.action[size_t(1 - slot)].empty();
-  const float h = ImGui::GetFrameHeight();
-  const float spacing = ImGui::GetStyle().ItemSpacing.x;
-  ImGui::SetNextItemWidth(-(h + spacing) * (can_mirror ? 2.0f : 1.0f));
-  if (ImGui::BeginCombo("##action", now.empty() ? "None" : now.c_str(), ImGuiComboFlags_HeightLarge)) {
-    if (ImGui::Selectable("None", now.empty())) {
-      operator_call(C, "armature.bone_turn_action", {way, {"action", ""}});
-    }
-    for (const std::string &action : armature.actions) {
-      /* A knob's sides and other bones' actions (or this one's other way) are taken; fixes aren't listed. */
-      const bool taken = action != now && (controller_of_action(armature, action) || controller_dial_of_action(armature, action));
-      if (bone_fix_find(armature, action)) {
-        continue;
-      }
-      if (ImGui::Selectable(action.c_str(), action == now, taken ? ImGuiSelectableFlags_Disabled : 0)) {
-        operator_call(C, "armature.bone_turn_action", {way, {"action", action}});
-      }
-    }
-    ImGui::Separator();
-    if (ImGui::Selectable("New Action")) {
-      operator_call(C, "armature.bone_turn_action_new", {way});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Make a new action turning the bone this way and open it");
-    }
-    ImGui::EndCombo();
-  }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip(slots.full_turn ? "The action the bone plays as it turns round: a whole turn, round and round"
-                                      : "The action the bone plays as it turns this way. Picking one names it after "
-                                        "the bone; None lets go of it, its keys kept");
-  }
-  ImGui::SameLine();
-  if (now.empty()) {
-    if (ImGui::Button("+", ImVec2(h, 0))) {
-      operator_call(C, "armature.bone_turn_action_new", {way});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Make a new action turning the bone this way and open it");
-    }
-  }
-  else {
-    const Document &doc = *C.document;
-    const bool open = doc.action == now && doc.action_layer == armature.id;
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    if (open) {
-      ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    }
-    const bool clicked = ImGui::Button("##edit", ImVec2(h, h));
-    if (open) {
-      ImGui::PopStyleColor();
-    }
-    pencil_icon(ImGui::GetWindowDrawList(), ImVec2(at.x + h * 0.5f, at.y + h * 0.5f), h * 0.5f,
-                ImGui::GetColorU32(ImGuiCol_Text));
-    if (clicked) {
-      operator_call(C, "anim.action_set", {{"layer", std::to_string(armature.id)}, {"name", open ? std::string() : now}});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      if (open) {
-        ImGui::SetTooltip("Editing %s: click to go back to the mainline", now.c_str());
-      }
-      else {
-        ImGui::SetTooltip("Edit %s", now.c_str());
-      }
-    }
-  }
-  if (can_mirror) {
-    ImGui::SameLine();
-    if (ImGui::Button("M", ImVec2(h, 0))) {
-      operator_call(C, "armature.bone_turn_mirror", {way});
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Make this way from the other, as a mirrored action");
-    }
-  }
-  (void)bone;
+  own_action_row(
+      C, armature, now,
+      slots.full_turn ? "The action the bone plays as it turns round: a whole turn, round and round"
+                      : "The action the bone plays as it turns this way",
+      [&] { operator_call(C, "armature.bone_turn_action_new", {way}); },
+      "Make a new action turning the bone this way and open it",
+      can_mirror ? std::function<void()>([&] { operator_call(C, "armature.bone_turn_mirror", {way}); })
+                 : std::function<void()>(),
+      "Make this way from the other, as a mirrored action");
   ImGui::PopID();
 }
 
@@ -1637,7 +1563,7 @@ static void bone_actions_panel(Context &C, Layer &armature)
   }
   for (int slot = 0; slot < (slots.full_turn ? 1 : 2); slot++) {
     label(slots.full_turn ? "Full Turn" : slot == 0 ? "Counterclockwise" : "Clockwise");
-    bone_turn_row(C, armature, *active, slots, slot);
+    bone_turn_row(C, armature, slots, slot);
   }
   ui_panel_end();
 }

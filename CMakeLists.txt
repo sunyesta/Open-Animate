@@ -713,6 +713,8 @@ add_test(NAME bone_duplicate_keys
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_duplicate_keys.py)
 add_test(NAME bone_duplicate_actions
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_duplicate_actions.py)
+add_test(NAME bone_own_actions
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_own_actions.py)
 add_test(NAME clear_sub_group_bones
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_clear_sub_group_bones.py)
 add_test(NAME knob_distance_copies

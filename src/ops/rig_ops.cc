@@ -1435,8 +1435,9 @@ void rig_operators_register()
                });
 
   rig_operator("armature.bone_delete", "Delete Bones",
-               "Delete the selected bones; their children move up to the deleted bone's parent (on frame 0, the "
-               "setup, as every rig change)",
+               "Delete the selected bones, with their own actions (a controller's sides, the actions named after a "
+               "bone that turn it, the fixes following only them); their children move up to the deleted bone's "
+               "parent (on frame 0, the setup, as every rig change)",
                [](Context &C) {
                  /* With no bone picked, X goes on to delete points (of layers marked Editable in Bone
                   * Group). */
@@ -1511,6 +1512,17 @@ void rig_operators_register()
                    b.parent = parent;
                    b.connected = false;
                  }
+                 /* Their own actions go with them: a knob's sides, the actions named after a bone that turn it, and
+                  * the fixes following only bones that go (one following others too follows the rest). */
+                 std::vector<std::string> owned;
+                 for (const std::string &action :
+                      bones_own_actions(armature, std::set<uint64_t>(doomed.begin(), doomed.end())))
+                 {
+                   const BoneFix *fix = bone_fix_find(armature, action);
+                   if (!fix || std::all_of(fix->follows.begin(), fix->follows.end(), gone)) {
+                     owned.push_back(action);
+                   }
+                 }
                  std::erase_if(armature.bones, [&](const Bone &b) { return gone(b.id); });
                  /* Points lose the deleted bones' weights; one that followed only them stays put. */
                  std::vector<Layer *> below;
@@ -1529,6 +1541,10 @@ void rig_operators_register()
                  }
                  if (gone(armature.active_bone)) {
                    armature.active_bone = 0;
+                 }
+                 const uint64_t owner_id = armature.id;
+                 for (const std::string &action : owned) {
+                   document_action_delete(*C.document, owner_id, action);
                  }
                  return OpStatus::Finished;
                });
