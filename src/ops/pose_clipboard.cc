@@ -139,7 +139,11 @@ json pose_record(Document &doc, const std::vector<Layer *> &rigs, const std::vec
                  {"scale", json_of(b.scale - b.scale_keys.from_action_bones)},
                  {"transform_add", json_of(b.position_keys.from_action_bones)},
                  {"turn_add", b.angle_keys.from_action_bones},
-                 {"scale_add", json_of(b.scale_keys.from_action_bones)}};
+                 {"scale_add", json_of(b.scale_keys.from_action_bones)},
+                 /* The setup its change is from: pasted back on its own bone layer's setup frame the pose becomes the
+                  * setup, so a second paste there changes nothing. */
+                 {"setup_position", json_of(b.setup_position)},
+                 {"setup_angle", b.setup_angle}};
       /* A knob's place is a distance, its frames times its box's size: kept with it, so it goes back on the same
        * frames of a knob whose size is another (its other side's, or its own after the box is zoomed). */
       if (bone_is_controller(b)) {
@@ -171,7 +175,8 @@ json pose_record(Document &doc, const std::vector<Layer *> &rigs, const std::vec
                         {"radius", p.radius - p.radius_keys.from_action_bones},
                         {"shown", json_of(skins[i].apply(p.pos))},
                         {"key_add", json_of(p.pos_keys.from_action_bones)},
-                        {"radius_add", p.radius_keys.from_action_bones}});
+                        {"radius_add", p.radius_keys.from_action_bones},
+                        {"setup", json_of(p.setup_pos)}});
     }
     for (size_t c = 0; c < d.curves.size(); c++) {
       for (size_t j = 0; j < d.curves[c].points.size(); j++) {
@@ -200,6 +205,8 @@ json pose_record(Document &doc, const std::vector<Layer *> &rigs, const std::vec
           h["out"] = json_of(cp.change_out - cp.handle_out_keys.from_action_bones);
           h["in_add"] = json_of(cp.handle_in_keys.from_action_bones);
           h["out_add"] = json_of(cp.handle_out_keys.from_action_bones);
+          h["setup_in"] = json_of(cp.setup_in);
+          h["setup_out"] = json_of(cp.setup_out);
           h["in_shown"] = json_of(skin.apply_vector(cp.handle_in));
           h["out_shown"] = json_of(skin.apply_vector(cp.handle_out));
         }
@@ -585,6 +592,10 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
     }
     return l;
   };
+  /* On its own layer's setup frame the copied pose becomes the setup: its changes from the setup they were copied
+   * from (so a second paste there changes nothing; Paste Keys does the same). */
+  const bool own_setup = options.setup_frame && doc.frame_current == 0 && !flipped;
+  const auto own = [&](const Layer &l, const json &lj) { return own_setup && l.id == lj.value("id", uint64_t(0)); };
   const auto was_drawing = [&](const Layer &l) -> const VectorDrawing & {
     const VectorDrawing &d = was_layer(l).drawing;
     return d.points.size() == l.drawing.points.size() && d.curves.size() == l.drawing.curves.size() ? d : l.drawing;
@@ -689,7 +700,15 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
       float2 transform = copied_transform + added_here(b->position_keys, look);
       float turn = copied_turn + added_here(b->angle_keys, look);
       /* Against the setup as it was (its change put on once), worked into the setup as it is now. */
-      if (const Bone *was = bone_find(rig_was, b->id); was && was != b) {
+      const Bone *was = bone_find(rig_was, b->id);
+      Bone copied_setup;
+      if (own(*rig, *o.copied) && bj->contains("setup_angle")) {
+        copied_setup = *b;
+        copied_setup.setup_position = float2_of((*bj)["setup_position"]);
+        copied_setup.setup_angle = float_of(*bj, "setup_angle");
+        was = &copied_setup;
+      }
+      if (was && was != b) {
         transform = bone_transform_from_position(*b, bone_position_from_transform(*was, transform));
         turn += was->setup_angle - b->setup_angle;
       }
@@ -733,7 +752,10 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
        * its skin it came out a hair off, and recording took the hair for an edit (keys on what never moved). */
       const float2 pos = ignore && invertible(skin) ?
                              (distance(skin.apply(p.pos), shown) < SAME_PLACE_HAIR ? p.pos : skin.inverted().apply(shown)) :
-                             was_drawing(*t.layer).points[m->second].setup_pos + key + added_here(p.pos_keys, look);
+                             (own(*t.layer, *t.copied) && pj.contains("setup") ?
+                                  float2_of(pj["setup"]) :
+                                  was_drawing(*t.layer).points[m->second].setup_pos) +
+                                 key + added_here(p.pos_keys, look);
       placed.push_back({t.layer, m->second, pos});
       const float radius = copied1(pj, "radius", "radius_add", look) + added_here(p.radius_keys, look);
       p.radius = p.radius + (radius - p.radius) * factor;
@@ -767,7 +789,10 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
         }
         else {
           const Channel<float2> &ch = in ? cp.handle_in_keys : cp.handle_out_keys;
-          handle = handle_from_change(in ? cp_was.setup_in : cp_was.setup_out,
+          const char *setup_key = in ? "setup_in" : "setup_out";
+          handle = handle_from_change(own(*t.layer, *t.copied) && cj.contains(setup_key) ? float2_of(cj[setup_key]) :
+                                      in                                                  ? cp_was.setup_in :
+                                                                                            cp_was.setup_out,
                                       copied2(cj, in ? "in" : "out", in ? "in_add" : "out_add", look) + added_here(ch, look),
                                       in);
         }

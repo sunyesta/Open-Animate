@@ -247,7 +247,12 @@ not a bug, check the times against the shutdown before shrinking.
   skip a reference without Edit Points and return CANCELLED with no undo step: its edit is put back on the next
   capture, so it looks done and isn't. Check it after every point op that ran with a reference picked.
 - **A paste on the setup frame pastes changes.** Keys hold changes from the setup, so pasting them onto frame 0 moves
-  the setup and every later key with it: paste twice and the second press must change nothing.
+  the setup and every later key with it: paste twice and the second press must change nothing. The same for Paste
+  Pose there, and for any operator with two passes on frame 0 (Same Look's): the first pass's recording moves the setup,
+  so the second must work against the setup as it was, or the change goes on twice.
+- **A point that won't land may be squashed flat by the rig.** Before blaming a move, set a stored point by hand on
+  that pose and read what shows: on the practice character, with Bone.001's knob in "Up and Right", the brow's Mesh
+  Deform squashes Brow_Mask_R so a stored move of 0.1 shows 0.006, and no move can put its points where it's told.
 - **An operator ignores a setting it doesn't read.** Dyntopo's refine= became decimate= (off by default), and the
   fuzzer kept sending refine=: its "Collapse" strokes only added points, then were checked against strokes without
   Dyntopo (seed 33's Twist "0.018 off"). When a check fails on a setting, first see that the operator reads it

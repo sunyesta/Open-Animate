@@ -2,7 +2,8 @@
 setup once (their second pass, after the first was recorded into the setup, put it on again); Paste Pose Flipped as
 Same Look or Same Place onto points on frame 0 pastes (its second pass found no mirror images in the moved setup and
 returned CANCELLED over a changed file); On Selected Only counts the selection across the bone layer and its sub bone
-groups (an unselected bone in a sub bone group was pasted).
+groups (an unselected bone in a sub bone group was pasted); pasted again on frame 0 a pose changes nothing (each press
+put the copied change on the setup again).
 
 Run with:  OpenAnimate --background --python tests/test_pose_paste_setup.py
 """
@@ -140,5 +141,43 @@ for name, run in (("paste", lambda: ops.pose.paste(selected_mask="1")),
         assert abs(bone(rig_id, "Leg")["angle"] - was_leg) < 1e-6, (name, "Leg left alone")
         ops.ed.undo()
 print("SECTION 3 PASS")
+
+# --- Pasted twice on frame 0: the second press changes nothing ---------------------------------------------------------
+for as_ in ("KEYS", "LOOK", "PLACE"):
+    doc, layers = fresh()
+    assert ops.layer.new_bone() == {'FINISHED'}
+    rig = layers.active
+    assert ops.armature.bone_add(name="Arm", head_x="1", head_y="0.5", tail_x="1.6", tail_y="1.3", parent="") ==         {'FINISHED'}
+    assert ops.layer.new() == {'FINISHED'}
+    art = layers.active
+    assert ops.layer.move_to_group(group=str(rig.id)) == {'FINISHED'}
+    art.add_curve([(-0.3, 1.5), (0.0, 1.8), (0.3, 1.5)])
+    doc.frame_current = 1
+    doc.frame_current = 0
+    doc.auto_key = True
+    arm = lambda: next(b for b in rig.bones if b["name"] == "Arm")
+    setup = (arm()["setup_angle"], arm()["position"])
+    doc.frame_current = 10
+    rig.bone_set("Arm", angle=setup[0] + 0.3, position=(setup[1][0] + 0.2, setup[1][1]))
+    art.set_point(1, (0.1, 1.9))
+    doc.frame_current = 11
+    doc.frame_current = 10
+    layers.active = rig
+    ops.armature.select_none()
+    rig.select_bone("Arm")
+    art.selected = True  # the drawing picked beside the bone layer, so its points are copied with the bones
+    art.select_points(range(3))
+    assert ops.pose.copy() == {'FINISHED'}
+    doc.frame_current = 0
+    assert ops.pose.paste(paste_as=as_, keep_poses="0") == {'FINISHED'}
+    once = (arm()["setup_angle"], arm()["position"], [tuple(p[:2]) for p in art.points])
+    assert abs(once[0] - setup[0] - 0.3) < 1e-4, (as_, once[0], setup[0])
+    assert abs(once[2][1][0] - 0.1) < 1e-4 and abs(once[2][1][1] - 1.9) < 1e-4, (as_, once[2])
+    assert ops.pose.paste(paste_as=as_, keep_poses="0") == {'FINISHED'}
+    twice = (arm()["setup_angle"], arm()["position"], [tuple(p[:2]) for p in art.points])
+    assert abs(twice[0] - once[0]) < 1e-5, (as_, "the setup turned again", once[0], twice[0])
+    assert all(abs(a - b) < 1e-5 for a, b in zip(twice[1], once[1])), (as_, "the setup moved again", once[1], twice[1])
+    assert all(abs(a - b) < 1e-5 for p, q in zip(twice[2], once[2]) for a, b in zip(p, q)),         (as_, "the points moved again", once[2], twice[2])
+print("SECTION 4 PASS")
 
 print("pose paste setup ok")
