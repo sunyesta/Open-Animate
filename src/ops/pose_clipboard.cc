@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include "anim/animation.hh"
+#include "anim/bone_family.hh"
 #include "anim/controller.hh"
 #include "anim/deform.hh"
 #include "core/log.hh"
@@ -85,6 +86,12 @@ Layer *pose_rig(Context &C)
   return active && active->is_bone_layer() ? active : nullptr;
 }
 
+std::vector<Layer *> pose_rigs(Context &C)
+{
+  Layer *rig = pose_rig(C);
+  return rig ? armature_family(*C.document, rig->id) : std::vector<Layer *>();
+}
+
 static Bone *bone_named(Layer &rig, const std::string &name)
 {
   for (Bone &b : rig.bones) {
@@ -98,7 +105,7 @@ static Bone *bone_named(Layer &rig, const std::string &name)
 /* What Ctrl C finds to copy: the selected bones and points (a detail point follows its parent, so goes with it). */
 bool pose_anything_selected(Context &C)
 {
-  if (const Layer *rig = pose_rig(C)) {
+  for (const Layer *rig : pose_rigs(C)) {
     if (std::any_of(rig->bones.begin(), rig->bones.end(), [](const Bone &b) { return b.selected; })) {
       return true;
     }
@@ -113,11 +120,12 @@ bool pose_anything_selected(Context &C)
   return false;
 }
 
-json pose_record(Document &doc, Layer *rig, const std::vector<Layer *> &drawings, int *r_bones, int *r_points)
+json pose_record(Document &doc, const std::vector<Layer *> &rigs, const std::vector<Layer *> &drawings, int *r_bones,
+                 int *r_points)
 {
   json layers = json::array();
   *r_bones = *r_points = 0;
-  if (rig) {
+  for (Layer *rig : rigs) {
     json bones = json::array();
     for (Bone b : rig->bones) {
       if (!b.selected) {
@@ -133,7 +141,7 @@ json pose_record(Document &doc, Layer *rig, const std::vector<Layer *> &drawings
                        {"scale_add", json_of(b.scale_keys.from_action_bones)}});
     }
     if (!bones.empty()) {
-      *r_bones = int(bones.size());
+      *r_bones += int(bones.size());
       layers.push_back({{"id", rig->id}, {"name", rig->name}, {"bones", std::move(bones)}});
     }
   }
@@ -205,7 +213,7 @@ json pose_record(Document &doc, Layer *rig, const std::vector<Layer *> &drawings
 
 json pose_copy_json(Context &C, int *r_bones, int *r_points)
 {
-  return pose_record(*C.document, pose_rig(C), pose_drawings(C), r_bones, r_points);
+  return pose_record(*C.document, pose_rigs(C), pose_drawings(C), r_bones, r_points);
 }
 
 /* Every drawing a pose kept in the file can go back on, being edited or not. */
@@ -410,11 +418,23 @@ static std::vector<PoseTarget> pose_targets(Document &doc, const std::vector<Lay
   return targets;
 }
 
-/* The bone layer a copied one's bones paste onto: the active one (a bone layer); `anywhere`, the one it was copied from
- * (by id, else name). */
+/* The bone layer a copied one's bones paste onto: among the active one and its sub bone groups the one copied from (by
+ * id, else name), else the active one (a pose copied from another character); `anywhere`, the one it was copied from
+ * found anywhere (by id, else name). */
 static Layer *pose_rig_for(Context &C, const json &lj, bool anywhere)
 {
   Layer *active_rig = pose_rig(C);
+  if (!anywhere && active_rig) {
+    const std::vector<Layer *> family = pose_rigs(C);
+    const auto same = [&](auto pred) { return std::find_if(family.begin(), family.end(), pred); };
+    auto it = same([&](const Layer *l) { return l->id == lj.value("id", uint64_t(0)); });
+    if (it == family.end()) {
+      it = same([&](const Layer *l) { return l->name == lj.value("name", std::string()); });
+    }
+    if (it != family.end()) {
+      active_rig = *it;
+    }
+  }
   if (anywhere) {
     Document &doc = *C.document;
     Layer *by_id = layer_find(doc, lj.value("id", uint64_t(0)));

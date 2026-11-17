@@ -59,6 +59,10 @@ PENDING = [
     # A name taken in the same collection gets a number.
     ("src/ops/pose_library.cc", "  if (!taken(name)) {\n    return name;", "  if (true || !taken(name)) {\n    return name;",
      "unique pose names", "tests/test_pose_library.py"),
+    # A pose takes the selected bones of the active bone layer's sub bone groups too (the teeth in a mouth).
+    ("src/ops/pose_clipboard.cc", "  return rig ? armature_family(*C.document, rig->id) : std::vector<Layer *>();",
+     "  return rig ? std::vector<Layer *>{rig} : std::vector<Layer *>();", "poses take sub bone groups' bones",
+     "tests/test_pose_library.py"),
 ]
 
 def build(root):

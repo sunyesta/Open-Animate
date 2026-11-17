@@ -301,3 +301,74 @@ assert ops.poselib.pose_new(name="Late", collection="Legs") == {'FINISHED'}
 assert len({p["id"] for p in poses()}) == len(poses())
 
 print("pose library OK")
+
+
+# --- A sub bone group's bones, selected with the bone layer around it, go in the pose (the teeth's bones in the mouth
+# group were left out: Save Pose and Copy Pose took the active bone layer's alone) ---------------------------------------
+def sub_group():
+    """scene(), with a sub bone group Mouth inside the bone layer holding Jaw; frame 10 the jaw open, 20 shut."""
+    global mouth_id
+    scene()
+    at(0)
+    layers.active = rig()
+    assert ops.layer.new_bone() == {'FINISHED'}
+    mouth_id = layers.active.id
+    mouth().name = "Mouth"
+    assert ops.layer.move_to_group(group=str(rig_id)) == {'FINISHED'}
+    layers.active = mouth()
+    assert ops.armature.bone_add(name="Jaw", head_x="0", head_y="-0.5", tail_x="0", tail_y="-0.8", parent="") == {'FINISHED'}
+    mouth().sub_bone_group = True
+    ops.armature.select_none()
+    at(10)
+    mouth().bone_set("Jaw", angle=jaw()["setup_angle"] + 0.5)
+    at(20)
+    mouth().bone_set("Jaw", angle=jaw()["setup_angle"] - 0.2)
+    at(10)
+    layers.active = art()
+    assert ops.object.modifier_add(type="RESAMPLE") == {'FINISHED'}
+    assert ops.object.modifier_remove(index="0") == {'FINISHED'}
+
+
+def mouth():
+    return next(l for l in layers.all() if l.id == mouth_id)
+
+
+def jaw():
+    return next(b for b in mouth().bones if b["name"] == "Jaw")
+
+
+sub_group()
+jaw10 = jaw()["angle"]
+select_bones("Arm_L")
+mouth().select_bone("Jaw", extend=True)
+assert ops.poselib.pose_new(name="Talk", new_collection="Face") == {'FINISHED'}
+assert sorted(pose("Talk")["bones"]) == ["Arm_L", "Jaw"], pose("Talk")
+assert jaw()["collections"] == ["Face"], "the sub group's selected bone is put in the new collection too"
+select_nothing()
+mouth().select_bone("Jaw")
+layers.active = rig()
+assert [name for name, _ in rows()] == ["Face"], rows()
+at(20)
+select_nothing()
+assert not close(jaw()["angle"], jaw10)
+assert ops.poselib.apply(pose=str(pose("Talk")["id"])) == {'FINISHED'}
+assert close(jaw()["angle"], jaw10) and close(bone("Arm_L")["angle"], arm10), (jaw()["angle"], jaw10)
+at(20)
+assert close(jaw()["angle"], jaw10), "keyed"
+undo_op("Apply Pose")
+# Ctrl C and Ctrl V take them too.
+at(10)
+select_bones("Arm_L")
+mouth().select_bone("Jaw", extend=True)
+assert ops.pose.copy() == {'FINISHED'}
+at(20)
+assert ops.pose.paste() == {'FINISHED'}
+assert close(jaw()["angle"], jaw10), (jaw()["angle"], jaw10)
+undo_op("Paste Pose")
+# Selected alone, with the bone layer around it active.
+at(10)
+select_nothing()
+mouth().select_bone("Jaw")
+layers.active = rig()
+assert ops.poselib.pose_new(name="Jaw Only", collection="Face") == {'FINISHED'}
+assert pose("Jaw Only")["bones"] == ["Jaw"], pose("Jaw Only")

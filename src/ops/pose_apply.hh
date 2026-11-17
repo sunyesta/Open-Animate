@@ -41,17 +41,19 @@ struct PoseApplyOptions {
   std::vector<std::pair<uint64_t, size_t>> *r_points = nullptr;
 };
 
-/* The bone layer whose selected bones Copy Pose takes (the active layer, a bone layer), and the drawings whose
- * selected points it takes (those being edited). */
+/* The bone layer active (or null), and the bone layers whose selected bones Copy Pose takes: it and those worked in
+ * together with it (its sub bone groups, whose bones are clicked with its own: the teeth's in a mouth), and the
+ * drawings whose selected points it takes (those being edited). */
 Layer *pose_rig(Context &C);
+std::vector<Layer *> pose_rigs(Context &C);
 std::vector<Layer *> pose_drawings(Context &C);
-/* Whether anything Copy Pose takes is selected: bones of the active bone layer, points of the drawings being edited. */
+/* Whether anything Copy Pose takes is selected: bones of pose_rigs(), points of the drawings being edited. */
 bool pose_anything_selected(Context &C);
 /* The selected bones' and points' pose on the frame shown (Copy Pose's record). */
 nlohmann::ordered_json pose_copy_json(Context &C, int *r_bones, int *r_points);
-/* The same for bone layer `rig` (or none) and `drawings`, their selected bones and points. */
-nlohmann::ordered_json pose_record(Document &doc, Layer *rig, const std::vector<Layer *> &drawings, int *r_bones,
-                                   int *r_points);
+/* The same for bone layers `rigs` and `drawings`, their selected bones and points. */
+nlohmann::ordered_json pose_record(Document &doc, const std::vector<Layer *> &rigs, const std::vector<Layer *> &drawings,
+                                   int *r_bones, int *r_points);
 /* Puts a recorded pose back on the frame shown (flipped: mirrored left to right). Cancelled on frame 0, or when none of
  * its bones and points is here. */
 OpStatus pose_apply(Context &C, const nlohmann::ordered_json &pose, bool flipped, const PoseApplyOptions &options);

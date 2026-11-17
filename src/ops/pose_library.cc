@@ -61,14 +61,14 @@ std::string lower(std::string s)
   return s;
 }
 
-/* What saving a pose takes, as Copy Pose: the bone layer's selected bones, and the drawings with points selected. */
-void selection(Context &C, Layer **r_rig, std::vector<Bone *> &r_bones, std::vector<Layer *> &r_drawings)
+/* What saving a pose takes, as Copy Pose: the selected bones of the bone layer and its sub bone groups (each with its
+ * bone layer), and the drawings with points selected. */
+void selection(Context &C, std::vector<std::pair<Layer *, Bone *>> &r_bones, std::vector<Layer *> &r_drawings)
 {
-  *r_rig = pose_rig(C);
-  if (*r_rig) {
-    for (Bone &b : (*r_rig)->bones) {
+  for (Layer *rig : pose_rigs(C)) {
+    for (Bone &b : rig->bones) {
       if (b.selected) {
-        r_bones.push_back(&b);
+        r_bones.push_back({rig, &b});
       }
     }
   }
@@ -175,8 +175,14 @@ json pose_flipped_record(const Document &doc, const json &pose, int *r_bones, in
     return json();
   }
   /* Selected there: just what it posed. */
-  Layer *rig = bones.empty() ? nullptr : layer_find(copy, bones.front().first);
-  if (rig) {
+  std::vector<Layer *> rigs;
+  for (const auto &[layer, bone] : bones) {
+    Layer *rig = layer_find(copy, layer);
+    if (std::find(rigs.begin(), rigs.end(), rig) == rigs.end()) {
+      rigs.push_back(rig);
+    }
+  }
+  for (Layer *rig : rigs) {
     for (Bone &b : rig->bones) {
       b.selected = std::find(bones.begin(), bones.end(), std::pair{rig->id, b.id}) != bones.end();
     }
@@ -194,7 +200,7 @@ json pose_flipped_record(const Document &doc, const json &pose, int *r_bones, in
   for (const auto &[layer, i] : points) {
     layer_find(copy, layer)->drawing.points[i].selected = true;
   }
-  return pose_record(copy, rig, drawings, r_bones, r_points);
+  return pose_record(copy, rigs, drawings, r_bones, r_points);
 }
 
 /* Registers an undoable poselib operator. */
@@ -230,12 +236,11 @@ std::vector<uint64_t> pose_selection_collections(Context &C)
   if (!C.document) {
     return out;
   }
-  Layer *rig = nullptr;
-  std::vector<Bone *> bones;
+  std::vector<std::pair<Layer *, Bone *>> bones;
   std::vector<Layer *> drawings;
-  selection(C, &rig, bones, drawings);
+  selection(C, bones, drawings);
   std::set<uint64_t> held;
-  for (const Bone *b : bones) {
+  for (const auto &[rig, b] : bones) {
     held.insert(b->collections.begin(), b->collections.end());
   }
   for (const Layer *l : drawings) {
@@ -456,15 +461,12 @@ void pose_library_operators_register()
           collection = collection_new(doc, text).id;
           /* The selection put in it, so the pose shows while any of it is selected; on the panel of the bone layer
            * it is in. */
-          Layer *rig = nullptr;
-          std::vector<Bone *> picked_bones;
+          std::vector<std::pair<Layer *, Bone *>> picked_bones;
           std::vector<Layer *> picked_drawings;
-          selection(C, &rig, picked_bones, picked_drawings);
-          for (Bone *b : picked_bones) {
-            b->collections.push_back(collection);
-          }
+          selection(C, picked_bones, picked_drawings);
           std::set<uint64_t> panels;
-          if (rig && !picked_bones.empty()) {
+          for (auto &[rig, b] : picked_bones) {
+            b->collections.push_back(collection);
             panels.insert(rig->id);
           }
           for (Layer *d : picked_drawings) {
