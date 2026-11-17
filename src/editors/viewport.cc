@@ -11976,6 +11976,17 @@ static void points_with_bones_apply(Context &C, const ModalTransform &before, ch
   now.about_points = false;
   ModalLayers layers;
   if (modal_layers(C, now, layers)) {
+    /* A handle coming with its point is changed by as much as it is to show differently from its point than it did
+     * (modal_place): that "did" is where it showed before the bones moved, undone through the bones as they were then,
+     * not as they are now (through the bones turned, each turn grew the handles: 1.24 times for 30 degrees). */
+    for (size_t i = 0; i < now.items.size(); i++) {
+      ModalTransform::Item &item = now.items[i];
+      if (item.curve < 0 || item.direct) {
+        continue;
+      }
+      const float2 showed = layers[item.layer].second.apply_vector(item.start - item.origin);
+      item.stored_from += item.unskin.apply_vector(showed) - before.items[i].unskin.apply_vector(showed);
+    }
     modal_apply(C, now, layers, kind, delta, angle, float2(factor, factor));
   }
 }

@@ -1,6 +1,7 @@
 """G, R and S with bones and points picked together (A on a bone layer picks the points of the drawings edited with
 its bones too) move them all: each picked point lands as far from where it showed as the move takes it, once, whether
-the bones bend it or not (only the bones moved, and the points the bones don't bend stayed behind).
+the bones bend it or not (only the bones moved, and the points the bones don't bend stayed behind); their handles turn
+and scale with them, as long as they were (each R through a turned bone grew them: 1.24 times for 30 degrees).
 
 Run with:  OpenAnimate --background --python tests/test_move_bones_and_points.py
 """
@@ -105,5 +106,44 @@ for frame in (10, 0):
     assert oanim.ops.armature.translate(move_x="0.3", move_y="0.1", posing=posing) == {'FINISHED'}
     assert all(close(a, b) for a, b in zip(shown(mark), mark_before)), "an unpicked mark stays"
     oanim.ops.ed.undo()
+
+# --- The handles of points bent by a turning bone: turned with them, as long as they were -----------------------------
+doc.frame_current = 0
+jaw_rig = oanim.ops.layer.new_bone() and layers.active
+assert oanim.ops.armature.bone_add(name="Jaw", head_x="3", head_y="0", tail_x="3", tail_y="-1", parent="") ==     {'FINISHED'}
+oanim.ops.layer.new()
+lip = layers.active
+assert oanim.ops.layer.move_to_group(group=str(jaw_rig.id)) == {'FINISHED'}
+lip = fresh(lip)
+lip.add_curve([(3.3, 0.0), (3.0, 0.1), (2.7, 0.0), (3.0, -0.1)])
+lip.edit_with_bones = True
+layers.active = lip
+assert oanim.ops.layer.parent_bone_set(bone="Jaw", deform="POINTS") == {'FINISHED'}
+doc.auto_key = True
+doc.frame_current = 10
+layers.active = jaw_rig
+oanim.ops.armature.select_none()
+jaw_rig.select_bone("Jaw")
+lip.selected = True
+lip.select_points(range(4))
+layers.active = jaw_rig
+
+
+def handles():
+    """Each handle's end from its point, as they show."""
+    pts, curves = lip.shown()
+    return [(c[1][0] - pts[c[0]][0], c[1][1] - pts[c[0]][1], c[2][0] - pts[c[0]][0], c[2][1] - pts[c[0]][1])
+            for c in curves[0][0]]
+
+
+was = handles()
+assert sum(math.hypot(h[0], h[1]) > 1e-3 for h in was) >= 2, was
+for turn in (1, 2, 3):
+    assert oanim.ops.armature.rotate(angle="30", posing="1") == {'FINISHED'}
+    want = [turned(h[:2], 30 * turn) + turned(h[2:], 30 * turn) for h in was]
+    assert all(close(a, b) for a, b in zip(handles(), want)), (turn, handles(), want)
+turned_handles = handles()
+assert oanim.ops.armature.resize(scale="1.5", posing="1") == {'FINISHED'}
+assert all(close(a, tuple(v * 1.5 for v in b)) for a, b in zip(handles(), turned_handles)),     ("scaled with them", handles(), turned_handles)
 
 print("ok")

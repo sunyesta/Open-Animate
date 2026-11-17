@@ -35,6 +35,10 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    # Bones and points turned together: handles measured from where they showed through the bones as they were.
+    ("src/editors/viewport.cc",
+     "      item.stored_from += item.unskin.apply_vector(showed) - before.items[i].unskin.apply_vector(showed);",
+     "      (void)showed;", "handles turn with bones and points", "tests/test_move_bones_and_points.py"),
     # The shelf's Poses: a selected collection with no poses is no row.
     ("src/ops/pose_library.cc", "      if (!row.poses.empty()) {", "      if (true || !row.poses.empty()) {",
      "no row for a selected tag without poses", "tests/test_pose_library.py"),
