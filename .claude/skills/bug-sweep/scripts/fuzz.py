@@ -864,7 +864,8 @@ def mp_where(op, label):
     return None
 
 
-UNKEYED = [False]   # edits made with auto-key off since the frame last changed (the next frame change drops them)
+UNKEYED = [False]   # edits made with auto-key off since the file was last reopened (a frame change may drop them: not
+#                     the next one inside an action, as seed 103 found)
 
 
 def apply_mpath(op):
@@ -1832,9 +1833,7 @@ def main():
                 raise Failure(f"exception: {op['op']} raised {type(e).__name__}: {e}\n{traceback.format_exc()}")
             if r != "skip":
                 check_op(op, r, before, step_before, frame_before)
-                if doc.frame_current != frame_before:
-                    UNKEYED[0] = False
-                elif not doc.auto_key and op["op"] != "auto_key":
+                if not doc.auto_key and op["op"] != "auto_key":
                     UNKEYED[0] = True
                 kind = TABLE[op["op"]][1]
                 if kind == "op" and active_step() != step_before:
