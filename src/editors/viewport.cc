@@ -14361,13 +14361,30 @@ static OpStatus points_transform_exec(Context &C, char kind)
   return OpStatus::Finished;
 }
 
+/* The bone layers Alt G, R and S clear: the active one and the sub bone groups inside it (as G, R and S move them: the
+ * teeth's bones picked in a mouth group too), each with bones picked. */
+static std::vector<Layer *> bones_clearing(Document &doc, const Layer &armature)
+{
+  std::vector<Layer *> clearing;
+  for (Layer *l : armature_and_inside(doc, armature.id)) {
+    if (armature_any_picked(*l)) {
+      clearing.push_back(l);
+    }
+  }
+  return clearing;
+}
+
 /* Alt G, R, S on bones: the pose cleared, `amount` of the way, with Move Only Bones and Move Without
  * Children as the moves have them (kept for later moves, until the frame or action changes). */
 static OpStatus bones_clear_exec(Context &C, int kind)
 {
   Document &doc = *C.document;
-  Layer *armature = document_active_layer(doc);
-  if (!armature || !armature->is_bone_layer() || !armature_any_picked(*armature)) {
+  Layer *active = document_active_layer(doc);
+  if (!active || !active->is_bone_layer()) {
+    return OpStatus::Cancelled;
+  }
+  const std::vector<Layer *> clearing = bones_clearing(doc, *active);
+  if (clearing.empty()) {
     return OpStatus::Cancelled;
   }
   const auto option = [&](const char *name, StickyOption &sticky) {
@@ -14382,39 +14399,51 @@ static OpStatus bones_clear_exec(Context &C, int kind)
   const bool without_children = option("without_children", g_move_without_children);
   const float amount = std::clamp(op_arg_float(C, "amount", 1.0f), 0.0f, 1.0f);
   const bool along_x = op_arg(C, "x", "1") == "1", along_y = op_arg(C, "y", "1") == "1";
-  BoneCounter counter;
-  if (only_bones) {
-    counter = bone_counter_capture(doc, armature->id);
+  /* What Only Bones keeps still, taken before any bone layer is cleared (a sub group's drawings hang from both). */
+  std::vector<BoneCounter> counters;
+  for (Layer *armature : clearing) {
+    if (only_bones) {
+      counters.push_back(bone_counter_capture(doc, armature->id));
+    }
   }
-  const std::vector<Bone> start = armature->bones;
-  if (!armature_clear_pose(*armature, kind == 0, kind == 1, kind == 2)) {
+  bool any = false;
+  for (Layer *armature : clearing) {
+    const std::vector<Bone> start = armature->bones;
+    if (!armature_clear_pose(*armature, kind == 0, kind == 1, kind == 2)) {
+      continue;
+    }
+    any = true;
+    /* Part of the way, and only along the axes asked for: the location along the bone's rest axes (its
+     * Transform), as the Bone panel shows it. */
+    for (size_t i = 0; i < armature->bones.size(); i++) {
+      Bone &b = armature->bones[i];
+      const Bone &was = start[i];
+      if (kind == 0) {
+        const float2 from = bone_transform_from_position(was, was.position);
+        const float2 to = bone_transform_from_position(b, b.position);
+        const float2 t(along_x ? from.x + (to.x - from.x) * amount : from.x,
+                       along_y ? from.y + (to.y - from.y) * amount : from.y);
+        b.position = bone_position_from_transform(b, t);
+      }
+      else if (kind == 1) {
+        b.angle = was.angle + (b.angle - was.angle) * amount;
+      }
+      else {
+        b.scale = was.scale + (b.scale - was.scale) * amount;
+      }
+    }
+    if (without_children) {
+      armature_keep_children(*armature, start, false);
+    }
+  }
+  if (!any) {
     return OpStatus::Cancelled;
   }
-  /* Part of the way, and only along the axes asked for: the location along the bone's rest axes (its
-   * Transform), as the Bone panel shows it. */
-  for (size_t i = 0; i < armature->bones.size(); i++) {
-    Bone &b = armature->bones[i];
-    const Bone &was = start[i];
-    if (kind == 0) {
-      const float2 from = bone_transform_from_position(was, was.position);
-      const float2 to = bone_transform_from_position(b, b.position);
-      const float2 t(along_x ? from.x + (to.x - from.x) * amount : from.x,
-                     along_y ? from.y + (to.y - from.y) * amount : from.y);
-      b.position = bone_position_from_transform(b, t);
-    }
-    else if (kind == 1) {
-      b.angle = was.angle + (b.angle - was.angle) * amount;
-    }
-    else {
-      b.scale = was.scale + (b.scale - was.scale) * amount;
-    }
-  }
-  if (without_children) {
-    armature_keep_children(*armature, start, false);
-  }
   animation_refresh_action_bones(doc);
-  if (!counter.layers.empty()) {
-    bone_counter_apply(doc, counter);
+  for (const BoneCounter &counter : counters) {
+    if (!counter.layers.empty()) {
+      bone_counter_apply(doc, counter);
+    }
   }
   return OpStatus::Finished;
 }
@@ -15134,7 +15163,7 @@ static void transform_operators_register()
         props,
         [](Context &C) {
           const Layer *l = C.document ? document_active_layer(*C.document) : nullptr;
-          return l && l->is_bone_layer() && C.document->frame_current != 0 && armature_any_picked(*l);
+          return l && l->is_bone_layer() && C.document->frame_current != 0 && !bones_clearing(*C.document, *l).empty();
         },
         [kind](Context &C) { return bones_clear_exec(C, kind); });
   }

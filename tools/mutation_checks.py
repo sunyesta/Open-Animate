@@ -81,6 +81,10 @@ PENDING = [
     ("src/anim/motion_path.cc", "  return knob && bone_is_controller(*knob) ? STEP * controller_unit(*knob) : STEP;",
      "  return false && knob && bone_is_controller(*knob) ? STEP * controller_unit(*knob) : STEP;",
      "knob path nudge in frames", "tests/test_motion_path_control_edge.py"),
+    # Alt G, R and S clear the picked bones of the sub bone groups inside the active bone layer too.
+    ("src/editors/viewport.cc", "      clearing.push_back(l);",
+     "      if (l->id == armature.id) {\n        clearing.push_back(l);\n      }",
+     "clear sub group bones", "tests/test_clear_sub_group_bones.py"),
 ]
 
 def build(root):
