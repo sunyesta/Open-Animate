@@ -246,6 +246,13 @@ def _handle(client, message):
             _oanim.ipad_stroke_cancel()
             _drawing = None
         return False
+    if t == "input_log":
+        # Taken whenever it comes (a stroke the PC still thinks is going included), and answered, so the page can
+        # say whether it got here.
+        saved = _input_log_save(message)
+        if saved:
+            _send_json(client, {"t": "input_log_saved", "path": saved[0], "rows": saved[1]})
+        return False
     if _drawing is not None:
         # The header and the gestures wait for the stroke to end (the pen and a finger at once).
         return False
@@ -275,9 +282,6 @@ def _handle(client, message):
     if t == "brush":
         _oanim.ipad_brush_shape_set(str(message.get("name", "")))
         return True
-    if t == "input_log":
-        _input_log_save(message)
-        return True
     if t == "brush_recent":
         oanim.ops.brush.recent_pick(index=int(message.get("index", -1)))
         return True
@@ -297,19 +301,23 @@ def input_log_path():
 
 
 def _input_log_save(message):
-    """The page's last touches and Pencil events, written to input_log_path() (a fixed file, at most 2000 rows)."""
+    """The page's last touches and Pencil events, written to input_log_path() (a fixed file, at most 2000 rows):
+    (the path, how many rows), or None when the message has none."""
     import os
 
     import oanim
 
     events = message.get("events")
     if not isinstance(events, list):
-        return
+        return None
     path = input_log_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    page = message.get("page")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"agent": str(message.get("agent", ""))[:300], "events": events[-2000:]}, f)
+        json.dump({"agent": str(message.get("agent", ""))[:300], "page": page if isinstance(page, dict) else {},
+                   "drawing": _drawing is not None, "events": events[-2000:]}, f)
     oanim.wm.report("iPad input log saved to " + path)
+    return path, len(events[-2000:])
 
 
 def _no_constant(name):

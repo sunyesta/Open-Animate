@@ -109,6 +109,11 @@ PENDING = [
     ('scripts/modules/oanim/ipad.py', '"ipad_input_log_background.json" if _oanim.context().is_background else',
      '"ipad_input_log.json" if _oanim.context().is_background else',
      "A background run's iPad input log never writes over or deletes one an iPad sent", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py',
+     '            _send_json(client, {"t": "input_log_saved", "path": saved[0], "rows": saved[1]})', '            pass',
+     "The iPad page is told when its input log is saved, so it can say whether it got there", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py', '    if t == "input_log":', '    if t == "input_log" and _drawing is None:',
+     "The iPad's input log is saved while the PC thinks a stroke is going too", 'tests/test_ipad.py'),
 ]
 
 def build(root):

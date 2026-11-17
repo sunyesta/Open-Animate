@@ -558,11 +558,22 @@ log_path = ipad.input_log_path()
 assert os.path.basename(log_path) == "ipad_input_log_background.json", "never the one an iPad sent"
 if os.path.exists(log_path):
     os.remove(log_path)
-messages({"t": "input_log", "agent": "test", "events": [[k, "touchstart", "direct", 1, 10, 10, 20, 0, 1] for k in range(2500)]})
+got = messages({"t": "input_log", "agent": "test", "page": {"mode": "FREEHAND", "holds": 1},
+                "events": [[k, "touchstart", "direct", 1, 10, 10, 20, 0, 1] for k in range(2500)]})
 with open(log_path, encoding="utf-8") as f:
     saved = json.load(f)
 assert saved["agent"] == "test" and len(saved["events"]) == 2000 and saved["events"][0][0] == 500, len(saved["events"])
-messages({"t": "input_log", "events": "not a list"})
+assert saved["page"] == {"mode": "FREEHAND", "holds": 1} and saved["drawing"] is False, (saved["page"], saved["drawing"])
+# The page is told it got here, so it can say so (or that it didn't).
+assert of("input_log_saved", got) == [{"t": "input_log_saved", "path": log_path, "rows": 2000}], of("input_log_saved", got)
+assert of("input_log_saved", messages({"t": "input_log", "events": "not a list"})) == [], "nothing saved, nothing said"
+# Taken while the PC thinks a stroke is going too (the header's messages wait for its end): what the log is for is
+# finding out what went wrong, a stroke stuck included.
+os.remove(log_path)
+messages({"t": "down", "zoom": 1, "s": wave()[:5]})
+got = messages({"t": "input_log", "agent": "mid-stroke", "events": [[1, "touchstart"]]})
+assert of("input_log_saved", got) and json.load(open(log_path, encoding="utf-8"))["drawing"] is True
+messages({"t": "cancel"})
 os.remove(log_path)
 
 # --- What a page gone wrong (or anyone on the network) can't do ---------------------------------------------------------

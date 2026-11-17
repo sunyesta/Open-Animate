@@ -671,6 +671,7 @@ eraseButton.addEventListener('pointerdown', (e) => {
 
 const inputLog = [];
 const LOG_MAX = 1500;
+let logTimer = 0;
 function logInput(...entry) {
   inputLog.push([Math.round(performance.now()), ...entry]);
   if (inputLog.length > LOG_MAX) inputLog.splice(0, inputLog.length - LOG_MAX);
@@ -994,6 +995,11 @@ function receive(m) {
       if (!s) break;
       if (m.undo) { s.done = m.count; dirty(); }
       else strokeDrop(s);
+      break;
+    }
+    case 'input_log_saved': {
+      clearTimeout(logTimer);
+      flashBanner('Input log saved on the PC (' + m.rows + ' events)');
       break;
     }
     case 'refused': {
@@ -1515,9 +1521,16 @@ function optionsPopover(p) {
   sendLog.title = "The canvas's last touches and Pencil strokes, saved on the PC for finding out what this iPad sends";
   sendLog.addEventListener('click', (e) => {
     e.stopPropagation();
-    send({ t: 'input_log', agent: navigator.userAgent, events: inputLog });
     closePopovers();
-    toast('Input log sent');
+    if (!ws || ws.readyState !== 1) { flashBanner("Not connected: the input log wasn't sent"); return; }
+    /* With what the page made of the touches: its mode, whether a held finger erases, the fingers it knows. */
+    const page = { mode: state && state.mode, tool: state && state.tool, erases: erases(), holds: eraseHolds.size,
+                   fingers: fingers.size, penDown, palm_px: PALM_PX, hold_ms: HOLD_MS, slip_px: HOLD_SLIP };
+    send({ t: 'input_log', agent: navigator.userAgent, page, events: inputLog });
+    /* The PC answers when it has saved it. */
+    clearTimeout(logTimer);
+    logTimer = setTimeout(() => flashBanner("The input log didn't reach Open Animate: try again"), 5000);
+    toast('Sending the input log');
   });
   p.append(sendLog);
 }
