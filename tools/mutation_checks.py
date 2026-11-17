@@ -128,6 +128,10 @@ PENDING = [
      '  for (const ModalTransform::Item &item : drawings && false ? r_points.items : std::vector<ModalTransform::Item>()) {',
      'drag updates start from the drawings',
      'tests/test_bone_drag_points.py'),
+    # A path kept beside the chosen one counts a dot on the timing it shares (a whole drawing's) as a pick on it.
+    ('src/ops/motion_path_ops.cc', '[&](const auto &d) { return d.first.same(t) || d.first.same(owner); });',
+     '[&](const auto &d) { return d.first.same(t) || (false && d.first.same(owner)); });',
+     'Shift Alt keeps a whole drawing pick', 'tests/test_drawing_stretch_add.py'),
 ]
 
 def build(root):

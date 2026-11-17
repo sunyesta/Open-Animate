@@ -221,8 +221,10 @@ std::vector<MotionPathTarget> motion_path_targets(Context &C)
       wm.path_also_shown.clear();
     }
     std::erase_if(wm.path_also_shown, [&](const MotionPathTarget &t) {
+      /* (A dot picked on a whole drawing's or a folded group's row is on the timing the path shares.) */
+      const MotionPathTarget owner = motion_path_timing_owner(*C.document, t);
       const bool dots = std::any_of(wm.path_dots.begin(), wm.path_dots.end(),
-                                    [&](const auto &d) { return d.first.same(t); });
+                                    [&](const auto &d) { return d.first.same(t) || d.first.same(owner); });
       return t.same(active) || !path_shown_in(all, t) ||
              (!dots && motion_path_selected_keys(*C.document, {t}).empty());
     });
