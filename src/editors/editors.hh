@@ -111,6 +111,12 @@ struct Area {
   std::string shelf_search;
   float shelf_tile = 72.0f;
   bool shelf_hover_preview = true;
+  /* Which of its sections shows: 0 Switches, 1 Poses (the pose library), 2 Actions. The Poses' search, and whether
+   * its rows are pinned (collection ids, 0 Unsorted). */
+  int shelf_section = 0;
+  std::string shelf_pose_search;
+  bool shelf_pose_pinned = false;
+  std::vector<uint64_t> shelf_pose_pins;
 
   /* Text editor. */
   bool show_line_numbers = true;

@@ -57,6 +57,8 @@
 #include "ops/edit_ops.hh"
 #include "ops/file_ops.hh"
 #include "ops/operator.hh"
+#include "ops/pose_library.hh"
+#include <nlohmann/json.hpp>
 #include "ops/undo.hh"
 #include "rna/rna.hh"
 #include "wm/context.hh"
@@ -3252,6 +3254,55 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   });
   /* A solid line's triangles as the renderer makes them (its points' opacity included, no soft edge): [(x, y, alpha),
    * ...], layer space, alpha premultiplied by the line colour's. */
+  /* The pose library (ops/pose_library.hh): every pose kept in the file, [{id, name, collection, bones, points,
+   * layers}]: its collection's name ("" for none), the bones' names saved, how many points, the layers' names. */
+  m.def("poses", [] {
+    const Document &doc = *current_context().document;
+    py::list out;
+    for (const PoseAsset &p : doc.poses) {
+      py::dict d;
+      d["id"] = p.id;
+      d["name"] = p.name;
+      d["collection"] = collection_find(doc, p.collection) ? collection_name(doc, p.collection) : std::string();
+      py::list bones, layers;
+      int points = 0;
+      const nlohmann::ordered_json j = nlohmann::ordered_json::parse(p.pose, nullptr, false);
+      if (j.is_object() && j.contains("layers") && j["layers"].is_array()) {
+        for (const auto &lj : j["layers"]) {
+          layers.append(lj.value("name", std::string()));
+          if (lj.contains("bones")) {
+            for (const auto &bj : lj["bones"]) {
+              bones.append(bj.value("name", std::string()));
+            }
+          }
+          if (lj.contains("points")) {
+            points += int(lj["points"].size());
+          }
+        }
+      }
+      d["bones"] = bones;
+      d["points"] = points;
+      d["layers"] = layers;
+      out.append(d);
+    }
+    return out;
+  });
+  /* The Asset Shelf's Poses rows as it would show them now: [(collection name, [pose ids])] ("Unsorted" for poses whose
+   * collection is gone), `search` as typed in its search field. */
+  m.def(
+      "pose_shelf_rows",
+      [](const std::string &search) {
+        py::list out;
+        for (const PoseShelfRow &row : pose_shelf_rows(current_context(), search)) {
+          py::list ids;
+          for (const uint64_t id : row.poses) {
+            ids.append(id);
+          }
+          out.append(py::make_tuple(row.name, ids));
+        }
+        return out;
+      },
+      py::arg("search") = "");
   m.def("layer_shape_stroke", [layer_or_raise](uint64_t id, int index) {
     const Document &doc = *current_context().document;
     const VectorDrawing &drawing = layer_drawing(doc, layer_or_raise(id));

@@ -1353,6 +1353,18 @@ std::string oanim_document_to_json(const Document &doc)
               return links;
             }()},
            {"next_switch_link", doc.next_switch_link},
+           {"poses", [&] {
+              json list = json::array();
+              for (const PoseAsset &p : doc.poses) {
+                json pose = json::parse(p.pose, nullptr, false);
+                list.push_back({{"id", p.id},
+                                {"name", p.name},
+                                {"collection", p.collection},
+                                {"pose", pose.is_discarded() ? json::object() : pose}});
+              }
+              return list;
+            }()},
+           {"next_pose_id", doc.next_pose_id},
            {"annotations", annotations_to_json(doc)},
            {"active_annotation", doc.active_annotation},
            {"guides", guides_to_json(doc)},
@@ -4104,6 +4116,30 @@ bool oanim_document_from_json(const std::string &text, Document &r_doc, std::str
   doc.next_switch_link = std::max<uint64_t>(j.value("next_switch_link", uint64_t(1)), 1);
   for (const SwitchLink &l : doc.switch_links) {
     doc.next_switch_link = std::max(doc.next_switch_link, l.id + 1);
+  }
+  doc.next_pose_id = std::max<uint64_t>(j.value("next_pose_id", uint64_t(1)), 1);
+  for (const json &pj : get_array(j, "poses")) {
+    if (!pj.is_object() || !pj.contains("pose") || !pj["pose"].is_object()) {
+      continue;
+    }
+    PoseAsset p;
+    p.id = pj.value("id", uint64_t(0));
+    p.name = get_string(pj, "name", "Pose");
+    p.collection = pj.value("collection", uint64_t(0));
+    p.pose = pj["pose"].dump();
+    /* An id missing or taken (a file edited by hand): a new one. */
+    if (!p.id || std::any_of(doc.poses.begin(), doc.poses.end(), [&](const PoseAsset &o) { return o.id == p.id; })) {
+      p.id = 0;
+    }
+    doc.poses.push_back(std::move(p));
+  }
+  for (const PoseAsset &p : doc.poses) {
+    doc.next_pose_id = std::max(doc.next_pose_id, p.id + 1);
+  }
+  for (PoseAsset &p : doc.poses) {
+    if (!p.id) {
+      p.id = doc.next_pose_id++;
+    }
   }
   for (const json &dj : get_array(j, "drivers")) {
     if (!dj.is_object()) {

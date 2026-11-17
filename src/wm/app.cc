@@ -44,6 +44,7 @@
 #include "ops/edit_ops.hh"
 #include "ops/file_ops.hh"
 #include "ops/media_ops.hh"
+#include "ops/pose_library.hh"
 #include "ops/text_ops.hh"
 #include "ops/operator.hh"
 #include "ops/undo.hh"
@@ -135,6 +136,7 @@ int App::run(const LaunchOptions &options)
   layer_operators_register();
   layer_clipboard_operators_register();
   pose_clipboard_operators_register();
+  pose_library_operators_register();
   vector_operators_register();
   viewport_operators_register();
   asset_operators_register();

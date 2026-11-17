@@ -23,9 +23,12 @@
 #include "data/bones.hh"
 #include "data/document.hh"
 #include "editors/editors.hh"
+#include "editors/pose_thumbnails.hh"
 #include "editors/switch_thumbnails.hh"
 #include "editors/ui.hh"
 #include "ops/operator.hh"
+#include "ops/pose_apply.hh"
+#include "ops/pose_library.hh"
 #include "ops/undo.hh"
 #include "wm/context.hh"
 #include "core/profile.hh"
@@ -223,12 +226,429 @@ void tile_menu(Context &C, Area &area, uint64_t sw_id, uint64_t child_id)
 
 }  // namespace
 
-void asset_shelf_draw(Area &area, Context &C)
+namespace {
+
+std::string trimmed(const std::string &s)
 {
-  OANIM_PROFILE("asset_shelf_draw");
+  const auto first = s.find_first_not_of(" \t\r\n");
+  return first == std::string::npos ? std::string() : s.substr(first, s.find_last_not_of(" \t\r\n") - first + 1);
+}
+
+/* The Poses' state: the tile its menu is for, the pose being renamed, and the Save Pose dialog's fields (Save tried:
+ * its errors show). */
+struct PoseShelf {
+  uint64_t menu_pose = 0;
+  uint64_t renaming = 0;
+  bool focus_rename = false;
+  std::string rename_text;
+  bool open_save = false;
+  bool focus_name = false, focus_new = false;
+  std::string name;
+  uint64_t collection = 0;
+  bool new_collection = false;
+  std::string new_name;
+  bool tried = false;
+};
+PoseShelf g_poses;
+
+/* The Save Pose dialog, its collection `collection` (0: the selection's first, else a new one). */
+void pose_save_open(Context &C, uint64_t collection)
+{
+  g_poses.open_save = true;
+  g_poses.focus_name = true;
+  g_poses.name.clear();
+  g_poses.new_name.clear();
+  g_poses.tried = false;
+  if (!collection || !collection_find(*C.document, collection)) {
+    const std::vector<uint64_t> held = pose_selection_collections(C);
+    collection = held.empty() ? 0 : held.front();
+  }
+  g_poses.collection = collection;
+  g_poses.new_collection = collection == 0;
+}
+
+void pose_save_dialog(Context &C)
+{
+  if (g_poses.open_save) {
+    ImGui::OpenPopup("##pose_save");
+    g_poses.open_save = false;
+  }
+  if (!ImGui::BeginPopup("##pose_save")) {
+    return;
+  }
+  Document &doc = *C.document;
+  const ImVec4 red(0.95f, 0.45f, 0.45f, 1.0f);
+  const bool selected = pose_anything_selected(C);
+  const float label_w = ImGui::CalcTextSize("Collection").x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+  const float field_w = ImGui::GetFontSize() * 14.0f;
+  const float left = ImGui::GetCursorPosX();
+  ImGui::TextUnformatted("Save Pose");
+  ImGui::Separator();
+  bool save = false;
+
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted("Name");
+  ImGui::SameLine(left + label_w);
+  ImGui::SetNextItemWidth(field_w);
+  if (g_poses.focus_name) {
+    ImGui::SetKeyboardFocusHere();
+    g_poses.focus_name = false;
+  }
+  save |= ImGui::InputText("##pose_name", &g_poses.name, ImGuiInputTextFlags_EnterReturnsTrue);
+  if (g_poses.tried && trimmed(g_poses.name).empty()) {
+    ImGui::SetCursorPosX(left + label_w);
+    ImGui::TextColored(red, "Enter a name");
+  }
+
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted("Collection");
+  ImGui::SameLine(left + label_w);
+  ImGui::SetNextItemWidth(field_w);
+  const std::string shown = g_poses.new_collection ? "New collection" : collection_name(doc, g_poses.collection);
+  if (ImGui::BeginCombo("##pose_collection", shown.c_str())) {
+    for (const Collection &c : doc.collections) {
+      ImGui::PushID(int(c.id));
+      if (ImGui::Selectable(c.name.c_str(), !g_poses.new_collection && g_poses.collection == c.id)) {
+        g_poses.collection = c.id;
+        g_poses.new_collection = false;
+      }
+      ImGui::PopID();
+    }
+    if (!doc.collections.empty()) {
+      ImGui::Separator();
+    }
+    if (ImGui::Selectable("New collection", g_poses.new_collection)) {
+      g_poses.new_collection = true;
+      g_poses.focus_new = true;
+    }
+    ImGui::EndCombo();
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("The pose shows on the shelf while anything in this collection is selected.\n"
+                      "A new collection is made from the selection");
+  }
+  if (g_poses.new_collection) {
+    ImGui::SetCursorPosX(left + label_w);
+    ImGui::SetNextItemWidth(field_w);
+    if (g_poses.focus_new) {
+      ImGui::SetKeyboardFocusHere();
+      g_poses.focus_new = false;
+    }
+    save |= ImGui::InputTextWithHint("##pose_new_collection", "Name", &g_poses.new_name,
+                                     ImGuiInputTextFlags_EnterReturnsTrue);
+    if (g_poses.tried && trimmed(g_poses.new_name).empty()) {
+      ImGui::SetCursorPosX(left + label_w);
+      ImGui::TextColored(red, "Name the new collection");
+    }
+  }
+  if (!selected) {
+    ImGui::TextColored(red, "Select bones or points to save a pose");
+  }
+  ImGui::Spacing();
+  const float buttons_w = ImGui::CalcTextSize("Save").x + ImGui::CalcTextSize("Cancel").x +
+                          ImGui::GetStyle().FramePadding.x * 4.0f + ImGui::GetStyle().ItemSpacing.x;
+  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), left + label_w + field_w - buttons_w));
+  ImGui::BeginDisabled(!selected);
+  save |= ImGui::Button("Save");
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  bool close = ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape);
+  if (!ImGui::GetIO().WantTextInput && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) {
+    save = true;
+  }
+  if (save && !close) {
+    g_poses.tried = true;
+    if (selected && !trimmed(g_poses.name).empty() && (!g_poses.new_collection || !trimmed(g_poses.new_name).empty())) {
+      OpArgs args{{"name", g_poses.name}};
+      if (g_poses.new_collection) {
+        args["new_collection"] = g_poses.new_name;
+      }
+      else {
+        args["collection"] = collection_name(doc, g_poses.collection);
+      }
+      close = operator_call(C, "poselib.pose_new", args) == OpStatus::Finished;
+    }
+  }
+  if (close) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
+void pose_tile_menu(Context &C, uint64_t id)
+{
+  Document &doc = *C.document;
+  const PoseAsset *pose = pose_asset_find(doc, id);
+  if (!pose) {
+    return;
+  }
+  const std::string sid = std::to_string(id);
+  const uint64_t in_collection = collection_find(doc, pose->collection) ? pose->collection : 0;
+  ImGui::TextDisabled("%s", pose->name.c_str());
+  ImGui::Separator();
+  if (ui_menu_item("Apply")) {
+    operator_call(C, "poselib.apply", {{"pose", sid}});
+    return;
+  }
+  if (ui_menu_item("Apply Flipped")) {
+    operator_call(C, "poselib.apply", {{"pose", sid}, {"flipped", "1"}});
+    return;
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("Mirrored left to right: each _L bone's or drawing's pose on its _R partner (Ctrl click)");
+  }
+  if (ui_menu_item("Apply to Selected Only")) {
+    operator_call(C, "poselib.apply", {{"pose", sid}, {"selected_only", "1"}});
+    return;
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("Only onto the pose's bones and points selected now");
+  }
+  ImGui::Separator();
+  if (ui_menu_item("Replace with Current Pose", nullptr, false, pose_anything_selected(C))) {
+    operator_call(C, "poselib.replace", {{"pose", sid}});
+    return;
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Save the selected bones' and points' pose on this frame over it");
+  }
+  if (ui_menu_item("Rename", "F2")) {
+    g_poses.renaming = id;
+    g_poses.rename_text = pose->name;
+    g_poses.focus_rename = true;
+    return;
+  }
+  if (ui_submenu_begin("Move to Collection")) {
+    std::string to;
+    bool move = false;
+    for (const Collection &c : doc.collections) {
+      ImGui::PushID(int(c.id));
+      if (ui_menu_item(c.name.c_str(), nullptr, in_collection == c.id) && in_collection != c.id) {
+        to = c.name;
+        move = true;
+      }
+      ImGui::PopID();
+    }
+    if (!doc.collections.empty()) {
+      ImGui::Separator();
+    }
+    if (ui_menu_item("None", nullptr, in_collection == 0) && in_collection != 0) {
+      move = true;
+    }
+    ui_submenu_end();
+    if (move) {
+      operator_call(C, "poselib.move", {{"pose", sid}, {"collection", to}});
+      return;
+    }
+  }
+  if (ui_menu_item("Duplicate")) {
+    if (operator_call(C, "poselib.duplicate", {{"pose", sid}}) == OpStatus::Finished) {
+      /* The copy's name opens for typing. */
+      if (const PoseAsset *copy = pose_asset_find(doc, doc.next_pose_id - 1)) {
+        g_poses.renaming = copy->id;
+        g_poses.rename_text = copy->name;
+        g_poses.focus_rename = true;
+      }
+    }
+    return;
+  }
+  if (ui_menu_item("Save Flipped Copy")) {
+    operator_call(C, "poselib.flip_copy", {{"pose", sid}});
+    return;
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("A copy mirrored left to right, named after the other side");
+  }
+  ImGui::Separator();
+  if (ui_menu_item("Delete")) {
+    operator_call(C, "poselib.delete", {{"pose", sid}});
+  }
+}
+
+/* Search and tile size at the header's right, or on a line of their own when the shelf is narrow. */
+void header_right(std::string &search, float &tile_size, float right_w)
+{
+  ImGui::SameLine();
+  if (ImGui::GetContentRegionAvail().x < right_w) {
+    ImGui::NewLine();
+  }
+  else {
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - right_w));
+  }
+  if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F)) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(130.0f);
+  ImGui::InputTextWithHint("##shelf_search", "Search (Ctrl F)", &search);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(90.0f);
+  ImGui::SliderFloat("##shelf_tile", &tile_size, 40.0f, 160.0f, "%.0f px");
+}
+
+void poses_section(Area &area, Context &C)
+{
   Document &doc = *C.document;
   const ImGuiIO &io = ImGui::GetIO();
-  area_editor_type_menu(area);
+  const bool selected = pose_anything_selected(C);
+  std::vector<PoseShelfRow> rows = pose_shelf_rows(C, area.shelf_pose_search,
+                                                   area.shelf_pose_pinned ? &area.shelf_pose_pins : nullptr);
+
+  /* Header: Save Pose, pin, search, size. */
+  ImGui::SameLine(0, 12.0f);
+  if (ImGui::Button("Save Pose")) {
+    pose_save_open(C, 0);
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("Save the selected bones' and points' pose on this frame under a collection: it shows here\n"
+                      "while anything in that collection is selected");
+  }
+  pose_save_dialog(C);
+  ImGui::SameLine(0, 8.0f);
+  if (ImGui::Button(area.shelf_pose_pinned ? "Pinned" : "Pin")) {
+    area.shelf_pose_pinned = !area.shelf_pose_pinned;
+    area.shelf_pose_pins.clear();
+    for (const PoseShelfRow &row : rows) {
+      area.shelf_pose_pins.push_back(row.collection);
+    }
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip(area.shelf_pose_pinned ? "Pinned: these rows stay whatever you select. Click to follow the "
+                                               "selection again"
+                                             : "Keep these rows whatever you select");
+  }
+  header_right(area.shelf_pose_search, area.shelf_tile, 230.0f);
+  ImGui::Separator();
+
+  ImGui::BeginChild("##pose_rows", ImVec2(0, 0), ImGuiChildFlags_None);
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const float tile = std::clamp(area.shelf_tile, 40.0f, 160.0f);
+  const float name_h = ImGui::GetTextLineHeight() + 4.0f;
+  const int tex_size = int(tile * std::max(1.0f, io.DisplayFramebufferScale.x));
+  uint64_t over_pose = 0, menu_pose = 0;
+  for (const PoseShelfRow &row : rows) {
+    ImGui::PushID(int(row.collection) + 1);
+    ImGui::TextUnformatted(row.name.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("%d", int(row.poses.size()));
+    const float avail = ImGui::GetContentRegionAvail().x;
+    float x = 0.0f;
+    const ImVec2 row_start = ImGui::GetCursorScreenPos();
+    float y = row_start.y;
+    const float gap = 6.0f;
+    std::vector<uint64_t> ids = row.poses;
+    ids.push_back(0); /* the + tile */
+    for (const uint64_t id : ids) {
+      if (x > 0.0f && x + tile > avail) {
+        x = 0.0f;
+        y += tile + name_h + gap;
+      }
+      const ImVec2 at(row_start.x + x, y);
+      x += tile + gap;
+      ImGui::SetCursorScreenPos(at);
+      ImGui::PushID(int(id));
+      ImGui::InvisibleButton("##tile", ImVec2(tile, tile + name_h));
+      const bool over = ImGui::IsItemHovered();
+      const ImVec2 box_max = at + ImVec2(tile, tile);
+      dl->AddRectFilled(at, box_max, IM_COL32(0x30, 0x30, 0x30, 255), 4.0f);
+      if (id == 0) {
+        /* The + tile: save the selection's pose here. */
+        const ImVec2 c = at + ImVec2(tile * 0.5f, tile * 0.5f);
+        const float r = tile * 0.18f;
+        const ImU32 col = selected ? IM_COL32(0xc0, 0xc0, 0xc0, 255) : IM_COL32(0x70, 0x70, 0x70, 255);
+        dl->AddLine(c - ImVec2(r, 0), c + ImVec2(r, 0), col, 2.0f);
+        dl->AddLine(c - ImVec2(0, r), c + ImVec2(0, r), col, 2.0f);
+        if (over) {
+          dl->AddRect(at, box_max, IM_COL32(0xf0, 0xf0, 0xf0, 160), 4.0f);
+          ImGui::SetTooltip("Save the selected bones' and points' pose in %s", row.collection ? row.name.c_str()
+                                                                                              : "a new collection");
+        }
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+          pose_save_open(C, row.collection);
+        }
+        ImGui::PopID();
+        continue;
+      }
+      const PoseAsset *pose = pose_asset_find(doc, id);
+      if (!pose) {
+        ImGui::PopID();
+        continue;
+      }
+      if (const unsigned int tex = pose_thumbnail(doc, *pose, tex_size)) {
+        dl->AddImage(ImTextureRef(ImTextureID(intptr_t(tex))), at + ImVec2(2, 2), box_max - ImVec2(2, 2));
+      }
+      if (over) {
+        dl->AddRect(at, box_max, IM_COL32(0xf0, 0xf0, 0xf0, 160), 4.0f, 0, 1.5f);
+      }
+      const ImVec2 name_at(at.x, box_max.y + 2.0f);
+      if (g_poses.renaming == id) {
+        ImGui::SetCursorScreenPos(name_at);
+        ImGui::SetNextItemWidth(tile);
+        if (g_poses.focus_rename) {
+          ImGui::SetKeyboardFocusHere();
+          g_poses.focus_rename = false;
+        }
+        ImGui::InputText("##rename", &g_poses.rename_text, ImGuiInputTextFlags_AutoSelectAll);
+        if (ImGui::IsItemDeactivated()) {
+          if (!trimmed(g_poses.rename_text).empty() && g_poses.rename_text != pose->name) {
+            operator_call(C, "poselib.rename", {{"pose", std::to_string(id)}, {"name", g_poses.rename_text}});
+          }
+          g_poses.renaming = 0;
+        }
+      }
+      else {
+        dl->PushClipRect(name_at, name_at + ImVec2(tile, name_h), true);
+        dl->AddText(name_at, IM_COL32(0xc8, 0xc8, 0xc8, 255), pose->name.c_str());
+        dl->PopClipRect();
+      }
+      if (over) {
+        over_pose = id;
+        ImGui::SetItemTooltip("%s\nClick to apply it on this frame (Ctrl: flipped). Right-click for more",
+                              pose->name.c_str());
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+          menu_pose = id;
+        }
+      }
+      const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left) && g_poses.renaming != id;
+      ImGui::PopID();
+      if (clicked) {
+        operator_call(C, "poselib.apply", {{"pose", std::to_string(id)}, {"flipped", io.KeyCtrl ? "1" : "0"}});
+      }
+    }
+    ImGui::SetCursorScreenPos(ImVec2(row_start.x, y + tile + name_h + gap));
+    ImGui::Dummy(ImVec2(1, 4));
+    ImGui::Separator();
+    ImGui::PopID();
+  }
+  if (rows.empty()) {
+    ImGui::TextDisabled("%s", !area.shelf_pose_search.empty() ? "No pose has that name"
+                              : selected                      ? "No poses for the selection yet"
+                                                              : "No poses yet");
+  }
+  if (menu_pose) {
+    g_poses.menu_pose = menu_pose;
+    ImGui::OpenPopup("##pose_tile_menu");
+  }
+  if (ui_menu_begin("##pose_tile_menu")) {
+    pose_tile_menu(C, g_poses.menu_pose);
+    ui_menu_end();
+  }
+  if (ImGui::IsWindowHovered() && !io.WantTextInput && over_pose && ImGui::IsKeyPressed(ImGuiKey_F2)) {
+    if (const PoseAsset *pose = pose_asset_find(doc, over_pose)) {
+      g_poses.renaming = over_pose;
+      g_poses.rename_text = pose->name;
+      g_poses.focus_rename = true;
+    }
+  }
+  ImGui::EndChild();
+}
+
+}  // namespace
+
+/* The Switches section: the switches that fit the work, every switch, or those pinned. */
+static void switches_section(Area &area, Context &C)
+{
+  Document &doc = *C.document;
+  const ImGuiIO &io = ImGui::GetIO();
 
   /* Which rows: pinned, every switch, or what fits the work. */
   std::vector<uint64_t> rows;
@@ -311,22 +731,7 @@ void asset_shelf_draw(Area &area, Context &C)
                                                  : follows.c_str());
   }
   /* Search, size and preview at the right, or on a line of their own when the shelf is narrow. */
-  const float right_w = 330.0f;
-  ImGui::SameLine();
-  if (ImGui::GetContentRegionAvail().x < right_w) {
-    ImGui::NewLine();
-  }
-  else {
-    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - right_w));
-  }
-  if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F)) {
-    ImGui::SetKeyboardFocusHere();
-  }
-  ImGui::SetNextItemWidth(130.0f);
-  ImGui::InputTextWithHint("##shelf_search", "Search (Ctrl F)", &area.shelf_search);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(90.0f);
-  ImGui::SliderFloat("##shelf_tile", &area.shelf_tile, 40.0f, 160.0f, "%.0f px");
+  header_right(area.shelf_search, area.shelf_tile, 330.0f);
   ImGui::SameLine();
   ImGui::Checkbox("Preview", &area.shelf_hover_preview);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -605,6 +1010,42 @@ void asset_shelf_draw(Area &area, Context &C)
     g_shelf.previewing = false;
   }
   ImGui::EndChild();
+}
+
+
+void asset_shelf_draw(Area &area, Context &C)
+{
+  OANIM_PROFILE("asset_shelf_draw");
+  Document &doc = *C.document;
+  area_editor_type_menu(area);
+  /* Its sections, as tabs: what the switches show, the pose library, actions. */
+  ImGui::SameLine();
+  static const char *const sections[] = {"Switches", "Poses", "Actions"};
+  for (int s = 0; s < 3; s++) {
+    ImGui::SameLine(0, s == 0 ? 8.0f : 1.0f);
+    const bool on = area.shelf_section == s;
+    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(on ? ImGuiCol_ButtonActive : ImGuiCol_FrameBg));
+    if (ImGui::Button(sections[s])) {
+      area.shelf_section = s;
+    }
+    ImGui::PopStyleColor();
+  }
+  if (area.shelf_section != 0 && g_shelf.previewing) {
+    switch_preview_clear();
+    switches_resolve(doc, doc.frame_current);
+    g_shelf.previewing = false;
+    g_shelf.dragging = false;
+  }
+  if (area.shelf_section == 1) {
+    poses_section(area, C);
+  }
+  else if (area.shelf_section == 2) {
+    /* Actions: still to come. */
+    ImGui::Separator();
+  }
+  else {
+    switches_section(area, C);
+  }
 }
 
 }  // namespace oanim

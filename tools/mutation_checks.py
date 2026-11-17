@@ -35,6 +35,30 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    # Pose library: Save Pose with a new collection puts the selection in it.
+    ("src/ops/pose_library.cc", "          for (Bone *b : picked_bones) {\n            b->collections.push_back(collection);\n          }",
+     "          for (Bone *b : picked_bones) {\n            (void)b;\n          }", "pose_new assigns the new collection",
+     "tests/test_pose_library.py"),
+    # Save Flipped Copy puts the flipped bones in its collection, so it shows while they are selected.
+    ("src/ops/pose_library.cc", "                    join(b.collections);", "                    (void)b;",
+     "flip_copy joins its collection", "tests/test_pose_library.py"),
+    # A pose kept in the file goes back on its bone layer whatever layer is active.
+    ("src/ops/pose_clipboard.cc", "  if (anywhere) {\n    Document &doc = *C.document;",
+     "  if (false && anywhere) {\n    Document &doc = *C.document;", "apply finds the rig anywhere",
+     "tests/test_pose_library.py"),
+    # Apply to Selected Only.
+    ("src/ops/pose_library.cc", "        options.selected_only = op_arg_bool(C, \"selected_only\");\n", "",
+     "apply selected_only", "tests/test_pose_library.py"),
+    # The shelf's rows follow the selection's collections.
+    ("src/ops/pose_library.cc", "  if (pose_anything_selected(C)) {\n    /* The selection's collections",
+     "  if (false) {\n    /* The selection's collections", "shelf rows follow the selection",
+     "tests/test_pose_library.py"),
+    # Poses are read back from the file.
+    ("src/io/oanim_file.cc", "    doc.poses.push_back(std::move(p));", "    (void)p;", "poses read from the file",
+     "tests/test_pose_library.py"),
+    # A name taken in the same collection gets a number.
+    ("src/ops/pose_library.cc", "  if (!taken(name)) {\n    return name;", "  if (true || !taken(name)) {\n    return name;",
+     "unique pose names", "tests/test_pose_library.py"),
 ]
 
 def build(root):

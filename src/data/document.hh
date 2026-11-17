@@ -91,6 +91,19 @@ struct SwitchLinkName {
   std::string name;
   bool operator==(const SwitchLinkName &) const = default;
 };
+/* A pose kept in the file (the Asset Shelf's Poses, ops/pose_library.cc): Copy Pose's record of the bones and points
+ * selected when it was saved (each value's change from the setup pose, by bone name and point id), under a name and a
+ * collection. It shows on the shelf while anything in its collection is selected. */
+struct PoseAsset {
+  uint64_t id = 0;
+  std::string name;
+  /* The document's collection it is filed under (0, or one deleted since: none). */
+  uint64_t collection = 0;
+  /* Copy Pose's JSON, as text. */
+  std::string pose;
+  bool operator==(const PoseAsset &) const = default;
+};
+
 struct SwitchLink {
   uint64_t id = 0;
   /* The member whose Switch channel holds the group's keys. */
@@ -257,6 +270,9 @@ struct Document {
    * mouth. */
   std::vector<SwitchLink> switch_links;
   uint64_t next_switch_link = 1;
+  /* Poses saved in this file, in the order the shelf shows them (PoseAsset). */
+  std::vector<PoseAsset> poses;
+  uint64_t next_pose_id = 1;
   /* Shared looks for shapes (data/material.hh), in the order they were made. */
   std::vector<Material> materials;
   uint64_t next_material_id = 1;

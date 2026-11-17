@@ -86,6 +86,7 @@ set(OANIM_SOURCES
   src/editors/asset_shelf.cc
   src/editors/switch_thumbnails.cc
   src/editors/controller_thumbnails.cc
+  src/editors/pose_thumbnails.cc
   src/editors/properties.cc
   src/editors/text_editor.cc
   src/editors/timeline.cc
@@ -121,6 +122,7 @@ set(OANIM_SOURCES
   src/ops/layer_ops.cc
   src/ops/layer_clipboard.cc
   src/ops/pose_clipboard.cc
+  src/ops/pose_library.cc
   src/ops/operator.cc
   src/ops/rig_ops.cc
   src/ops/draw_ops.cc
@@ -703,6 +705,8 @@ add_test(NAME rest_keeps_animation
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_rest_keeps_animation.py)
 add_test(NAME pose_clipboard
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_clipboard.py)
+add_test(NAME pose_library
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_library.py)
 add_test(NAME pose_paste_flipped
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_paste_flipped.py)
 add_test(NAME key_whole_drawing

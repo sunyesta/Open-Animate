@@ -27,6 +27,7 @@
 #include "data/vector.hh"
 #include "ops/edit_ops.hh"
 #include "ops/operator.hh"
+#include "ops/pose_apply.hh"
 #include "wm/context.hh"
 
 namespace oanim {
@@ -67,7 +68,7 @@ static void curve_neighbours(const Curve &curve, size_t j, int &before, int &aft
 }
 
 /* The drawings whose points are being edited, and the bone layer whose bones are (the active layer, a bone layer). */
-static std::vector<Layer *> pose_drawings(Context &C)
+std::vector<Layer *> pose_drawings(Context &C)
 {
   std::vector<Layer *> out;
   for (Layer *l : editable_layers(C)) {
@@ -78,7 +79,7 @@ static std::vector<Layer *> pose_drawings(Context &C)
   return out;
 }
 
-static Layer *pose_rig(Context &C)
+Layer *pose_rig(Context &C)
 {
   Layer *active = document_active_layer(*C.document);
   return active && active->is_bone_layer() ? active : nullptr;
@@ -95,7 +96,7 @@ static Bone *bone_named(Layer &rig, const std::string &name)
 }
 
 /* What Ctrl C finds to copy: the selected bones and points (a detail point follows its parent, so goes with it). */
-static bool pose_anything_selected(Context &C)
+bool pose_anything_selected(Context &C)
 {
   if (const Layer *rig = pose_rig(C)) {
     if (std::any_of(rig->bones.begin(), rig->bones.end(), [](const Bone &b) { return b.selected; })) {
@@ -112,12 +113,11 @@ static bool pose_anything_selected(Context &C)
   return false;
 }
 
-static json pose_copy_json(Context &C, int *r_bones, int *r_points)
+json pose_record(Document &doc, Layer *rig, const std::vector<Layer *> &drawings, int *r_bones, int *r_points)
 {
-  Document &doc = *C.document;
   json layers = json::array();
   *r_bones = *r_points = 0;
-  if (Layer *rig = pose_rig(C)) {
+  if (rig) {
     json bones = json::array();
     for (Bone b : rig->bones) {
       if (!b.selected) {
@@ -137,7 +137,7 @@ static json pose_copy_json(Context &C, int *r_bones, int *r_points)
       layers.push_back({{"id", rig->id}, {"name", rig->name}, {"bones", std::move(bones)}});
     }
   }
-  for (Layer *l : pose_drawings(C)) {
+  for (Layer *l : drawings) {
     VectorDrawing d = l->drawing;
     drawing_changes_from_values(d);
     std::vector<Transform2D> skins = layer_point_skins(doc, *l);
@@ -203,9 +203,25 @@ static json pose_copy_json(Context &C, int *r_bones, int *r_points)
   return {{"frame", doc.frame_current}, {"layers", std::move(layers)}};
 }
 
+json pose_copy_json(Context &C, int *r_bones, int *r_points)
+{
+  return pose_record(*C.document, pose_rig(C), pose_drawings(C), r_bones, r_points);
+}
+
+/* Every drawing a pose kept in the file can go back on, being edited or not. */
+static std::vector<Layer *> pose_all_drawings(Document &doc)
+{
+  std::vector<Layer *> out;
+  for (const Layer *l : document_layers_flat(doc)) {
+    if (l->type == LayerType::Vector && !l->is_reference()) {
+      out.push_back(layer_find(doc, l->id));
+    }
+  }
+  return out;
+}
+
 /* Paste As (a pick-one) and Keep Place, kept from the last time they were set, as the timeline's Paste Keys keeps
  * them. */
-enum class PasteAs { Keys, Look, Place };
 /* Same Place: a point or handle showing this close to where it was copied is already there. */
 static constexpr float SAME_PLACE_HAIR = 1e-5f;
 static PasteAs g_paste_as = PasteAs::Keys;
@@ -279,10 +295,8 @@ struct PoseTarget {
 
 /* Flipped: a copied drawing's pose goes on its partner (by _L and _R name, else itself), each point on its mirror image
  * (where it is in the setup pose reflected, as mirror editing pairs them). The copied drawing must be in this file. */
-static bool pose_target_flipped(Context &C, const json &lj, PoseTarget &t)
+static bool pose_target_flipped(Document &doc, const std::vector<Layer *> &drawings, const json &lj, PoseTarget &t)
 {
-  Document &doc = *C.document;
-  const std::vector<Layer *> drawings = pose_drawings(C);
   const uint64_t id = lj.value("id", uint64_t(0));
   const std::string name = lj.value("name", std::string());
   Layer *source = layer_find(doc, id);
@@ -331,9 +345,9 @@ static bool pose_target_flipped(Context &C, const json &lj, PoseTarget &t)
   return true;
 }
 
-static std::vector<PoseTarget> pose_targets(Context &C, const json &copied, bool selected_only, bool flipped = false)
+static std::vector<PoseTarget> pose_targets(Document &doc, const std::vector<Layer *> &drawings, const json &copied,
+                                            bool selected_only, bool flipped = false)
 {
-  const std::vector<Layer *> drawings = pose_drawings(C);
   std::vector<PoseTarget> targets;
   for (const json &lj : copied) {
     if (!lj.contains("points")) {
@@ -341,7 +355,7 @@ static std::vector<PoseTarget> pose_targets(Context &C, const json &copied, bool
     }
     if (flipped) {
       PoseTarget t{nullptr, &lj, {}};
-      if (!pose_target_flipped(C, lj, t)) {
+      if (!pose_target_flipped(doc, drawings, lj, t)) {
         continue;
       }
       if (selected_only) {
@@ -396,10 +410,22 @@ static std::vector<PoseTarget> pose_targets(Context &C, const json &copied, bool
   return targets;
 }
 
-/* The bone layer a copied one's bones paste onto: the active one (a bone layer). */
-static Layer *pose_rig_for(Context &C, const json &lj)
+/* The bone layer a copied one's bones paste onto: the active one (a bone layer); `anywhere`, the one it was copied from
+ * (by id, else name). */
+static Layer *pose_rig_for(Context &C, const json &lj, bool anywhere)
 {
   Layer *active_rig = pose_rig(C);
+  if (anywhere) {
+    Document &doc = *C.document;
+    Layer *by_id = layer_find(doc, lj.value("id", uint64_t(0)));
+    active_rig = by_id && by_id->is_bone_layer() ? by_id : nullptr;
+    const std::string name = lj.value("name", std::string());
+    for (const Layer *l : document_layers_flat(doc)) {
+      if (!active_rig && l->is_bone_layer() && l->name == name) {
+        active_rig = layer_find(doc, l->id);
+      }
+    }
+  }
   if (!active_rig) {
     return nullptr;
   }
@@ -418,11 +444,11 @@ static bool pose_has_target(Context &C, const json &pose, bool flipped)
   if (!copied.is_array()) {
     return false;
   }
-  if (!pose_targets(C, copied, false, flipped).empty()) {
+  if (!pose_targets(*C.document, pose_drawings(C), copied, false, flipped).empty()) {
     return true;
   }
   return std::any_of(copied.begin(), copied.end(),
-                     [&](const json &lj) { return lj.contains("bones") && pose_rig_for(C, lj); });
+                     [&](const json &lj) { return lj.contains("bones") && pose_rig_for(C, lj, false); });
 }
 
 /* A flipped paste's handles and curvature: each copied handle goes on its point's image's handle that reaches for the
@@ -503,25 +529,27 @@ static void pose_paste_handles_flipped(PoseTarget &t, const std::vector<Transfor
   }
 }
 
-static OpStatus pose_paste_once(Context &C, const json &pose, bool flipped, bool quiet)
+OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyOptions &options)
 {
   Document &doc = *C.document;
   if (doc.frame_current == 0) {
-    report(ReportType::Warning, "Paste Pose poses: go to a frame other than the setup frame (frame 0)");
+    report(ReportType::Warning, options.anywhere ? "Poses go on frames other than the setup frame (frame 0)"
+                                                 : "Paste Pose poses: go to a frame other than the setup frame (frame 0)");
     return OpStatus::Cancelled;
   }
-  const bool selected_only = op_arg_bool(C, "selected_mask");
-  const float factor = op_arg_float(C, "factor", 1.0f);
-  paste_as_take(C);
-  const bool ignore = g_paste_as == PasteAs::Place;
-  const bool look = g_paste_as != PasteAs::Keys;
+  const bool selected_only = options.selected_only;
+  const float factor = options.factor;
+  const bool ignore = options.as == PasteAs::Place;
+  const bool look = options.as != PasteAs::Keys;
   /* Same Place puts each point where it was: there is no place of its own to keep. */
-  const bool keep_place = remembered_arg(C, "keep_place", g_pose_keep_place) && !ignore;
-  const json &copied = pose["layers"];
-  if (!copied.is_array()) {
+  const bool keep_place = options.keep_place && !ignore;
+  const auto copied_it = pose.find("layers");
+  if (copied_it == pose.end() || !copied_it->is_array()) {
     return OpStatus::Cancelled;
   }
-  std::vector<PoseTarget> targets = pose_targets(C, copied, selected_only, flipped);
+  const json &copied = *copied_it;
+  std::vector<PoseTarget> targets = pose_targets(doc, options.anywhere ? pose_all_drawings(doc) : pose_drawings(C),
+                                                 copied, selected_only, flipped);
 
   /* Keep Place: where the pasted points' centre shows now, before anything moves (the bones pasted too). */
   float2 centre_was;
@@ -544,7 +572,7 @@ static OpStatus pose_paste_once(Context &C, const json &pose, bool flipped, bool
     if (!lj.contains("bones")) {
       continue;
     }
-    Layer *rig = pose_rig_for(C, lj);
+    Layer *rig = pose_rig_for(C, lj, options.anywhere);
     if (!rig) {
       continue;
     }
@@ -592,6 +620,9 @@ static OpStatus pose_paste_once(Context &C, const json &pose, bool flipped, bool
       b->scale = b->scale + (scale - b->scale) * factor;
       bone_values_from_changes(*b);
       bones_pasted++;
+      if (options.r_bones) {
+        options.r_bones->push_back({rig->id, b->id});
+      }
     }
   }
 
@@ -682,13 +713,19 @@ static OpStatus pose_paste_once(Context &C, const json &pose, bool flipped, bool
   for (const Placed &p : placed) {
     MeshPoint &mp = p.layer->drawing.points[p.point];
     mp.pos = mp.pos + (p.pos - mp.pos) * factor;
+    if (options.r_points) {
+      options.r_points->push_back({p.layer->id, p.point});
+    }
   }
   for (PoseTarget &t : targets) {
     drawing_changes_from_values(t.layer->drawing);
   }
   const int points_pasted = int(placed.size());
   if (bones_pasted + points_pasted == 0) {
-    report(ReportType::Warning, "The copied pose's bones and points aren't being edited here");
+    if (options.warn) {
+      report(ReportType::Warning, options.anywhere ? "None of the pose's bones and points is here"
+                                                   : "The copied pose's bones and points aren't being edited here");
+    }
     return OpStatus::Cancelled;
   }
   std::string note;
@@ -698,9 +735,9 @@ static OpStatus pose_paste_once(Context &C, const json &pose, bool flipped, bool
   if (points_pasted > 0) {
     note += (note.empty() ? "" : ", ") + std::to_string(points_pasted) + (points_pasted == 1 ? " point" : " points");
   }
-  if (!quiet) {
-    op_note("Pasted onto " + note + " as " + paste_as_name(g_paste_as));
-    report(ReportType::Info, "Pasted onto " + note + " as " + paste_as_name(g_paste_as));
+  if (!options.quiet) {
+    op_note("Pasted onto " + note + " as " + paste_as_name(options.as));
+    report(ReportType::Info, "Pasted onto " + note + " as " + paste_as_name(options.as));
   }
   return OpStatus::Finished;
 }
@@ -710,15 +747,22 @@ static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
   /* Same Look and Same Place take out of each value what the action bone actions add here, and the paste moves the
    * bones that drive them (a knob): worked out again with what they add once it is pasted, one press gives the look
    * (it took two). With a factor below 1 a second pass would blend twice: one, as before. */
-  const bool again = paste_as_take(C) != PasteAs::Keys && op_arg_float(C, "factor", 1.0f) >= 1.0f;
-  const OpStatus status = pose_paste_once(C, pose, flipped, again);
+  PoseApplyOptions options;
+  options.as = paste_as_take(C);
+  options.selected_only = op_arg_bool(C, "selected_mask");
+  options.factor = op_arg_float(C, "factor", 1.0f);
+  options.keep_place = remembered_arg(C, "keep_place", g_pose_keep_place);
+  const bool again = options.as != PasteAs::Keys && options.factor >= 1.0f;
+  options.quiet = again;
+  const OpStatus status = pose_apply(C, pose, flipped, options);
   if (status != OpStatus::Finished || !again) {
     return status;
   }
   Document &doc = *C.document;
   animation_record(doc);
   animation_evaluate(doc, doc.frame_current);
-  return pose_paste_once(C, pose, flipped, false);
+  options.quiet = false;
+  return pose_apply(C, pose, flipped, options);
 }
 
 /* The pose on the clipboard (null json if none). */

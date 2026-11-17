@@ -17,6 +17,9 @@ Document controller_posed_copy(const Document &doc, uint64_t armature, uint64_t 
 /* Counts the document's changes, leaving out the revisions posed copies give their own layers (so pictures made from
  * them don't count as the document changing): the same while nothing else has changed. */
 uint64_t controller_document_generation();
+/* A posed copy of the document was made elsewhere (a pose's thumbnail, ops/pose_library.cc): what that gave its
+ * layers isn't the document changing. Call controller_document_generation() before making it. */
+void controller_document_generation_settle();
 
 /* While set, the viewport draws the knob at `at` (its bones and overlays stay as they are). One at a time. */
 void controller_preview_set(uint64_t armature, uint64_t bone, float2 at);

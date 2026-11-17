@@ -22,6 +22,11 @@ uint64_t controller_document_generation()
   return g_generation;
 }
 
+void controller_document_generation_settle()
+{
+  g_seen_revision = revision_latest();
+}
+
 Document controller_posed_copy(const Document &doc, uint64_t armature, uint64_t bone, float2 at)
 {
   OANIM_PROFILE("controller_posed_copy");
