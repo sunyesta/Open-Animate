@@ -3914,7 +3914,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
                                                         ControllerBoxShow::Always;
       }
       else if (key == "controller_frame_size") {
-        bone.controller_frame_size = std::max(value.cast<float>(), 1e-5f);
+        controller_frame_size_set(bone, std::max(value.cast<float>(), 1e-5f));
         bone.controller_size_auto = false;
       }
       else if (key == "knob") {

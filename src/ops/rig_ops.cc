@@ -3525,7 +3525,7 @@ void rig_operators_register()
                 b.controller_box_angle += std::atan2(change.b, change.a);
                 const float size = std::sqrt(std::abs(change.a * change.d - change.b * change.c));
                 if (size > 1e-6f) {
-                  b.controller_frame_size *= size;
+                  controller_frame_size_set(b, b.controller_frame_size * size);
                 }
               }
               else if (!moved.count(b.parent)) {

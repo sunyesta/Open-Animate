@@ -70,7 +70,7 @@ doc.frame_current = 20
 rig.bone_set("eye", knob=(10.0, 5.0))
 go(20)
 keyed = {k["frame"]: k["value"] for k in rig.keyframes(KNOB)}
-assert 20 in keyed and close(keyed[20], (10, 0)), ("the key is along its axis only", keyed)
+assert 20 in keyed and close(keyed[20], (10 * size, 0)), ("the key is along its axis only, as far as 10 frames", keyed)
 assert close(bone("eye")["knob_shown"], (10, 0)), ("keyed along its axis only", bone("eye")["knob_shown"])
 go(10)
 assert close(bone("eye")["knob_shown"], (5, 0)), ("straight between keys", bone("eye")["knob_shown"])

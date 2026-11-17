@@ -66,6 +66,21 @@ PENDING = [
     # G, R and S on bones move the points picked with them too (A picks both).
     ("src/editors/viewport.cc", "    points_with_bones_apply(C, points, kind, move, degrees * PI / 180.0f, factor, pivot);",
      "    (void)factor;\n    (void)pivot;", "points move with the bones", "tests/test_move_bones_and_points.py"),
+    # A knob is keyed as far as it is (its frames times its Frame Size), as any bone's Transform.
+    ("src/anim/controller.cc",
+     "  knob.position = bone_position_from_transform(knob, controller_transform_of(knob, frames));",
+     "  knob.position = bone_position_from_transform(knob, frames);", "knob keyed as distance",
+     "tests/test_knob_distance.py"),
+    # A new Frame Size scales the knob's keys so they play the same frames.
+    ("src/anim/controller.cc", "  if (std::abs(k - 1.0f) < 1e-7f) {", "  if (true || std::abs(k - 1.0f) < 1e-7f) {",
+     "frame size keeps the knob's frames", "tests/test_knob_distance.py"),
+    # Older files' knob keys (frames) become distances on opening.
+    ("src/io/oanim_file.cc", "  if (g_loading_version < 9) {", "  if (false && g_loading_version < 9) {",
+     "older knob keys upgraded", "tests/test_knob_distance.py"),
+    # A knob's path is nudged by a hundredth of a frame (its keys are distances): a unit's hundredth crosses its box.
+    ("src/anim/motion_path.cc", "  return knob && bone_is_controller(*knob) ? STEP * controller_unit(*knob) : STEP;",
+     "  return false && knob && bone_is_controller(*knob) ? STEP * controller_unit(*knob) : STEP;",
+     "knob path nudge in frames", "tests/test_motion_path_control_edge.py"),
 ]
 
 def build(root):

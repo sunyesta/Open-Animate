@@ -705,6 +705,8 @@ add_test(NAME rest_keeps_animation
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_rest_keeps_animation.py)
 add_test(NAME pose_clipboard
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_clipboard.py)
+add_test(NAME knob_distance
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_knob_distance.py)
 add_test(NAME move_bones_and_points
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_move_bones_and_points.py)
 add_test(NAME pose_library

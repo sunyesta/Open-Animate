@@ -158,5 +158,16 @@ const ControllerSpot *controller_spot_find(const Bone &knob, const std::string &
 std::string controller_spot_unique_name(const Bone &knob, const std::string &name);
 /* The frame size that gives the box a sensible size for its actions (the longest side half a unit). */
 void controller_fit_size(Bone &knob);
+/* That size, for `knob` as it is. */
+float controller_fitted_size(const Bone &knob);
+/* How far one frame of the knob's actions is (bone layer units): its Frame Size, never 0. The knob's keys are distances,
+ * as any bone's Transform (its place against its rest point, along the box as it lies): frames are them over this. */
+float controller_unit(const Bone &knob);
+/* The knob's Transform (its keys' units) as frames, and frames as its Transform. */
+float2 controller_frames_of(const Bone &knob, float2 transform);
+float2 controller_transform_of(const Bone &knob, float2 frames);
+/* A new Frame Size for a controller: its keys (every action's) and its place scaled with it, so they put the knob on
+ * the same frames. */
+void controller_frame_size_set(Bone &knob, float size);
 
 }  // namespace oanim

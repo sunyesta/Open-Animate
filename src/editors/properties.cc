@@ -2019,12 +2019,16 @@ static void bone_panel(Context &C, Layer &armature)
     if (bone_is_controller(*active)) {
       if (doc.frame_current != 0) {
         keyed_field("Knob", "position", [&] {
-          float2 frames = controller_knob(*active);
-          if (ui_drag_float2("##knob", &frames.x, 0.5f, -100000.0f, 100000.0f, "%.1f")) {
-            controller_knob_set(*active, frames);
+          /* As far as a bone's Transform: what its keys hold. Its actions' frames are that over its Frame Size. */
+          const float2 frames = controller_knob(*active);
+          float2 moved = controller_transform_of(*active, frames);
+          if (ui_drag_float2("##knob", &moved.x, 0.005f, -100000.0f, 100000.0f, "%.3f")) {
+            controller_knob_set(*active, controller_frames_of(*active, moved));
           }
           if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-            ImGui::SetTooltip("Where the knob is, in frames of its actions: right and up are positive");
+            ImGui::SetTooltip("How far the knob is from its rest point, as a bone's Transform: right and up are "
+                              "positive. Frames of its actions: %.1f, %.1f",
+                              double(frames.x), double(frames.y));
           }
           if (ImGui::IsItemDeactivatedAfterEdit()) {
             C.undo->push("Move Knob", doc);

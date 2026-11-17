@@ -74,8 +74,10 @@ class Rig:
         return tuple(self.bone()["knob"])
 
     def keys(self):
-        return {k["frame"]: (tuple(k["value"]), k["interp"]) for k in self.rig.keyframes('bones["%s"].position' % self.name)
-                if k["frame"]}
+        # In frames: the keys hold how far the knob is, its frames times its Frame Size.
+        unit = self.bone()["controller_frame_size"]
+        return {k["frame"]: (tuple(round(v / unit, 4) + 0.0 for v in k["value"]), k["interp"])
+                for k in self.rig.keyframes('bones["%s"].position' % self.name) if k["frame"]}
 
     def where(self):
         return tuple(self.face.shown()[0][0])
@@ -164,7 +166,8 @@ assert _oanim.controller_preview_points(r.face.id) is None, "cleared"
 r.doc.frame_current = 90
 r.knob(25.0, 12.0)
 assert ops.armature.controller_spot_move(name="Smile") == {'FINISHED'}
-assert dict(r.spots())["Smile"] == (25.0, 12.0), r.spots()
+# (Kept as far as a bone moves, the frames come back within a float's rounding.)
+assert all(abs(a - b) < 1e-4 for a, b in zip(dict(r.spots())["Smile"], (25.0, 12.0))), r.spots()
 
 # --- Add Corners -------------------------------------------------------------------------------------------------------
 r = Rig()

@@ -1105,7 +1105,8 @@ int dynamics_bake(Document &doc, Layer *only)
           const float2 pull = poses[i].knob_pull - without[i].knob_pull;
           const float turn = wrap_pi(pose_angle(poses[i].knob) - pose_angle(without[i].knob));
           baked.push_back({&armature, b.id, f, b.angle - b.setup_angle + turn,
-                           controller_knob(b) + b.controller_frames_to_keys.apply_vector(pull), d.scale, d.angle_on,
+                           controller_transform_of(b, controller_knob(b) + b.controller_frames_to_keys.apply_vector(pull)),
+                           d.scale, d.angle_on,
                            d.position_on, false, true});
           continue;
         }

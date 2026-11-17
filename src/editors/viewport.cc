@@ -16062,7 +16062,7 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
     if (frames.y > 0.0f) {
       size = std::max(size, std::abs(d.y) / frames.y);
     }
-    knob->controller_frame_size = size;
+    controller_frame_size_set(*knob, size);
     knob->controller_size_auto = false;
     return;
   }

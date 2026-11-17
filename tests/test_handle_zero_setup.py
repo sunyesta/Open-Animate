@@ -74,7 +74,7 @@ path = os.path.join(folder, "new.oanim")
 assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
 with zipfile.ZipFile(path) as z:
     data = json.loads(z.read("document.json"))
-assert data["version"] == 8, data["version"]
+assert data["version"] == 9, data["version"]
 data["version"] = 7
 shifted = 0
 

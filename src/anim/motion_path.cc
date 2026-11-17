@@ -1963,6 +1963,17 @@ float2 *place_value(Document &doc, const MotionPathTarget &t, Bone **r_bone)
   return &layer->position;
 }
 
+/* How far a position value is nudged to find how the target moves with it: a hundredth of a unit, or of one frame of
+ * a knob's actions for a controller's knob (its keys are distances, a frame its box's Frame Size: a hundredth of a unit
+ * there is frames, past an edge of its box and too rough to find the box by). */
+static float value_nudge(const Document &doc, const MotionPathTarget &t)
+{
+  constexpr float STEP = 1e-2f;
+  const Layer *layer = t.bone && t.head ? layer_find(doc, t.layer) : nullptr;
+  const Bone *knob = layer ? bone_find(*layer, t.bone) : nullptr;
+  return knob && bone_is_controller(*knob) ? STEP * controller_unit(*knob) : STEP;
+}
+
 /* Moves `value` so `t` shows at `at`: how it moves the target is found by nudging it (bones, parents and skins move
  * a point, a head or an origin as a straight-line function of it), a few times over for anything that isn't quite.
  * Where it can't get there (a pupil held inside its eye by Look At, at the edge), as near as it gets, the value going
@@ -1979,7 +1990,7 @@ bool solve_position(Document &doc, const MotionPathTarget &t, float2 &value, flo
   float best_miss = first_miss;
   for (int iteration = 0; iteration < 6 && best_miss >= 1e-6f; iteration++) {
     const float2 miss = at - now;
-    const float h = 1e-2f;
+    const float h = value_nudge(doc, t);
     const float2 start = value;
     float2 dx, dy;
     value = start + float2{h, 0.0f};
@@ -2638,7 +2649,7 @@ bool key_jacobian(const Document &doc, const MotionPathTarget &t, int frame, flo
   }
   const Document &copy = moved ? *moved : doc;
   const float2 start = key->value;
-  const float h = 1e-2f;
+  const float h = value_nudge(doc, t);
   std::vector<HeldPlace> places(3);
   places[0].value = start;
   places[1].value = start + float2{h, 0.0f};
@@ -3179,13 +3190,12 @@ static void held_copy_places(const Document &doc, const Channel<float2> &held, c
   }, PLACES_HELD_KEY, &doc, &held);
 }
 
-constexpr float VALUE_STEP = 1e-2f;
-
 /* Off an edge it is held at, measured the other way (slopes_off_edges). */
 bool value_jacobian(const Document &doc, const MotionPathTarget &t, int frame, float2 value, float2 &r_at, float2 *r_cx,
                     float2 *r_cy)
 {
   OANIM_PROFILE("value_jacobian");
+  const float nudge = value_nudge(doc, t);
   Channel<float2> copy;
   if (!held_copy(doc, t, copy)) {
     return false;
@@ -3194,8 +3204,8 @@ bool value_jacobian(const Document &doc, const MotionPathTarget &t, int frame, f
   std::vector<HeldPlace> places(slopes ? 3 : 1);
   places[0].value = value;
   if (slopes) {
-    places[1].value = value + float2{VALUE_STEP, 0.0f};
-    places[2].value = value + float2{0.0f, VALUE_STEP};
+    places[1].value = value + float2{nudge, 0.0f};
+    places[2].value = value + float2{0.0f, nudge};
   }
   for (HeldPlace &p : places) {
     p.frame = frame;
@@ -3208,9 +3218,9 @@ bool value_jacobian(const Document &doc, const MotionPathTarget &t, int frame, f
   if (!(places[0].ok && places[1].ok && places[2].ok)) {
     return false;
   }
-  *r_cx = (places[1].at - r_at) / VALUE_STEP;
-  *r_cy = (places[2].at - r_at) / VALUE_STEP;
-  slopes_off_edges(value, frame, VALUE_STEP, r_at, *r_cx, *r_cy,
+  *r_cx = (places[1].at - r_at) / nudge;
+  *r_cy = (places[2].at - r_at) / nudge;
+  slopes_off_edges(value, frame, nudge, r_at, *r_cx, *r_cy,
                    [&](std::vector<HeldPlace> &ps) { held_copy_places(doc, copy, t, ps); });
   return true;
 }
@@ -3236,6 +3246,7 @@ static bool value_step(const Document &doc, const MotionPathTarget &t, int frame
    * the box the place goes straight with the value, past an edge it stops: placed a nudge past the step's end, how far
    * it got, against its rate, is where the edge is, and the step stops a quarter nudge short of it. The rate is
    * measured inside (halfway to where the slope puts the edge): the slopes are nudges, too rough to find it by. */
+  const float nudge = value_nudge(doc, t);
   const float2 whole = r_step;
   for (int axis = 0; axis < 2; axis++) {
     const float amount = axis == 0 ? whole.x : whole.y, along = std::abs(amount);
@@ -3244,7 +3255,7 @@ static bool value_step(const Document &doc, const MotionPathTarget &t, int frame
     }
     const float2 one = axis == 0 ? float2{amount, 0.0f} : float2{0.0f, amount};
     const float2 slope = (axis == 0 ? cx : cy) * amount;
-    const float past = 1.0f + VALUE_STEP / along;
+    const float past = 1.0f + nudge / along;
     float2 far, in;
     if (!value_jacobian(doc, t, frame, v + one * past, far, nullptr, nullptr)) {
       continue;
@@ -3258,10 +3269,10 @@ static bool value_step(const Document &doc, const MotionPathTarget &t, int frame
         edge = dot(got, rate) / dot(rate, rate);
       }
     }
-    if (edge >= 1.0f + 0.5f * VALUE_STEP / along) {
+    if (edge >= 1.0f + 0.5f * nudge / along) {
       continue;
     }
-    (axis == 0 ? r_step.x : r_step.y) *= std::clamp(edge - 0.25f * VALUE_STEP / along, 0.0f, 1.0f);
+    (axis == 0 ? r_step.x : r_step.y) *= std::clamp(edge - 0.25f * nudge / along, 0.0f, 1.0f);
   }
   return true;
 }
@@ -5333,6 +5344,7 @@ std::vector<MotionPathControl> motion_path_controls(const Document &doc, const M
     size_t key = 0, j = 0, place = 0;
     bool tips = false;
   };
+  const float nudge = value_nudge(doc, target);
   std::vector<Wanted> wanted;
   std::vector<HeldPlace> places;
   for (size_t i = 1; i < ch->keys.size(); i++) {
@@ -5351,8 +5363,8 @@ std::vector<MotionPathControl> motion_path_controls(const Document &doc, const M
       places.push_back({f, v});
       places.push_back({f, ch->evaluate(f)});
       if (w.tips) {
-        places.push_back({f, v + float2{VALUE_STEP, 0.0f}});
-        places.push_back({f, v + float2{0.0f, VALUE_STEP}});
+        places.push_back({f, v + float2{nudge, 0.0f}});
+        places.push_back({f, v + float2{0.0f, nudge}});
       }
       wanted.push_back(w);
     }
@@ -5373,7 +5385,7 @@ std::vector<MotionPathControl> motion_path_controls(const Document &doc, const M
     c.in_tip = c.out_tip = c.at;
     if (w.tips) {
       /* The handles as the path runs along them, shown through how the channel shows there (as the point). */
-      const float2 cx = (p[2].at - c.at) / VALUE_STEP, cy = (p[3].at - c.at) / VALUE_STEP;
+      const float2 cx = (p[2].at - c.at) / nudge, cy = (p[3].at - c.at) / nudge;
       const StretchPoints s = stretch_points(ch->keys, w.key);
       c.in_tip = c.at + cx * s.in[w.j + 1].x + cy * s.in[w.j + 1].y;
       c.out_tip = c.at + cx * s.out[w.j + 1].x + cy * s.out[w.j + 1].y;

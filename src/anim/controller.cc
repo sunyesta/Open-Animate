@@ -224,9 +224,30 @@ void controller_box(const Bone &knob, float2 &lo, float2 &hi)
   hi = {reach(CONTROLLER_RIGHT), reach(CONTROLLER_UP)};
 }
 
+float controller_unit(const Bone &knob)
+{
+  return std::max(knob.controller_frame_size, 1e-6f);
+}
+
+float2 controller_frames_of(const Bone &knob, float2 transform)
+{
+  return transform / controller_unit(knob);
+}
+
+float2 controller_transform_of(const Bone &knob, float2 frames)
+{
+  return frames * controller_unit(knob);
+}
+
+/* The knob put at `frames` (its keys hold the distance). */
+static void knob_position_set(Bone &knob, float2 frames)
+{
+  knob.position = bone_position_from_transform(knob, controller_transform_of(knob, frames));
+}
+
 float2 controller_knob(const Bone &knob)
 {
-  return bone_transform_from_position(knob, knob.position);
+  return controller_frames_of(knob, bone_transform_from_position(knob, knob.position));
 }
 
 float2 controller_knob_clamped(const Bone &knob)
@@ -275,32 +296,34 @@ void controller_knob_set(Bone &knob, float2 frames)
     /* In a side's own action: along that side, keying how far it goes on this frame. */
     const int side = knob.controller_knob_edit_side;
     const float2 to = controller_side_only(side, frames);
-    knob.position = bone_position_from_transform(knob, to);
+    knob_position_set(knob, to);
     /* Shown at its timing but valued where its keys are: a move onto that value (back to rest with none) is no
      * change to record, though it moved, so it keys here. Its channel keys the move from the setup pose. */
     Channel<float2> &ch = knob.position_keys;
     const float2 shown = controller_side_only(side, knob.controller_knob_edit_at);
     const auto same = [](float2 a, float2 b) { return std::hypot(a.x - b.x, a.y - b.y) <= 1e-5f; };
-    if (knob.controller_knob_edit_frame > 0 && ch.has_last && same(to, ch.last) && !same(to, shown)) {
+    if (knob.controller_knob_edit_frame > 0 && ch.has_last && same(to, controller_frames_of(knob, ch.last)) &&
+        !same(to, shown))
+    {
       if (!ch.animated()) {
         ch.set_key(0, float2() - ch.from_action_bones);
       }
-      ch.set_key(knob.controller_knob_edit_frame, to - ch.from_action_bones);
+      ch.set_key(knob.controller_knob_edit_frame, controller_transform_of(knob, to) - ch.from_action_bones);
     }
     return;
   }
   if (knob.controller_knob_independent) {
     /* A place in the picture: the box may have moved from under it, so it is kept in the box as it plays. */
-    knob.position = bone_position_from_transform(knob, frames);
+    knob_position_set(knob, frames);
     return;
   }
   if (!knob.controller_contain_knob) {
-    knob.position = bone_position_from_transform(knob, frames);
+    knob_position_set(knob, frames);
     return;
   }
   float2 lo, hi;
   controller_box(knob, lo, hi);
-  knob.position = bone_position_from_transform(knob, {std::clamp(frames.x, lo.x, hi.x), std::clamp(frames.y, lo.y, hi.y)});
+  knob_position_set(knob, {std::clamp(frames.x, lo.x, hi.x), std::clamp(frames.y, lo.y, hi.y)});
 }
 
 void controller_knob_put(Bone &knob, float2 at)
@@ -314,7 +337,7 @@ void controller_knob_put(Bone &knob, float2 at)
     controller_box(knob, lo, hi);
     at = {std::clamp(at.x, lo.x, hi.x), std::clamp(at.y, lo.y, hi.y)};
   }
-  knob.position = bone_position_from_transform(knob, knob.controller_frames_to_keys.apply(at - knob.controller_knob_pull_now));
+  knob_position_set(knob, knob.controller_frames_to_keys.apply(at - knob.controller_knob_pull_now));
 }
 
 float2 controller_knob_seen(const Bone &knob)
@@ -345,7 +368,7 @@ void controller_knob_move(Bone &knob, const BonePose &pose, float2 delta)
       controller_box(knob, lo, hi);
       to = {std::clamp(to.x, lo.x, hi.x), std::clamp(to.y, lo.y, hi.y)};
     }
-    knob.position = bone_position_from_transform(knob, to - pose.knob_pull);
+    knob_position_set(knob, to - pose.knob_pull);
     return;
   }
   /* From where it is seen (held at the edge, or past it), the way the mouse goes; contained, it stops at the edge, so
@@ -359,7 +382,7 @@ void controller_knob_move(Bone &knob, const BonePose &pose, float2 delta)
   /* Its keys without what its constraints add. */
   const float2 place = controller_box_point(knob, pose, to - pose.knob_pull);
   const float2 keyed = rotate(pose.knob_parent_skin.inverted().apply(place) - pose.setup_head, -knob.controller_box_angle);
-  knob.position = bone_position_from_transform(knob, keyed / size);
+  knob_position_set(knob, keyed / size);
 }
 
 void controller_knob_snap(Bone &knob)
@@ -401,14 +424,48 @@ std::string controller_spot_unique_name(const Bone &knob, const std::string &nam
   return unique;
 }
 
-void controller_fit_size(Bone &knob)
+float controller_fitted_size(const Bone &knob)
 {
   float longest = float(CONTROLLER_EMPTY_FRAMES);
   for (int side = 0; side < CONTROLLER_SIDES; side++) {
     /* By the actions' lengths, not the timing: keying the knob never rescales the box under it. */
     longest = std::max(longest, controller_side_frames(knob, side));
   }
-  knob.controller_frame_size = 0.5f / longest;
+  return 0.5f / longest;
+}
+
+void controller_fit_size(Bone &knob)
+{
+  knob.controller_frame_size = controller_fitted_size(knob);
+}
+
+void controller_frame_size_set(Bone &knob, float size)
+{
+  const float k = std::max(size, 1e-6f) / controller_unit(knob);
+  knob.controller_frame_size = size;
+  if (std::abs(k - 1.0f) < 1e-7f) {
+    return;
+  }
+  const auto scale = [&](float2 &v) { v = v * k; };
+  const auto each = [&](std::vector<Key<float2>> &keys) {
+    for (Key<float2> &key : keys) {
+      key.value = key.value * k;
+      key_path_shape_map(key, scale);
+    }
+  };
+  Channel<float2> &ch = knob.position_keys;
+  each(ch.keys);
+  for (auto &[action, keys] : ch.actions) {
+    each(keys);
+  }
+  for (auto &[action, key] : ch.action_setup) {
+    key.value = key.value * k;
+    key_path_shape_map(key, scale);
+  }
+  ch.last = ch.last * k;
+  ch.from_action_bones = ch.from_action_bones * k;
+  knob.transform = knob.transform * k;
+  knob.position = bone_position_from_transform(knob, bone_transform_from_position(knob, knob.position) * k);
 }
 
 }  // namespace oanim

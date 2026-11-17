@@ -274,6 +274,7 @@ assert ops.anim.motion_path_select(frame="30") == {'FINISHED'}
 assert ops.anim.motion_path_keys_transform(kind="G", x=str(25 * size), y="0") == {'FINISHED'}, (
     "past the box's edge (40): as far as it goes")
 knob = next(k for k in rig.keyframes('bones["eye"].position') if k["frame"] == 30)["value"]
+knob = (knob[0] / size, knob[1] / size)  # keyed as distance: frames are that over the Frame Size
 assert close(knob, (40.0, 0.0), 0.05), ("the key at the edge, not past it", knob)
 
 

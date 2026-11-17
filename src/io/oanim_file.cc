@@ -1777,6 +1777,60 @@ static bool value_from_json(const json &j, float2 *r)
 /* The file being read: its format version. */
 static int g_loading_version = OANIM_FILE_VERSION;
 
+/* Before format 9 a 2 Axis Controller's knob was keyed in frames of its actions; now as far as any bone's Transform:
+ * every knob's keys (every action's too) and place, and the poses kept in the file, times its Frame Size. */
+static void controllers_keys_to_distance(Document &doc)
+{
+  for (const Layer *flat : document_layers_flat(doc)) {
+    if (!flat->is_bone_layer()) {
+      continue;
+    }
+    Layer &owner = *layer_find(doc, flat->id);
+    for (Bone &b : owner.bones) {
+      if (bone_is_controller(b)) {
+        const float size = b.controller_frame_size;
+        b.controller_frame_size = 1.0f;
+        controller_frame_size_set(b, size);
+      }
+    }
+  }
+  for (PoseAsset &p : doc.poses) {
+    json pose = json::parse(p.pose, nullptr, false);
+    if (!pose.is_object() || !pose.contains("layers") || !pose["layers"].is_array()) {
+      continue;
+    }
+    for (json &lj : pose["layers"]) {
+      if (!lj.is_object() || !lj.contains("bones") || !lj["bones"].is_array()) {
+        continue;
+      }
+      const Layer *rig = layer_find(doc, lj.value("id", uint64_t(0)));
+      for (const Layer *l : document_layers_flat(doc)) {
+        if ((!rig || !rig->is_bone_layer()) && l->is_bone_layer() && l->name == lj.value("name", std::string())) {
+          rig = l;
+        }
+      }
+      if (!rig || !rig->is_bone_layer()) {
+        continue;
+      }
+      for (json &bj : lj["bones"]) {
+        const std::string name = bj.is_object() ? bj.value("name", std::string()) : std::string();
+        const auto b = std::find_if(rig->bones.begin(), rig->bones.end(), [&](const Bone &o) { return o.name == name; });
+        if (b == rig->bones.end() || !bone_is_controller(*b)) {
+          continue;
+        }
+        for (const char *key : {"transform", "transform_add"}) {
+          if (bj.contains(key) && bj[key].is_array() && bj[key].size() == 2) {
+            for (json &v : bj[key]) {
+              v = v.get<float>() * b->controller_frame_size;
+            }
+          }
+        }
+      }
+    }
+    p.pose = pose.dump();
+  }
+}
+
 /* Before format 6 a control point (Key::path_controls) was kept relative to its stretch's keys, x along the line from
  * the key before to its own, y across it (in that line's length; an offset from them where they were on top of each
  * other), and its handles' offsets the same way: now each is where it is. */
@@ -4275,6 +4329,9 @@ bool oanim_document_from_json(const std::string &text, Document &r_doc, std::str
   document_weight_new_points(doc, true);
   /* Older files' Vector Deforms become the deform their shape fits. */
   vector_deform_resolve_legacy(doc);
+  if (g_loading_version < 9) {
+    controllers_keys_to_distance(doc);
+  }
   /* Older files' controller sides linked to a bone's own action get ordinary actions of their own. */
   controller_links_undo(doc);
   bone_fix_names_follow(doc);

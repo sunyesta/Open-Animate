@@ -142,12 +142,14 @@ rig.bone_set("stick", knob=(0.0, -5.0))
 assert close(bone("stick")["knob"], (0.0, 0.0)), "no Down action, no way down"
 settle()
 
-# Keys hold frames: a longer action leaves a key on its pose, a shorter one shows the last frame.
+# Keys hold how far the knob is, as any bone's Transform (its frames times its Frame Size): a longer action leaves a key
+# on its pose, a shorter one shows the last frame.
 rig.bone_set("stick", knob=(20.0, 0.0))
 doc.frame_current = 11
 doc.frame_current = 10
 assert any(k["frame"] == 10 for k in rig.keyframes('bones["stick"].position')), "the knob keys as any bone does"
-assert close(rig.keyframes('bones["stick"].position')[-1]["value"], (20.0, 0.0))
+unit = bone("stick")["controller_frame_size"]
+assert close(rig.keyframes('bones["stick"].position')[-1]["value"], (20.0 * unit, 0.0)),     (rig.keyframes('bones["stick"].position')[-1], unit)
 doc.frame_current = 0
 doc.action = "Look Right"
 doc.frame_current = 60
@@ -489,6 +491,6 @@ assert bone("stick")["type"] == "CONTROLLER_2D"
 assert bone("stick")["controller_actions"]["RIGHT"] == "Look Right"
 assert close(bone("stick")["controller_frame_size"], 0.01, 1e-6)
 assert bone("stick")["controller_box"] == ((-30.0, 0.0), (15.0, 20.0)), bone("stick")
-assert any(k["frame"] == 22 and close(k["value"], (10.0, 0.0)) for k in rig.keyframes('bones["stick"].position'))
+assert any(k["frame"] == 22 and close(k["value"], (10.0 * 0.01, 0.0)) for k in rig.keyframes('bones["stick"].position'))
 
 print("controller ok")

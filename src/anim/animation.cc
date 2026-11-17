@@ -3453,7 +3453,7 @@ static BoneFixPlay bone_fix_play_with(const Layer &owner, const BoneFix &fix, bo
       x.now = now(i, 0);
       y.now = now(i, 1);
       for (int s = 0; s < samples; s++) {
-        const float2 at = line.at(t_of(s));
+        const float2 at = controller_frames_of(b, line.at(t_of(s)));
         x.line.push_back(at.x);
         y.line.push_back(at.y);
       }
@@ -3600,7 +3600,7 @@ std::string bone_fix_name(const Layer &owner, const BoneFix &fix, bool edited, i
         continue;
       }
       const BoneFixSampler<float2> line(keys, channel_setup(b->position_keys, b->transform));
-      const float2 at = line.at(float(frame >= 0 ? frame : keys->back().frame));
+      const float2 at = controller_frames_of(*b, line.at(float(frame >= 0 ? frame : keys->back().frame)));
       /* Up or Down first, as said aloud ("up and right"). */
       for (const auto &[v, plus, minus] : {std::tuple(at.y, CONTROLLER_UP, CONTROLLER_DOWN),
                                            std::tuple(at.x, CONTROLLER_RIGHT, CONTROLLER_LEFT)})
@@ -3658,9 +3658,9 @@ std::string bone_fix_name(const Layer &owner, const BoneFix &fix, bool edited, i
 static float2 bone_fix_at(const Bone &b, const BoneFix &fix, bool edited, float frame)
 {
   if (bone_is_controller(b)) {
-    return BoneFixSampler<float2>(bone_fix_keys(b.position_keys, fix.name, edited),
-                                  channel_setup(b.position_keys, b.transform))
-        .at(frame);
+    return controller_frames_of(b, BoneFixSampler<float2>(bone_fix_keys(b.position_keys, fix.name, edited),
+                                                          channel_setup(b.position_keys, b.transform))
+                                       .at(frame));
   }
   const float setup = channel_setup(b.angle_keys, b.turn);
   return {BoneFixSampler<float>(bone_fix_keys(b.angle_keys, fix.name, edited), setup).at(frame) - setup, 0.0f};
@@ -3798,7 +3798,7 @@ std::string document_bone_fix_new(Document &doc, uint64_t owner_id, const std::v
       const ChannelKeysQuiet scratch;
       Channel<float2> c;
       c.set_key(0, channel_setup(b.position_keys, b.transform));
-      c.set_key(1, controller_knob_played(*owner, b));
+      c.set_key(1, controller_transform_of(b, controller_knob_played(*owner, b)));
       b.position_keys.actions[fix.name] = c.keys;
     }
     else {
@@ -3948,7 +3948,7 @@ void action_bone_actions_add_at(const Layer &owner, int frame, std::vector<Bone>
   const auto play_fix = [&](const BoneFix &fix) {
     const BoneFixPlay at = bone_fix_play_with(owner, fix, false, [&](size_t i, int axis) {
       if (bone_is_controller(owner.bones[i])) {
-        const float2 k = bone_transform_from_position(owner.bones[i], bones[i].position);
+        const float2 k = controller_frames_of(owner.bones[i], bone_transform_from_position(owner.bones[i], bones[i].position));
         return axis == 0 ? k.x : k.y;
       }
       return bones[i].angle - owner.bones[i].setup_angle;
@@ -4439,7 +4439,8 @@ void controllers_update(Document &doc)
         float most = 0.0f;
         for (size_t k = 0; keys && k < keys->size(); k++) {
           const Key<float2> &key = (*keys)[k];
-          const float along = (controller_side_axis(side) == 0 ? key.value.x : key.value.y) * controller_side_sign(side);
+          const float2 frames = controller_frames_of(knob, key.value);
+          const float along = (controller_side_axis(side) == 0 ? frames.x : frames.y) * controller_side_sign(side);
           if (key.frame <= 0) {
             continue;
           }
@@ -4456,7 +4457,7 @@ void controllers_update(Document &doc)
       const bool sides_keyed = std::any_of(knob.controller_timing.begin(), knob.controller_timing.end(),
                                            [](const std::vector<float2> &t) { return !t.empty(); });
       if (knob.controller_size_auto && !sides_keyed) {
-        controller_fit_size(knob);
+        controller_frame_size_set(knob, controller_fitted_size(knob));
       }
       /* A side not keyed yet is as long as the opposite side is keyed (its own action's length when that isn't), its
        * frames even along it, until its knob is keyed. */
@@ -4578,26 +4579,6 @@ template<typename C> static void bone_fix_lines_drop(const Layer &owner, const B
   }
 }
 
-/* A bone's position keys scaled by `k` (a knob's frames as moves, or back), their paths' shapes with them: the
- * mainline's with `mainline`, and always every ordinary action's (an action that isn't a side's or a fix's line: those
- * are dropped). */
-static void position_keys_scale(Bone &bone, float k, bool mainline)
-{
-  const auto scale = [&](float2 &v) { v = v * k; };
-  const auto each = [&](std::vector<Key<float2>> &keys) {
-    for (Key<float2> &key : keys) {
-      key.value = key.value * k;
-      key_path_shape_map(key, scale);
-    }
-  };
-  if (mainline) {
-    each(bone.position_keys.keys);
-  }
-  for (auto &[action, keys] : bone.position_keys.actions) {
-    each(keys);
-  }
-}
-
 std::string bone_convert_to_controller(Document &doc, uint64_t owner_id, uint64_t bone_id)
 {
   Layer *owner = layer_find(doc, owner_id);
@@ -4655,19 +4636,17 @@ std::string bone_convert_to_controller(Document &doc, uint64_t owner_id, uint64_
     };
     controller_keys_copy(angle_keys, bone->position_keys, [&](int, float turn) {
       const float right = frame_of(own[0], turn);
-      return float2(right > 0.0f ? right : -frame_of(own[1], turn), 0.0f);
+      return controller_transform_of(*bone, float2(right > 0.0f ? right : -frame_of(own[1], turn), 0.0f));
     });
-    /* Its moves in other actions are the knob's frames now. */
-    position_keys_scale(*bone, 1.0f / bone->controller_frame_size, false);
+    /* Its moves in other actions are the knob's now, as far. */
   }
   else {
-    /* Moves it was keyed with stay, as frames (in every action too), and come back the same: its size stays as it is
+    /* Moves it was keyed with stay, as far (in every action too), and come back the same: its size stays as it is
      * for that. */
     bone->angle_keys.keys = std::move(angle_keys);
     bone->controller_size_auto = bone->position_keys.keys.empty() &&
                                  std::all_of(bone->position_keys.actions.begin(), bone->position_keys.actions.end(),
                                              [](const auto &a) { return a.second.empty(); });
-    position_keys_scale(*bone, 1.0f / bone->controller_frame_size, true);
   }
   bone->angle = bone->setup_angle;
   bone->turn = 0.0f;
@@ -4700,8 +4679,9 @@ std::string bone_convert_to_regular(Document &doc, uint64_t owner_id, uint64_t b
     bone->angle_keys.keys.clear();
     controller_keys_copy(bone->position_keys.keys, bone->angle_keys, [&](int, float2 at) {
       /* How far out is a frame through the side's timing. */
-      return at.x > 0.0f ? turn_at(own[0], controller_side_frame(*bone, CONTROLLER_RIGHT, at.x)) :
-                           turn_at(own[1], controller_side_frame(*bone, CONTROLLER_LEFT, -at.x));
+      const float x = controller_frames_of(*bone, at).x;
+      return x > 0.0f ? turn_at(own[0], controller_side_frame(*bone, CONTROLLER_RIGHT, x)) :
+                        turn_at(own[1], controller_side_frame(*bone, CONTROLLER_LEFT, -x));
     });
     bone->position_keys.keys.clear();
   }
@@ -4713,8 +4693,8 @@ std::string bone_convert_to_regular(Document &doc, uint64_t owner_id, uint64_t b
     }
   }
   bone_fix_lines_drop(*owner, *bone, bone->position_keys);
-  /* The knob's frames stay, as moves: the mainline's where it had no sides of its own, every other action's always. */
-  position_keys_scale(*bone, bone->controller_frame_size, !(own_right || own_left));
+  /* The knob's keys stay, as moves (they are distances already): the mainline's where it had no sides of its own, every
+   * other action's always. */
   bone->type = BoneType::Regular;
   bone->controller_actions = {};
   bone->controller_keys = {};

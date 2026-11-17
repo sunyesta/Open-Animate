@@ -784,7 +784,7 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
                                                      controller_knob_place(bone, p);
       /* Moved in its side's own action and not yet keyed: where it is going. */
       if (bone.controller_knob_edit_side >= 0 && bone.position_keys.has_last) {
-        const float2 now = controller_knob(bone), was = bone.position_keys.last;
+        const float2 now = controller_knob(bone), was = controller_frames_of(bone, bone.position_keys.last);
         if (std::hypot(now.x - was.x, now.y - was.y) > 1e-5f) {
           frames = controller_side_only(bone.controller_knob_edit_side, now);
         }
