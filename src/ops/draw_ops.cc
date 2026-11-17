@@ -141,7 +141,7 @@ static bool stroke_line(Context &C, VectorDrawing &drawing, const InkStroke &ink
 }
 
 bool draw_live_line(const ToolSettings &ts, const InkStroke &ink, float2 tip, int shapes_before,
-                    VectorDrawing &r_drawing)
+                    VectorDrawing &r_drawing, bool open_end)
 {
   const Brush *brush = brush_find(ts.style.brush.name);
   if (ink.empty() || !brush || brush_tip_images(*brush, ts.style.brush).empty()) {
@@ -150,7 +150,11 @@ bool draw_live_line(const ToolSettings &ts, const InkStroke &ink, float2 tip, in
   std::vector<InkPoint> line = ink.points();
   const std::vector<InkPoint> tail = ink.tail(tip);
   line.insert(line.end(), tail.begin(), tail.end());
-  ink_taper(line, ink.settings(), ink.view());
+  InkSettings taper = ink.settings();
+  if (open_end) {
+    taper.taper_end = 0.0f;
+  }
+  ink_taper(line, taper, ink.view());
   if (line.size() < 2) {
     return false;
   }
@@ -177,6 +181,10 @@ bool draw_live_line(const ToolSettings &ts, const InkStroke &ink, float2 tip, in
   Shape shape;
   shape.style = ts.style;
   shape.style.line_width = ink.view().half_width * 2.0f;
+  if (open_end) {
+    shape.style.brush.size_fade_out = 0;
+    shape.style.brush.opacity_fade_out = 0;
+  }
   for (int s = 0; s < r_drawing.curves.back().segment_count(); s++) {
     shape.edges.push_back({0, s});
   }

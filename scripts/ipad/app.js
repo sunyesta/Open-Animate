@@ -181,48 +181,164 @@ function penHalfWidth() {
   return Math.max(px * 0.5, 0.5);
 }
 
-/* A brushed line's tip ([x, y, half width, opacity] in canvas pixels) as stamps of the brush (the brush button's
- * preview says which images and how they're laid), added to `out` as a line of dabs; false for a plain line. */
-function stampsTip(s, tip, out) {
+/* The brush engine's random numbers (gpu/brush_stroke.cc), so the tip's stamps turn, size and scatter as the brush's. */
+function hash32(x) {
+  x = (x ^ (x >>> 16)) >>> 0;
+  x = Math.imul(x, 0x7feb352d) >>> 0;
+  x = (x ^ (x >>> 15)) >>> 0;
+  x = Math.imul(x, 0x846ca68b) >>> 0;
+  return (x ^ (x >>> 16)) >>> 0;
+}
+const random01 = (seed, i) => (hash32((seed ^ hash32((i + 0x9e3779b9) >>> 0)) >>> 0) & 0xffffff) / 0x1000000;
+function smoothNoise(seed, x) {
+  const f = Math.floor(x), t = x - f, i = (f | 0) >>> 0;
+  const a = random01(seed, i) * 2 - 1, b = random01(seed, (i + 1) >>> 0) * 2 - 1;
+  return a + (b - a) * t * t * (3 - 2 * t);
+}
+function rgbToHsv(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d > 0) {
+    h = (mx === r ? (g - b) / d : mx === g ? 2 + (b - r) / d : 4 + (r - g) / d) / 6;
+    h -= Math.floor(h);
+  }
+  return [h, mx > 0 ? d / mx : 0, mx];
+}
+function hsvToRgb(h, s, v) {
+  h = (h - Math.floor(h)) * 6;
+  const i = Math.floor(h) % 6, f = h - Math.floor(h);
+  const p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));
+  return [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][i];
+}
+
+/* The tip's width and opacity at a pressure, as the Stroke Pen's (ink_stroke.cc): the pen's pressure curve, its
+ * least size and, with opacity from pressure, its least opacity. */
+function tipPoint(p) {
+  const st = state.settings, curve = st.pressure_curve || [0.25, 0.25, 0.75, 0.75];
+  const c = curveAt(curve, Math.min(Math.max(p, 0), 1));
+  const size = st.min_size + (1 - st.min_size) * (st.use_pressure ? c : 1);
+  const opacity = st.opacity_pressure && state.mode === 'FREEHAND' ? st.min_opacity + (1 - st.min_opacity) * c : 1;
+  return [size, opacity];
+}
+
+/* A brushed line's tip ([x, y, half width, opacity] in canvas pixels, from `along` pixels into the line) as stamps of
+ * the brush, laid as brush_stroke lays them (the brush button's preview says which images and how), added to `out`
+ * as a line of dabs; false for a plain line. The stamps are numbered on from the line sent back, with its seed, so
+ * each gets the random turn, size and place the line will give it there. */
+function stampsTip(s, tip, along, out) {
   const b = brushPreview;
   if (!state || state.mode !== 'FREEHAND' || !b || b.kind !== 'dabs' || !b.tip || !b.images.length) return false;
-  const t = b.tip, ids = b.images.map((im) => String(im.id));
-  const c = state.settings.line_color, alpha = c[3];
-  const col = b.own ? [alpha, alpha, alpha, alpha] : [c[0] * alpha, c[1] * alpha, c[2] * alpha, alpha];
+  const t = b.tip, br = t.brush || {}, ids = b.images.map((im) => String(im.id)), n = ids.length;
+  const c = state.settings.line_color;
+  const seed = s.seed !== undefined ? s.seed : hash32(Math.imul(s.id, 2654435761) >>> 0);
+  const shapeDyn = br.shapeDynamics !== false, scatterOn = br.scattering !== false, transfer = br.transfer !== false;
+  const drift = br.colorDynamics !== false && (br.hueDrift || br.satDrift || br.valDrift);
+  const hsv = rgbToHsv(c[0], c[1], c[2]);
+  const wave = Math.max(br.sizeVariationScale || 0.3, 0.001) * canvasH;
+  const fromStart = s.n === 0;
   const dabs = new Map();
   const u0 = t.flip_x ? 1 : 0, u1 = 1 - u0, v0 = t.flip_y ? 1 : 0, v1 = 1 - v0;
-  /* `since`: how far the line has gone since the last stamp (the line sent back has the ones before the tip). */
-  let k = 0, since = s.n > 0 ? 0 : Infinity;
-  const stamp = (x, y, h, angle) => {
-    const i = k++ % ids.length, aspect = t.aspects[i] > 0 ? t.aspects[i] : 1, size = 2 * h;
+  /* One stamp, as brush_stroke's: its middle, size, turn on the canvas (y runs down, so the document's turns run the
+   * other way) and squash, its image and premultiplied colour. */
+  const stamp = (x, y, size, angle, squash, image, col) => {
+    const aspect = t.aspects[image] > 0 ? t.aspects[image] : 1;
     const hx = aspect >= 1 ? size * 0.5 : size * 0.5 * aspect;
-    const hy = (aspect >= 1 ? size * 0.5 / aspect : size * 0.5) * t.roundness;
+    const hy = (aspect >= 1 ? size * 0.5 / aspect : size * 0.5) * squash;
     const ca = Math.cos(angle), sa = Math.sin(angle);
-    const ax = [ca * hx, sa * hx], ay = [-sa * hy, ca * hy];
+    const ax = [ca * hx, sa * hx], ay = [sa * hy, -ca * hy];
     const v = (px, py, u, w) => [px, py, u, w, ...col];
     const tl = v(x - ax[0] + ay[0], y - ax[1] + ay[1], u0, v0), tr = v(x + ax[0] + ay[0], y + ax[1] + ay[1], u1, v0);
-    const br = v(x + ax[0] - ay[0], y + ax[1] - ay[1], u1, v1), bl = v(x - ax[0] - ay[0], y - ax[1] - ay[1], u0, v1);
-    const list = dabs.get(ids[i]) || [];
-    list.push(...tl, ...tr, ...br, ...tl, ...br, ...bl);
-    dabs.set(ids[i], list);
+    const bot = v(x + ax[0] - ay[0], y + ax[1] - ay[1], u1, v1), bl = v(x - ax[0] - ay[0], y - ax[1] - ay[1], u0, v1);
+    const key = ids[image], list = dabs.get(key) || [];
+    list.push(...tl, ...tr, ...bot, ...tl, ...bot, ...bl);
+    dabs.set(key, list);
   };
+  /* A place on the line: `a` pixels along it, `dx, dy` the way it runs, `h` its half width, `o` its opacity. */
+  let place = fromStart ? 0 : s.places || 0;
+  const dab = (x, y, a, dx, dy, h, o) => {
+    const order = place++, id = Math.imul(order, 32) >>> 0;
+    const width = 2 * h;
+    let size = width, angle = -t.angle;
+    if (shapeDyn) {
+      if (br.sizeVariationAmp > 0) size *= Math.max(0, 1 + br.sizeVariationAmp * smoothNoise((seed ^ 0xa511e9b3) >>> 0, a / wave));
+      if (fromStart && br.sizeFadeIn > 0) size *= Math.min(1, (order + 1) / br.sizeFadeIn);
+      if (t.align) angle += Math.atan2(dy, dx) + Math.PI / 2;
+      if (br.angleDrift) angle -= br.angleDrift * smoothNoise((seed ^ 0x63d83595) >>> 0, a / Math.max(40 * h, 1e-6));
+    }
+    let shows = Math.min(Math.max(c[3], 0), 1) * o;
+    if (transfer && fromStart && br.opacityFadeIn > 0) shows *= Math.min(1, (order + 1) / br.opacityFadeIn);
+    let copies = 1;
+    if (scatterOn && br.count > 1) {
+      copies = br.count;
+      if (br.countJitter > 0) copies = Math.max(1, Math.round(copies * (1 - br.countJitter * random01((seed ^ 0x2f8a1b7d) >>> 0, id))));
+    }
+    for (let copy = 0; copy < copies; copy++) {
+      const cid = copy === 0 ? id : hash32((Math.imul(id, 31) + Math.imul(copy, 0x9e3779b9)) >>> 0);
+      let px = x, py = y;
+      if (scatterOn && br.scatter > 0) {
+        /* Across the line: the document's left of the way it runs, which is the canvas's right (y runs down). */
+        const off = (random01((seed ^ 0x5bd1e995) >>> 0, cid) * 2 - 1) * br.scatter * width;
+        px += dy * off;
+        py -= dx * off;
+        if (br.scatterBoth) {
+          const on = (random01((seed ^ 0x68e31da4) >>> 0, cid) * 2 - 1) * br.scatter * width;
+          px += dx * on;
+          py += dy * on;
+        }
+      }
+      let sz = size, turn = angle, squash = Math.min(Math.max(t.roundness, 0.01), 1);
+      if (shapeDyn) {
+        if (br.sizeJitter > 0) sz *= Math.max(br.sizeMin || 0, 1 - br.sizeJitter * random01((seed ^ 0x7a2c4e11) >>> 0, cid));
+        turn -= (random01(seed, (Math.imul(cid, 3) + 0) >>> 0) - 0.5) * (br.jitter || 0);
+        if (br.roundnessJitter > 0) squash *= Math.max(0.01, 1 - br.roundnessJitter * random01((seed ^ 0x3c6ef372) >>> 0, cid));
+      }
+      const image = br.randomOrder !== false ? Math.floor(random01(seed, (Math.imul(cid, 3) + 1) >>> 0) * n) % n : order % n;
+      let rgb = [c[0], c[1], c[2]];
+      if (drift) {
+        const r1 = random01(seed, (Math.imul(cid, 3) + 2) >>> 0), r2 = random01((seed ^ 0x1b873593) >>> 0, cid);
+        const r3 = random01((seed ^ 0xcc9e2d51) >>> 0, cid);
+        rgb = hsvToRgb(hsv[0] + (r1 - 0.5) * 2 * (br.hueDrift || 0),
+                       Math.min(Math.max(hsv[1] + (r2 - 0.5) * 2 * (br.satDrift || 0), 0), 1),
+                       Math.min(Math.max(hsv[2] + (r3 - 0.5) * 2 * (br.valDrift || 0), 0), 1));
+      }
+      let alpha = shows;
+      if (transfer && br.opacityJitter > 0) alpha *= 1 - br.opacityJitter * random01((seed ^ 0x85ebca6b) >>> 0, cid);
+      if (sz <= 0 || alpha <= 0) continue;
+      stamp(px, py, sz, turn, squash, image, b.own ? [alpha, alpha, alpha, alpha] : [rgb[0] * alpha, rgb[1] * alpha, rgb[2] * alpha, alpha]);
+    }
+  };
+  /* `since`: how far the line has gone since its last stamp (the line sent back has the ones before the tip). */
+  let since = Infinity, a = along;
+  if (!fromStart && s.lastPlace && tip.length >= 2) since = Math.hypot(tip[0] - s.lastPlace[0], tip[1] - s.lastPlace[1]);
   for (let j = 0; j + 4 <= tip.length; j += 4) {
-    const x = tip[j], y = tip[j + 1], h = tip[j + 2];
-    const nx = j + 8 <= tip.length ? tip[j + 4] : x, ny = j + 8 <= tip.length ? tip[j + 5] : y;
-    const len = Math.hypot(nx - x, ny - y), dir = Math.atan2(ny - y, nx - x);
-    const angle = t.angle + (t.align ? dir : 0);
+    const x = tip[j], y = tip[j + 1], h = tip[j + 2], o = tip[j + 3];
+    const more = j + 8 <= tip.length;
+    const nx = more ? tip[j + 4] : x, ny = more ? tip[j + 5] : y;
+    const len = Math.hypot(nx - x, ny - y), dx = len > 0 ? (nx - x) / len : 1, dy = len > 0 ? (ny - y) / len : 0;
     const step = Math.max(t.spacing * 2 * h, 0.5);
-    if (since >= step) { stamp(x, y, h, angle); since = 0; }
+    if (since >= step) { dab(x, y, a, dx, dy, h, o); since = 0; }
     /* Along the segment to the next sample, a stamp each step. */
     let last = -since;
     for (let d = step - since; d < len; d += step) {
-      stamp(x + (nx - x) * d / len, y + (ny - y) * d / len, h, angle);
+      dab(x + dx * d, y + dy * d, a + d, dx, dy, h, o);
       last = d;
     }
     since = len - last;
+    a += len;
   }
   out.push({ dabs, own: b.own });
   return true;
+}
+
+/* How far along a line its sample `n` is (canvas pixels), counted on from where the last count stopped. */
+function alongAt(s, n) {
+  if (!s.along || s.along.n > n) s.along = { n: 0, d: 0 };
+  for (let i = s.along.n; i < n; i++) {
+    const p = s.raw[i], q = s.raw[i + 1];
+    s.along.d += Math.hypot(q[0] - p[0], q[1] - p[1]);
+  }
+  s.along.n = n;
+  return s.along.d;
 }
 
 function redraw() {
@@ -251,17 +367,22 @@ function redraw() {
   /* What the pen has drawn since: the samples Open Animate hasn't answered yet, at the line's width; a brushed line's
    * stamped as the brush stamps, so it doesn't show as a plain line until the line comes back. */
   const half = penHalfWidth();
-  const usePressure = state && state.settings.use_pressure;
-  const minSize = state ? state.settings.min_size : 0;
   const tipDabs = [];
   for (const s of strokes) {
-    if (s.done !== null || s.raw.length === 0) continue;
+    if (s.done !== null || s.raw.length === 0 || !state) continue;
     const tip = [];
-    for (let i = Math.max(0, s.n - 1); i < s.raw.length; i++) {
+    const first = Math.max(0, s.n - 1), along = alongAt(s, first);
+    /* Before any of the line comes back the tip is its start, narrowing to it as the start taper narrows the line. */
+    const taper = s.n === 0 ? state.settings.taper_start * canvasH / docHeight : 0;
+    let a = along;
+    for (let i = first; i < s.raw.length; i++) {
       const p = s.raw[i];
-      tip.push(p[0], p[1], half * (usePressure ? Math.max(p[2], minSize) : 1), 1);
+      if (i > first) a += Math.hypot(p[0] - s.raw[i - 1][0], p[1] - s.raw[i - 1][1]);
+      const [size, opacity] = tipPoint(p[2]);
+      const narrow = taper > 0 && a < taper ? (a / taper) * (2 - a / taper) : 1;
+      tip.push(p[0], p[1], half * size * narrow, opacity);
     }
-    if (!s.erasing && stampsTip(s, tip, tipDabs)) continue;
+    if (!s.erasing && stampsTip(s, tip, along, tipDabs)) continue;
     const c = state ? (s.erasing ? [0.9, 0.3, 0.3, 0.4] : state.mode === 'FILL_PEN' ? state.settings.fill_color : state.settings.line_color) : [0, 0, 0, 1];
     drawVarLine(ctx, tip, c, V);
   }
@@ -860,6 +981,11 @@ function receive(m) {
       if (!s) break;
       liveUpdate(s, m);
       s.n = m.n || s.n;
+      /* A brushed line's random seed, how many places it has stamped and where the last is: the tip goes on from
+       * there with the stamps the line will have. */
+      if (m.seed !== undefined) s.seed = m.seed >>> 0;
+      if (m.places !== undefined) s.places = m.places;
+      if (m.last !== undefined) s.lastPlace = m.last;
       dirty();
       break;
     }

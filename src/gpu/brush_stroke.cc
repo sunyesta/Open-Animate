@@ -481,6 +481,13 @@ void brush_stroke(const BrushPath &shown, const BrushPath &rest_path, const Brus
     }
     dab(marks[k], uint32_t(k) * 32u, k, alpha);
     const bool last = k + 1 >= count;
+    if (last) {
+      int e;
+      const float u = locate(marks[size_t(k)], &e);
+      float2 dir;
+      r_dabs.places = count;
+      r_dabs.last_place = edge_point(shown_table[size_t(e)], u, &dir);
+    }
     if (!last || rest.closed) {
       fill(fill, marks[k], last ? total : marks[k + 1], 1, 1u, k);
     }

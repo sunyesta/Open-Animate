@@ -343,6 +343,37 @@ assert image in of("live", got)[0]["pngs"], "and again to a page that connects"
 assert second["images"][0]["keep"] > 0 and second["images"][0]["keep"] % 6 == 0, "stamps already down stay"
 assert len(first["images"][0]["add"]) % 48 == 0, "two triangles a stamp, eight numbers a corner"
 assert of("done", messages({"t": "up", "s": []}))[0]["undo"] == "Draw"
+# Every setting of the brush, for the tip's stamps to turn, size and scatter as the line's will.
+assert tip["brush"]["count"] == 1 and tip["brush"]["jitter"] == 0 and tip["brush"]["randomOrder"] in (True, False), tip["brush"]
+assert {"sizeJitter", "scatter", "hueDrift", "opacityJitter", "shapeDynamics", "sizeFadeIn"} <= set(tip["brush"]), tip["brush"]
+# The line sent back says its seed, how many places it stamped and where the last is: the tip goes on from there.
+add = first["images"][0]["add"]
+# (A place may have no stamp: the line's first, where its start taper is nothing wide.)
+assert isinstance(first["seed"], int) and 0 <= first["places"] - len(add) // 48 <= 1, (first["places"], len(add) // 48)
+centre = [(add[-48] + add[-32]) / 2, (add[-47] + add[-31]) / 2]
+assert math.hypot(centre[0] - first["last"][0], centre[1] - first["last"][1]) < 0.02, (centre, first["last"])
+
+
+# While it's drawn, the line's end neither tapers nor fades out: the page draws the line on past it (its tip), so a
+# narrowed end would pinch where the two meet. The end tapers once it's done.
+def line_end(taper, brushed):
+    fresh()
+    if brushed:
+        messages({"t": "brush", "name": "Round"})
+        ops.brush.setting_set(setting="sizeFadeOut", value="8" if taper else "0", target="TOOL")
+    oanim.wm.set_draw(taper_end=200.0 if taper else 0.0)
+    got = messages({"t": "down", "zoom": 1, "s": wave()[:40]})
+    m = of("live", got)[-1]
+    messages({"t": "up", "s": []})
+    if brushed:
+        add = m["images"][0]["add"]
+        return math.hypot(add[-40] - add[-48], add[-39] - add[-47])
+    return m["add"][-2]
+
+
+for brushed in (False, True):
+    open_end, tapered = line_end(False, brushed), line_end(True, brushed)
+    assert open_end > 1 and abs(tapered - open_end) < 1e-3 * open_end, (brushed, open_end, tapered)
 
 # --- The canvas: guides show (a reference picture often is one), and the onion skins -------------------------------------------
 doc, _ = fresh()
@@ -524,6 +555,7 @@ assert lines_reused >= 6 and 1 <= lines_made <= 2, (lines_reused, lines_made)
 
 # The page's input log (Options > Send Input Log) is saved where input_log_path() says, the last 2000 rows.
 log_path = ipad.input_log_path()
+assert os.path.basename(log_path) == "ipad_input_log_background.json", "never the one an iPad sent"
 if os.path.exists(log_path):
     os.remove(log_path)
 messages({"t": "input_log", "agent": "test", "events": [[k, "touchstart", "direct", 1, 10, 10, 20, 0, 1] for k in range(2500)]})

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <type_traits>
 
 #include <miniz.h>
 #include <qrcodegen.hpp>
@@ -157,7 +158,7 @@ std::string image_png(const BrushImage &image)
 
 /* A brushed line's dabs: laid out as the renderer lays a line's (layer space). Empty: no brush to stamp with. */
 bool line_dabs(const Document &doc, uint64_t layer_id, const VectorDrawing &live, float pixel, BrushDabs &r_dabs,
-               const std::vector<BrushImage> **r_images, bool *r_own_colors)
+               const std::vector<BrushImage> **r_images, bool *r_own_colors, uint32_t *r_seed = nullptr)
 {
   const Shape &shape = live.shapes.back();
   const Brush *brush = brush_find(shape.style.brush.name);
@@ -173,9 +174,11 @@ bool line_dabs(const Document &doc, uint64_t layer_id, const VectorDrawing &live
     aspects.push_back(float(image.width) / float(std::max(image.height, 1)));
   }
   const BrushPath path = brush_path(live, shape, 0.0f);
-  brush_stroke(path, path, shape.style.brush, shape.style.line, aspects, pixel * 0.5f,
-               brush_seed(shape.style.brush, layer_id, int(live.shapes.size()) - 1, doc.frame_current), r_dabs, nullptr,
-               true);
+  const uint32_t seed = brush_seed(shape.style.brush, layer_id, int(live.shapes.size()) - 1, doc.frame_current);
+  brush_stroke(path, path, shape.style.brush, shape.style.line, aspects, pixel * 0.5f, seed, r_dabs, nullptr, true);
+  if (r_seed) {
+    *r_seed = seed;
+  }
   *r_images = &images;
   *r_own_colors = brush->is_color && !shape.style.brush.tint;
   return true;
@@ -302,7 +305,10 @@ std::vector<InkPoint> line_now(const InkStroke &ink)
   std::vector<InkPoint> line = ink.points();
   const std::vector<InkPoint> tail = ink.tail(ink.last_sample());
   line.insert(line.end(), tail.begin(), tail.end());
-  ink_taper(line, ink.settings(), ink.view());
+  /* Its start tapered, its end left open: the page draws the line on past it, and the end tapers when it's done. */
+  InkSettings taper = ink.settings();
+  taper.taper_end = 0.0f;
+  ink_taper(line, taper, ink.view());
   return line;
 }
 
@@ -454,15 +460,25 @@ std::string ipad_stroke_add(Context &C, const std::vector<IpadSample> &samples)
   /* A brushed line stamps as it goes, a solid one, a fill and an eraser show as the viewport's preview. */
   VectorDrawing live;
   if (g_stroke.mode == DrawMode::Freehand &&
-      draw_live_line(ts, g_stroke.ink, g_stroke.ink.last_sample(), g_stroke.shapes_before, live))
+      draw_live_line(ts, g_stroke.ink, g_stroke.ink.last_sample(), g_stroke.shapes_before, live, true))
   {
     BrushDabs dabs;
     const std::vector<BrushImage> *images = nullptr;
     bool own = false;
-    if (line_dabs(doc, g_stroke.layer, live, g_stroke.canvas_pixel, dabs, &images, &own)) {
+    uint32_t seed = 0;
+    if (line_dabs(doc, g_stroke.layer, live, g_stroke.canvas_pixel, dabs, &images, &own, &seed)) {
       g_stroke.sent_brushed = true;
+      /* With the line's random seed and its last place, so the page's tip goes on with the stamps the line will
+       * have there. */
+      const float2 last = g_stroke.to_canvas.apply(dabs.last_place);
+      std::string on = ",\"seed\":" + std::to_string(seed) + ",\"places\":" + std::to_string(dabs.places) +
+                       ",\"last\":[";
+      num(on, last.x);
+      on += ',';
+      num(on, last.y);
+      on += ']';
       return "{\"t\":\"live\"," +
-             dabs_json(dabs, *images, own, g_stroke.to_canvas, &g_stroke.sent_dabs, &g_stroke.sent_images) + "}";
+             dabs_json(dabs, *images, own, g_stroke.to_canvas, &g_stroke.sent_dabs, &g_stroke.sent_images) + on + "}";
     }
   }
   const Color color = draw_mode_cuts(g_stroke.mode)         ? Color{0.9f, 0.3f, 0.3f, 0.4f}
@@ -625,7 +641,30 @@ std::string ipad_brush_preview_json(Context &C, float width, float height)
       tip += ",\"roundness\":";
       num(tip, brush.roundness, 4);
       tip += std::string(",\"align\":") + (brush.align ? "true" : "false") + ",\"flip_x\":" +
-             (brush.flip_x ? "true" : "false") + ",\"flip_y\":" + (brush.flip_y ? "true" : "false") + ",\"aspects\":[";
+             (brush.flip_x ? "true" : "false") + ",\"flip_y\":" + (brush.flip_y ? "true" : "false");
+      /* Every number and switch of the brush, by its .mohobrush name, for the stamps' random turns, sizes, places
+       * and colours. */
+      tip += ",\"brush\":{";
+      bool first_setting = true;
+      const auto setting = [&](const char *key, const auto &value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, int> || std::is_same_v<T, float>) {
+          tip += first_setting ? "\"" : ",\"";
+          first_setting = false;
+          tip += key;
+          tip += "\":";
+          if constexpr (std::is_same_v<T, bool>) {
+            tip += value ? "true" : "false";
+          }
+          else {
+            num(tip, double(value), 4);
+          }
+        }
+      };
+#define OANIM_BRUSH_TIP(type, field, key) setting(key, brush.field);
+      OANIM_BRUSH_SETTINGS(OANIM_BRUSH_TIP)
+#undef OANIM_BRUSH_TIP
+      tip += "},\"aspects\":[";
       for (size_t i = 0; i < images->size(); i++) {
         if (i > 0) {
           tip += ',';

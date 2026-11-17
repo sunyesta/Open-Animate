@@ -95,6 +95,20 @@ PENDING = [
     ('src/python/py_runtime.cc', '        ts.style.line_width = std::clamp(finite(value), 0.0f, 100.0f);',
      '        ts.style.line_width = std::max(value.cast<float>(), 0.0f);',
      "oanim.wm.set_draw refuses a line width that isn't finite", 'tests/test_ipad.py'),
+    ('src/ops/draw_ops.cc', '    taper.taper_end = 0.0f;', '    (void)taper;',
+     "A brushed line sent to the iPad while drawn has no end taper (the page's tip goes on past it)", 'tests/test_ipad.py'),
+    ('src/ops/draw_ops.cc', '    shape.style.brush.size_fade_out = 0;', '    (void)shape;',
+     "A brushed line sent to the iPad while drawn doesn't fade out its end", 'tests/test_ipad.py'),
+    ('src/wm/ipad_link.cc', '  taper.taper_end = 0.0f;', '  (void)taper;',
+     "A solid line sent to the iPad while drawn has no end taper", 'tests/test_ipad.py'),
+    ('src/gpu/brush_stroke.cc', '      r_dabs.last_place = edge_point(shown_table[size_t(e)], u, &dir);',
+     '      r_dabs.last_place = edge_point(shown_table[size_t(e)], 0.0f, &dir);\n      (void)u;',
+     "A brushed line says where its last place is, for the iPad's tip to go on from", 'tests/test_ipad.py'),
+    ('src/gpu/brush_stroke.cc', '      r_dabs.places = count;', '      r_dabs.places = count - 2;',
+     "A brushed line says how many places it stamped, for the iPad's tip to number its stamps on", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py', '"ipad_input_log_background.json" if _oanim.context().is_background else',
+     '"ipad_input_log.json" if _oanim.context().is_background else',
+     "A background run's iPad input log never writes over or deletes one an iPad sent", 'tests/test_ipad.py'),
 ]
 
 def build(root):

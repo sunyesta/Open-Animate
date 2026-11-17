@@ -285,11 +285,15 @@ def _handle(client, message):
 
 
 def input_log_path():
-    """Where the page's input log goes (Options > Send Input Log on the iPad)."""
+    """Where the page's input log goes (Options > Send Input Log on the iPad). A background run (the tests) keeps its
+    own, so it never writes over or deletes one sent from an iPad."""
     import os
     import tempfile
 
-    return os.path.join(tempfile.gettempdir(), "OpenAnimate", "ipad_input_log.json")
+    import _oanim
+
+    name = "ipad_input_log_background.json" if _oanim.context().is_background else "ipad_input_log.json"
+    return os.path.join(tempfile.gettempdir(), "OpenAnimate", name)
 
 
 def _input_log_save(message):

@@ -37,6 +37,10 @@ struct BrushDabs {
   /* Each dab's middle and how much of it shows (faded in or out), in the order laid down. */
   std::vector<float2> centers;
   std::vector<float> alphas;
+  /* How many places along the line the dabs were laid at, and where the last one is (layer space): a line still
+   * being drawn goes on from there. */
+  int places = 0;
+  float2 last_place{0.0f, 0.0f};
 };
 
 /* A brushed line's path: its segments end to end, each a Bezier (layer space) with the line's
