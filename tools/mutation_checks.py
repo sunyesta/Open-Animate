@@ -84,6 +84,17 @@ PENDING = [
     ('src/io/vector_export.cc', 'return !line.used && (impl.worked_out.count(line.owner) || !layers.count(line.owner / 2));',
      'return !line.used;',
      "The iPad's canvas keeps a layer's lines while the layer is taken whole from the last canvas", 'tests/test_ipad.py'),
+    ('src/wm/ipad_server.cc', 'constexpr uint64_t MAX_MESSAGE = 4ull << 20;', 'constexpr uint64_t MAX_MESSAGE = 64ull << 20;',
+     "The iPad's server closes a connection sending a message over 4 MB", 'tests/test_ipad.py'),
+    ('src/wm/ipad_server.cc', '      else if (pages_full()) {', '      else if (false) {',
+     "The iPad's server takes at most four pages at once", 'tests/test_ipad.py'),
+    ('src/wm/ipad_server.cc', '    if (g_server.serving >= MAX_CONNECTIONS) {', '    if (false) {',
+     "The iPad's server turns away connections past 32, key or not", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py', '        except Exception as error:', '        except ZeroDivisionError as error:',
+     "A message from the iPad that makes no sense is dropped alone, the others handled", 'tests/test_ipad.py'),
+    ('src/python/py_runtime.cc', '        ts.style.line_width = std::clamp(finite(value), 0.0f, 100.0f);',
+     '        ts.style.line_width = std::max(value.cast<float>(), 0.0f);',
+     "oanim.wm.set_draw refuses a line width that isn't finite", 'tests/test_ipad.py'),
 ]
 
 def build(root):

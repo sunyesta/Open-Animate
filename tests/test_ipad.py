@@ -530,4 +530,73 @@ assert saved["agent"] == "test" and len(saved["events"]) == 2000 and saved["even
 messages({"t": "input_log", "events": "not a list"})
 os.remove(log_path)
 
+# --- What a page gone wrong (or anyone on the network) can't do ---------------------------------------------------------
+# NaN, Infinity and numbers too big for a float never reach the settings: the message is dropped.
+width = oanim.wm.draw_settings()["line_width"]
+for bad in ('{"t":"set","values":{"line_width":NaN}}', '{"t":"set","values":{"line_width":Infinity}}',
+            '{"t":"set","values":{"line_width":1e999}}', '{"t":"set","values":{"line_color":[NaN,0,0,1]}}'):
+    ipad._tick([(CLIENT, bad)])
+    s = oanim.wm.draw_settings()
+    assert s["line_width"] == width and all(math.isfinite(c) for c in s["line_color"]), bad
+for key_name, value in (("line_width", float("nan")), ("fill_color", (0, float("inf"), 0, 1)),
+                        ("prediction", float("nan")), ("pressure_curve", (0.2, float("nan"), 0.8, 0.8))):
+    try:
+        oanim.wm.set_draw(**{key_name: value})
+        raise AssertionError("set_draw took a non-finite " + key_name)
+    except ValueError:
+        pass
+oanim.wm.set_draw(line_width=1e30)
+assert oanim.wm.draw_settings()["line_width"] <= 100.0
+oanim.wm.set_draw(line_width=width)
+# A message that makes no sense is dropped alone: those after it are handled, a stroke it broke is let go.
+weld = oanim.wm.draw_settings()["weld"]
+ipad._tick([(CLIENT, '{"t":"set","values":{"no_such_setting":1}}'),
+            (CLIENT, json.dumps({"t": "down", "id": 99, "zoom": 1, "s": [["a", 1, 1, 0, 0, 0]]})),
+            (CLIENT, json.dumps({"t": "set", "values": {"weld": not weld}}))])
+assert oanim.wm.draw_settings()["weld"] == (not weld) and ipad._drawing is None
+oanim.wm.set_draw(weld=weld)
+
+# The server: a few pages at once, no message over 4 MB, a limit to connections (with or without the key).
+port = ipad.start(0)
+key = ipad.url().split("k=")[1]
+pages = [ws_open(port, key) for _ in range(4)]
+assert all(b"101" in status for _, status in pages), [status for _, status in pages]
+extra, status = ws_open(port, key)
+assert b"503" in status, status
+extra.close()
+for p, _ in pages:
+    p.close()
+take_messages()
+time.sleep(0.3)
+big, status = ws_open(port, key)
+assert b"101" in status
+data = b'{"t":"x","pad":"' + b"y" * (5 << 20) + b'"}'
+mask = os.urandom(4)
+try:
+    big.sendall(bytes([0x81, 0x80 | 127]) + struct.pack(">Q", len(data)) + mask)
+    big.settimeout(5)
+    assert big.recv(1) == b"", "a message over 4 MB closes the connection"
+except (ConnectionResetError, ConnectionAbortedError):
+    pass
+big.close()
+idle = []
+for _ in range(40):
+    c = socket.create_connection(("127.0.0.1", port), timeout=5)
+    idle.append(c)
+time.sleep(0.5)
+closed = 0
+for c in idle:
+    c.settimeout(0.2)
+    try:
+        closed += c.recv(1) == b""
+    except socket.timeout:
+        pass
+    except (ConnectionResetError, ConnectionAbortedError):
+        closed += 1
+assert closed >= 8, closed
+for c in idle:
+    c.close()
+ipad.stop()
+take_messages(0.3)
+
 print("ipad: ok")

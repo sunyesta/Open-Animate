@@ -304,6 +304,9 @@ static bool ink_setting(InkSettings &ink, const std::string &key, const py::hand
   }
   else if (key == "pressure_curve") {
     const auto [x1, y1, x2, y2] = value.cast<std::tuple<float, float, float, float>>();
+    if (!std::isfinite(x1) || !std::isfinite(y1) || !std::isfinite(x2) || !std::isfinite(y2)) {
+      throw py::value_error("pressure_curve takes finite numbers");
+    }
     ink.pressure_curve_a = {std::clamp(x1, 0.0f, 1.0f), std::clamp(y1, 0.0f, 1.0f)};
     ink.pressure_curve_b = {std::clamp(x2, 0.0f, 1.0f), std::clamp(y2, 0.0f, 1.0f)};
   }
@@ -1184,21 +1187,33 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     ToolSettings &ts = current_context().wm->tool_settings;
     for (const auto &[key_obj, value] : values) {
       const std::string key = py::str(key_obj);
+      /* Numbers refused unless finite: a nan width or colour would go into every stroke after (and the file). */
+      const auto finite = [&](py::handle v) {
+        const float f = v.cast<float>();
+        if (!std::isfinite(f)) {
+          throw py::value_error(key + " takes finite numbers");
+        }
+        return f;
+      };
+      const auto color = [&]() {
+        const auto [r, g, b, a] = value.cast<std::tuple<py::object, py::object, py::object, py::object>>();
+        return Color{std::clamp(finite(r), 0.0f, 1.0f), std::clamp(finite(g), 0.0f, 1.0f),
+                     std::clamp(finite(b), 0.0f, 1.0f), std::clamp(finite(a), 0.0f, 1.0f)};
+      };
       if (key == "fill") {
         ts.draw_fill = value.cast<bool>();
       }
       else if (key == "prediction") {
-        preferences().pen_prediction = std::clamp(value.cast<float>(), 0.0f, 30.0f);
+        preferences().pen_prediction = std::clamp(finite(value), 0.0f, 30.0f);
       }
       else if (key == "line_width") {
-        ts.style.line_width = std::max(value.cast<float>(), 0.0f);
+        ts.style.line_width = std::clamp(finite(value), 0.0f, 100.0f);
       }
       else if (key == "fill_color" || key == "line_color") {
-        const auto [r, g, b, a] = value.cast<std::tuple<float, float, float, float>>();
-        (key == "fill_color" ? ts.style.fill : ts.style.line) = {r, g, b, a};
+        (key == "fill_color" ? ts.style.fill : ts.style.line) = color();
       }
       else if (key == "fill_size") {
-        ts.fill_size = std::max(value.cast<float>(), 0.0f);
+        ts.fill_size = std::clamp(finite(value), 0.0f, 100.0f);
       }
       else if (key == "erase_all_layers") {
         ts.draw_erase_all_layers = value.cast<bool>();

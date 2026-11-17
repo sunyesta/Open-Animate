@@ -32,6 +32,7 @@ Open Animate sends:
 """
 
 import json
+import math
 import re
 import time
 
@@ -54,6 +55,8 @@ _last_pieces = {"seq": 0, "head": None, "defs": [], "body": []}
 _clients = set()
 # The connection whose stroke is being drawn, and the page's id for that stroke (sent back with what is sent of it).
 _drawing = None
+# Messages dropped for not making sense (the first few are reported).
+_errors = 0
 _stroke_id = None
 # Strokes made so far: each canvas says how many it shows, so the page keeps a line lifted until one does.
 _strokes_done = 0
@@ -165,7 +168,7 @@ def _set(values):
     s = oanim.wm.draw_settings()
     mode = s["mode"]
     if "size_px" in values:
-        px = max(float(values.pop("size_px")), 0.0)
+        px = min(max(float(values.pop("size_px")), 0.0), 500.0)
         if s["size_view"]:
             values["view_size"] = min(px, 500.0)
         else:
@@ -305,10 +308,28 @@ def _input_log_save(message):
     oanim.wm.report("iPad input log saved to " + path)
 
 
+def _no_constant(name):
+    raise ValueError("JSON has no " + name)
+
+
+def _finite_float(text):
+    """A number from the page: finite (1e999 would be infinite), or the message is dropped."""
+    v = float(text)
+    if not math.isfinite(v):
+        raise ValueError("not a finite number")
+    return v
+
+
+# Samples in one message at most: a page sends a frame's worth (a few dozen).
+MAX_SAMPLES = 4000
+
+
 def _samples(rows):
     out = []
-    for r in rows:
-        if len(r) >= 6:
+    if not isinstance(rows, list):
+        return out
+    for r in rows[:MAX_SAMPLES]:
+        if isinstance(r, list) and len(r) >= 6:
             out.append((float(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])))
     return out
 
@@ -429,14 +450,29 @@ def _tick(messages=None):
     True when something besides a stroke ran."""
     if messages is None:
         messages = _oanim.ipad_take()
+    global _drawing, _errors
     changed = False
     for client, text in messages:
         try:
-            message = json.loads(text)
-        except ValueError:
+            message = json.loads(text, parse_constant=_no_constant, parse_float=_finite_float)
+        except (ValueError, OverflowError):
             continue
-        if isinstance(message, dict):
+        if not isinstance(message, dict):
+            continue
+        # A message that doesn't make sense (a page gone wrong, or not a page) is dropped on its own: the others are
+        # handled, and a stroke it was in the middle of is let go.
+        try:
             changed = _handle(client, message) or changed
+        except Exception as error:
+            if _drawing == client:
+                _oanim.ipad_stroke_cancel()
+                _drawing = None
+            _errors += 1
+            if _errors <= 3:
+                import oanim
+
+                oanim.wm.report("Draw on iPad: a message from the page was dropped (%s: %s)"
+                                % (type(error).__name__, str(error)[:200]), "WARNING")
     _tick.handled = bool(messages)
     return changed
 

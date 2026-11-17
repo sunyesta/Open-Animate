@@ -63,12 +63,20 @@ struct Server {
   std::map<int, std::shared_ptr<Client>> clients;
   int next_client = 1;
   std::deque<IpadMessage> inbox;
+  size_t inbox_bytes = 0;
 };
 Server g_server;
 
-/* A frame this big or a page's queue this full is a page gone wrong: it is dropped. */
-constexpr uint64_t MAX_MESSAGE = 64ull << 20;
+/* A message this big, a page's queue this full or messages piling up unread this far are a page gone wrong (or not a
+ * page): it is dropped. The page's biggest message, its input log, is a few hundred kilobytes. */
+constexpr uint64_t MAX_MESSAGE = 4ull << 20;
 constexpr size_t MAX_OUTBOX = 256ull << 20;
+constexpr size_t MAX_INBOX = 32ull << 20;
+/* Connections at once (anyone on the network can open one, key or not), and pages: more are turned away. */
+constexpr int MAX_CONNECTIONS = 32;
+constexpr size_t MAX_PAGES = 4;
+/* A request's headers must come within this (ms): a connection sending nothing holds no thread for long. */
+constexpr DWORD REQUEST_TIMEOUT = 10000;
 
 bool send_all(SOCKET s, const char *data, size_t size)
 {
@@ -236,10 +244,16 @@ void client_writer(std::shared_ptr<Client> client)
   }
 }
 
-void push_message(int client, std::string text)
+/* False when the inbox is too full: the page sending is dropped. A page's opening and closing always go in. */
+bool push_message(int client, std::string text, bool always = false)
 {
   std::lock_guard lock(g_server.mutex);
+  if (!always && g_server.inbox_bytes + text.size() > MAX_INBOX) {
+    return false;
+  }
+  g_server.inbox_bytes += text.size();
   g_server.inbox.push_back({client, std::move(text)});
+  return true;
 }
 
 void client_queue(Client &client, std::string frame)
@@ -273,7 +287,7 @@ void websocket_serve(SOCKET s)
     g_server.clients[client->id] = client;
   }
   client->writer = std::thread(client_writer, client);
-  push_message(client->id, "{\"t\":\"_open\"}");
+  push_message(client->id, "{\"t\":\"_open\"}", true);
   std::string message;
   int message_opcode = 0;
   while (g_server.running) {
@@ -339,8 +353,8 @@ void websocket_serve(SOCKET s)
       break;
     }
     if (fin) {
-      if (message_opcode == 1) {
-        push_message(client->id, std::move(message));
+      if (message_opcode == 1 && !push_message(client->id, std::move(message))) {
+        break;
       }
       message.clear();
     }
@@ -355,7 +369,27 @@ void websocket_serve(SOCKET s)
     std::lock_guard lock(g_server.mutex);
     g_server.clients.erase(client->id);
   }
-  push_message(client->id, "{\"t\":\"_close\"}");
+  push_message(client->id, "{\"t\":\"_close\"}", true);
+}
+
+/* The key the QR code carries, compared in a time that doesn't depend on where they differ. */
+bool key_matches(const std::string &key)
+{
+  const std::string &token = g_server.token;
+  if (token.empty() || key.size() != token.size()) {
+    return false;
+  }
+  unsigned char diff = 0;
+  for (size_t i = 0; i < key.size(); i++) {
+    diff |= static_cast<unsigned char>(key[i] ^ token[i]);
+  }
+  return diff == 0;
+}
+
+bool pages_full()
+{
+  std::lock_guard lock(g_server.mutex);
+  return g_server.clients.size() >= MAX_PAGES;
 }
 
 /* One connection: an HTTP request for one of the page's files, or the page's socket. */
@@ -364,6 +398,8 @@ void serve(SOCKET s)
   std::string request;
   char chunk[4096];
   size_t end = std::string::npos;
+  DWORD timeout = REQUEST_TIMEOUT;
+  setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout), sizeof(timeout));
   while (g_server.running && (end = request.find("\r\n\r\n")) == std::string::npos && request.size() < 65536) {
     const int n = recv(s, chunk, sizeof(chunk), 0);
     if (n <= 0) {
@@ -393,8 +429,11 @@ void serve(SOCKET s)
       if (!upgrade) {
         send_all(s, http_reply(400, "Bad Request", "text/plain", "A WebSocket only"));
       }
-      else if (query_value(query, "k") != g_server.token) {
+      else if (!key_matches(query_value(query, "k"))) {
         send_all(s, http_reply(403, "Forbidden", "text/plain", "Wrong key: scan the QR code again"));
+      }
+      else if (pages_full()) {
+        send_all(s, http_reply(503, "Service Unavailable", "text/plain", "Too many pages are open"));
       }
       else {
         const std::string reply = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
@@ -404,6 +443,9 @@ void serve(SOCKET s)
           /* Small messages (a stroke's samples) go at once rather than waiting to fill a packet. */
           BOOL no_delay = TRUE;
           setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&no_delay), sizeof(no_delay));
+          /* A page may say nothing for as long as it likes. */
+          DWORD forever = 0;
+          setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&forever), sizeof(forever));
           websocket_serve(s);
         }
       }
@@ -430,6 +472,10 @@ void accept_loop()
     if (!g_server.running) {
       closesocket(client);
       break;
+    }
+    if (g_server.serving >= MAX_CONNECTIONS) {
+      closesocket(client);
+      continue;
     }
     g_server.sockets.push_back(client);
     g_server.serving++;
@@ -547,6 +593,7 @@ int ipad_server_start(int port, const std::string &root)
   g_server.listener = listener;
   g_server.port = ntohs(address.sin_port);
   g_server.inbox.clear();
+  g_server.inbox_bytes = 0;
   g_server.running = true;
   g_server.accept_thread = std::thread(accept_loop);
   report(ReportType::Info, "Draw on iPad: open " + ipad_server_url(), false);
@@ -579,6 +626,7 @@ void ipad_server_stop()
     std::lock_guard lock(g_server.mutex);
     g_server.clients.clear();
     g_server.inbox.clear();
+    g_server.inbox_bytes = 0;
   }
   g_server.port = 0;
   g_server.token.clear();
@@ -625,6 +673,7 @@ std::vector<IpadMessage> ipad_server_take()
   std::vector<IpadMessage> out(std::make_move_iterator(g_server.inbox.begin()),
                                std::make_move_iterator(g_server.inbox.end()));
   g_server.inbox.clear();
+  g_server.inbox_bytes = 0;
   return out;
 }
 
