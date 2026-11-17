@@ -12147,6 +12147,26 @@ static void bone_modal_confirm(Context &C, float2 delta, float degrees, float fa
   }
 }
 
+/* While G, R or S drags on the setup frame, a 2 Axis Controller's setup goes with it, so its knob (its keys' distance
+ * from the setup place, in frames) and turn stay as they were: otherwise the knob read as pushed the way the box moved
+ * (drawn sliding off sideways, its actions playing mid-drag) until the confirm made the move the setup. */
+static void controllers_setup_follow(Layer &armature, const std::vector<Bone> &original)
+{
+  for (size_t i = 0; i < armature.bones.size() && i < original.size(); i++) {
+    Bone &b = armature.bones[i];
+    const Bone &was = original[i];
+    if (b.id != was.id || !bone_is_controller(b)) {
+      continue;
+    }
+    const float2 transform = bone_transform_from_position(was, was.position);
+    const float turn = was.angle - was.setup_angle;
+    b.setup_angle = b.angle - turn;
+    b.setup_position = b.position - rotate(transform, b.setup_angle);
+    b.transform = transform;
+    b.turn = turn;
+  }
+}
+
 static std::string bone_modal_update(Context &C, const ViewMapping &view)
 {
   Layer *armature = layer_find(*C.document, g_bone_modal.armature);
@@ -12289,6 +12309,10 @@ static std::string bone_modal_update(Context &C, const ViewMapping &view)
   if (C.wm->tool_settings.mirror_x) {
     armature_mirror_edits(*armature, g_bone_modal.bones, g_bone_modal.setup_frame);
     for_also([&](Layer &l, BoneModal::Also &also) { armature_mirror_edits(l, also.bones, bm.setup_frame); });
+  }
+  if (bm.setup_frame) {
+    controllers_setup_follow(*armature, g_bone_modal.bones);
+    for_also([](Layer &l, BoneModal::Also &also) { controllers_setup_follow(l, also.bones); });
   }
   /* Each update starts the bones again from how they were, which undoes what action bone actions did to
    * the bones they drive: play them again from the bones as they are now, so an action bone being
