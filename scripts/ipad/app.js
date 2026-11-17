@@ -394,6 +394,7 @@ function coalesced(e) {
 }
 
 function penStart(e) {
+  if (penDown) return;
   closePopovers();
   if (!state || state.refused) {
     flashBanner(state ? state.refused : 'Not connected');
@@ -442,7 +443,8 @@ function penCancel(tell = true) {
  * canvas erases while it stays, as Ctrl does on the PC: the strokes drawn meanwhile take the pen's matching eraser. */
 
 const ERASES = ['FREEHAND', 'FILL_PEN'];
-const HOLD_MS = 300, PALM_PX = 60;   // a touch wider than this is a hand resting, never a held finger
+const HOLD_MS = 300, HOLD_SLIP = 15;  // a finger held this long without going further than this (px) holds
+const PALM_PX = 100;                  // a touch wider than this is a hand resting, never a held finger
 const eraseHolds = new Set();        // the fingers resting on the canvas
 const eraseButton = $('erase-button');
 let eraseBack = null;                // the pen the button swapped from: {preset, mode}
@@ -496,6 +498,91 @@ eraseButton.addEventListener('pointerdown', (e) => {
 });
 
 /* ---------------------------------------------------------------------------------------------------------------
+ * Safari's pointer events take one kind of input at a time: with a finger down the Pencil's never come, and with the
+ * Pencil down a finger's never do. Touch events carry every touch, so they find the fingers held still, and while a
+ * finger is down they draw the Pencil's strokes (with no coalesced samples, so only then). */
+
+const fingers = new Map();   // touch identifier -> {x0, y0, slid, palm, hold, timer}
+let touchPen = null;         // the Pencil's touch identifier while its stroke comes from touch events
+
+/* A touch as a pointer event, for the pen's own functions. */
+function touchAsPointer(t, e) {
+  /* altitudeAngle: 0 flat on the glass, pi/2 upright; azimuthAngle, which way it leans. */
+  const alt = t.altitudeAngle, az = t.azimuthAngle || 0;
+  const lean = alt > 0 && alt < Math.PI / 2 ? 1 / Math.tan(alt) : 0;
+  const deg = 180 / Math.PI;
+  return { pointerId: 'touch' + t.identifier, pointerType: 'pen', button: 0, buttons: 1, clientX: t.clientX,
+           clientY: t.clientY, pressure: Math.min(Math.max(t.force || 0, 0), 1), tiltX: Math.round(Math.atan(Math.cos(az) * lean) * deg),
+           tiltY: Math.round(Math.atan(Math.sin(az) * lean) * deg), timeStamp: e.timeStamp };
+}
+
+/* A finger still where it went down: it holds the eraser on until lifted. Two resting with no stroke drawn are a pinch
+ * about to start; a finger the pointer events see too stops panning, the view going back to where it was. */
+function fingerRest(id) {
+  const f = fingers.get(id);
+  if (!f || f.palm || f.slid || !erases()) return;
+  if (!penDown && [...fingers.values()].some((o) => o !== f && !o.hold)) return;
+  f.hold = true;
+  let near = null, best = 40;
+  for (const t of touches.values()) {
+    const d = Math.hypot(t.x0 - f.x0, t.y0 - f.y0);
+    if (!t.hold && d < best) { best = d; near = t; }
+  }
+  if (near) {
+    near.hold = true;
+    V = near.V;
+    applyView();
+    tap = null;
+    reanchor();
+  }
+  eraseHold('finger' + id, true);
+}
+
+function fingerGone(id) {
+  const f = fingers.get(id);
+  if (!f) return;
+  clearTimeout(f.timer);
+  fingers.delete(id);
+  if (f.hold) eraseHold('finger' + id, false);
+}
+
+view.addEventListener('touchstart', (e) => {
+  for (const t of e.changedTouches) {
+    if (t.touchType === 'stylus') {
+      if (!penDown && fingers.size > 0) {
+        penStart(touchAsPointer(t, e));
+        if (penDown) touchPen = t.identifier;
+      }
+      continue;
+    }
+    const f = { x0: t.clientX, y0: t.clientY, slid: false, hold: false,
+                palm: 2 * Math.max(t.radiusX || 0, t.radiusY || 0) > PALM_PX };
+    f.timer = setTimeout(() => fingerRest(t.identifier), HOLD_MS);
+    fingers.set(t.identifier, f);
+  }
+});
+view.addEventListener('touchmove', (e) => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchPen) penMove(touchAsPointer(t, e));
+    const f = fingers.get(t.identifier);
+    if (f && Math.hypot(t.clientX - f.x0, t.clientY - f.y0) > HOLD_SLIP) f.slid = true;
+  }
+});
+const touchLift = (e) => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchPen) {
+      touchPen = null;
+      if (e.type === 'touchend') penEnd(touchAsPointer(t, e));
+      else penCancel();
+      penRefused = false;
+    }
+    fingerGone(t.identifier);
+  }
+};
+view.addEventListener('touchend', touchLift);
+view.addEventListener('touchcancel', touchLift);
+
+/* ---------------------------------------------------------------------------------------------------------------
  * Fingers: one pans, two pan, zoom and turn; a quick tap of two undoes, of three redoes; one held still erases. */
 
 const touches = new Map();
@@ -509,10 +596,8 @@ function reanchor() {
 function touchDown(e) {
   closePopovers();
   /* A finger put down while the Pencil draws only ever holds the eraser on (for the next stroke). */
-  const t = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, hold: penDown, V: { ...V },
-              palm: Math.max(e.width || 0, e.height || 0) > PALM_PX };
+  const t = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, hold: penDown, V: { ...V } };
   touches.set(e.pointerId, t);
-  t.timer = setTimeout(() => touchRest(e.pointerId), HOLD_MS);
   if (penDown) return;
   if (touches.size === 1) tap = { t0: performance.now(), most: 1, moved: false };
   else if (tap) tap.most = Math.max(tap.most, touches.size);
@@ -520,30 +605,12 @@ function touchDown(e) {
   reanchor();
 }
 
-/* A finger still where it went down, alone on the canvas (two resting are a pinch about to start): it stops panning,
- * the view goes back to where it was when it went down, and it holds the eraser on until lifted. */
-function touchRest(id) {
-  const t = touches.get(id);
-  if (!t || t.moved || t.palm || (!t.hold && touches.size > 1) || !erases()) return;
-  if (!t.hold) {
-    t.hold = true;
-    V = t.V;
-    applyView();
-    tap = null;
-    reanchor();
-  }
-  eraseHold(id, true);
-}
-
 function touchMove(e) {
   const t = touches.get(e.pointerId);
   if (!t) return;
   t.x = e.clientX;
   t.y = e.clientY;
-  if (Math.hypot(t.x - t.x0, t.y - t.y0) > 10) {
-    t.moved = true;
-    if (tap) tap.moved = true;
-  }
+  if (Math.hypot(t.x - t.x0, t.y - t.y0) > 10 && tap) tap.moved = true;
   if (!anchor || penDown || t.hold) return;
   const pts = [...touches.values()].filter((p) => !p.hold).slice(0, 2).map((p) => [p.x, p.y]);
   if (!pts.length) return;
@@ -570,11 +637,8 @@ function touchMove(e) {
 }
 
 function touchUp(e) {
-  const gone = touches.get(e.pointerId);
-  if (!gone) return;
-  clearTimeout(gone.timer);
+  if (!touches.has(e.pointerId)) return;
   touches.delete(e.pointerId);
-  if (gone.hold) eraseHold(e.pointerId, false);
   if ([...touches.values()].some((t) => !t.hold)) {
     reanchor();
     return;
