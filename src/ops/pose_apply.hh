@@ -4,6 +4,8 @@
  * Asset Shelf's pose library (ops/pose_library.cc), which keeps poses in the file. */
 
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,6 +40,11 @@ struct PoseApplyOptions {
   bool anywhere = false;
   /* Allowed on the setup frame (frame 0): the pose put back there becomes the setup pose (Paste Pose there). */
   bool setup_frame = false;
+  /* The bone layers and drawings as they were before a first pass on the setup frame: a second pass pastes against
+   * their setup (the first one moved it), so the change goes on once, and keeps the first pass's targets (the mirror
+   * images a flipped paste found, the setup no longer symmetric). */
+  const std::map<uint64_t, Layer> *setup_was = nullptr;
+  std::shared_ptr<void> *targets_kept = nullptr;
   /* Filled with what it posed: (bone layer, bone id) and (drawing, point index). */
   std::vector<std::pair<uint64_t, uint64_t>> *r_bones = nullptr;
   std::vector<std::pair<uint64_t, size_t>> *r_points = nullptr;

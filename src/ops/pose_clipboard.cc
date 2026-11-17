@@ -297,7 +297,7 @@ static bool remembered_arg(Context &C, const char *name, bool &kept)
 }
 
 /* Each copied drawing's points matched with a drawing being edited here: by id, else by order in one with as many
- * points. With `selected_only`, onto the copied points selected now (all of them if none is, as Blender's). */
+ * points. */
 struct PoseTarget {
   Layer *layer;
   const json *copied;
@@ -362,7 +362,7 @@ static bool pose_target_flipped(Document &doc, const std::vector<Layer *> &drawi
 }
 
 static std::vector<PoseTarget> pose_targets(Document &doc, const std::vector<Layer *> &drawings, const json &copied,
-                                            bool selected_only, bool flipped = false)
+                                            bool flipped = false)
 {
   std::vector<PoseTarget> targets;
   for (const json &lj : copied) {
@@ -373,13 +373,6 @@ static std::vector<PoseTarget> pose_targets(Document &doc, const std::vector<Lay
       PoseTarget t{nullptr, &lj, {}};
       if (!pose_target_flipped(doc, drawings, lj, t)) {
         continue;
-      }
-      if (selected_only) {
-        const bool any = std::any_of(t.points.begin(), t.points.end(),
-                                     [&](const auto &m) { return t.layer->drawing.points[m.second].selected; });
-        if (any) {
-          std::erase_if(t.points, [&](const auto &m) { return !t.layer->drawing.points[m.second].selected; });
-        }
       }
       if (!t.points.empty()) {
         targets.push_back(std::move(t));
@@ -409,14 +402,6 @@ static std::vector<PoseTarget> pose_targets(Document &doc, const std::vector<Lay
     if (t.points.empty() && lj.value("count", size_t(0)) == t.layer->drawing.points.size()) {
       for (const json &pj : lj["points"]) {
         t.points[pj.value("id", uint64_t(0))] = pj.value("index", size_t(0));
-      }
-    }
-    /* On Selected Only: onto the copied points selected now, or all of them if none is (as Blender's). */
-    if (selected_only) {
-      const bool any = std::any_of(t.points.begin(), t.points.end(),
-                                   [&](const auto &m) { return t.layer->drawing.points[m.second].selected; });
-      if (any) {
-        std::erase_if(t.points, [&](const auto &m) { return !t.layer->drawing.points[m.second].selected; });
       }
     }
     if (!t.points.empty()) {
@@ -472,7 +457,7 @@ static bool pose_has_target(Context &C, const json &pose, bool flipped)
   if (!copied.is_array()) {
     return false;
   }
-  if (!pose_targets(*C.document, pose_drawings(C), copied, false, flipped).empty()) {
+  if (!pose_targets(*C.document, pose_drawings(C), copied, flipped).empty()) {
     return true;
   }
   return std::any_of(copied.begin(), copied.end(),
@@ -481,11 +466,10 @@ static bool pose_has_target(Context &C, const json &pose, bool flipped)
 
 /* A flipped paste's handles and curvature: each copied handle goes on its point's image's handle that reaches for the
  * image of what it reached for (mirrored, a curve can run the other way), reflected. */
-static void pose_paste_handles_flipped(PoseTarget &t, const std::vector<Transform2D> &skins, bool ignore, bool look,
-                                       float factor)
+static void pose_paste_handles_flipped(PoseTarget &t, const VectorDrawing &from, const VectorDrawing &to_was,
+                                       const std::vector<Transform2D> &skins, bool ignore, bool look, float factor)
 {
   VectorDrawing &d = t.layer->drawing;
-  const VectorDrawing &from = t.source->drawing;
   const auto image_of = [&](const json &cj, const char *name) {
     if (!cj.contains(name)) {
       return -1;
@@ -502,9 +486,11 @@ static void pose_paste_handles_flipped(PoseTarget &t, const std::vector<Transfor
     const CurvePoint &was = from.curves[c].points[j];
     const int reach_in = image_of(cj, "in_to"), reach_out = image_of(cj, "out_to");
     bool curvature_done = false;
-    for (Curve &curve : d.curves) {
+    for (size_t ci = 0; ci < d.curves.size(); ci++) {
+      Curve &curve = d.curves[ci];
       for (size_t k = 0; k < curve.points.size(); k++) {
         CurvePoint &cp = curve.points[k];
+        const CurvePoint &cp_was = k < to_was.curves[ci].points.size() ? to_was.curves[ci].points[k] : cp;
         if (size_t(cp.point) != m->second) {
           continue;
         }
@@ -544,7 +530,7 @@ static void pose_paste_handles_flipped(PoseTarget &t, const std::vector<Transfor
             const float2 reflected = t.to.apply_vector(
                 handle_from_change(from_in ? was.setup_in : was.setup_out,
                                    copied2(cj, from_in ? "in" : "out", from_in ? "in_add" : "out_add", look), from_in));
-            const float2 setup = in ? cp.setup_in : cp.setup_out;
+            const float2 setup = in ? cp_was.setup_in : cp_was.setup_out;
             const Channel<float2> &ch = in ? cp.handle_in_keys : cp.handle_out_keys;
             const float2 change = handle_change(setup, reflected, (in ? cp.change_in : cp.change_out).x, in);
             handle = handle_from_change(setup, change + added_here(ch, look), in);
@@ -576,8 +562,84 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
     return OpStatus::Cancelled;
   }
   const json &copied = *copied_it;
-  std::vector<PoseTarget> targets = pose_targets(doc, options.anywhere ? pose_all_drawings(doc) : pose_drawings(C),
-                                                 copied, selected_only, flipped);
+  /* A second pass on the setup frame keeps the first's targets: the first moved the setup, by which a flipped paste
+   * finds each point's mirror image. */
+  std::vector<PoseTarget> targets;
+  if (options.targets_kept && *options.targets_kept) {
+    targets = *std::static_pointer_cast<std::vector<PoseTarget>>(*options.targets_kept);
+  }
+  else {
+    targets = pose_targets(doc, options.anywhere ? pose_all_drawings(doc) : pose_drawings(C), copied, flipped);
+    if (options.targets_kept) {
+      *options.targets_kept = std::make_shared<std::vector<PoseTarget>>(targets);
+    }
+  }
+  /* What it pastes against: each bone's and point's setup as it was before a first pass on the setup frame (which
+   * moved it), else as it is. */
+  const auto was_layer = [&](const Layer &l) -> const Layer & {
+    if (options.setup_was) {
+      const auto it = options.setup_was->find(l.id);
+      if (it != options.setup_was->end()) {
+        return it->second;
+      }
+    }
+    return l;
+  };
+  const auto was_drawing = [&](const Layer &l) -> const VectorDrawing & {
+    const VectorDrawing &d = was_layer(l).drawing;
+    return d.points.size() == l.drawing.points.size() && d.curves.size() == l.drawing.curves.size() ? d : l.drawing;
+  };
+
+  /* The bones each copied bone layer's go onto. */
+  struct Onto {
+    Layer *rig;
+    const json *copied;
+    std::vector<std::pair<Bone *, const json *>> bones;
+  };
+  std::vector<Onto> ontos;
+  for (const json &lj : copied) {
+    if (!lj.contains("bones")) {
+      continue;
+    }
+    Layer *rig = pose_rig_for(C, lj, options.anywhere);
+    if (!rig) {
+      continue;
+    }
+    Onto o{rig, &lj, {}};
+    for (const json &bj : lj["bones"]) {
+      const std::string name = bj.value("name", std::string());
+      Bone *b = flipped ? bone_named(*rig, bone_mirror_name(name)) : nullptr;
+      if (Bone *same = bone_named(*rig, name); !b) {
+        b = same;
+      }
+      if (b) {
+        o.bones.push_back({b, &bj});
+      }
+    }
+    ontos.push_back(std::move(o));
+  }
+  /* On Selected Only: onto the copied bones and points selected now, or all of them if none is (as Blender's), the
+   * selection counted across every bone layer and drawing (the teeth's sub bone group with the face's), not one at a
+   * time. */
+  if (selected_only) {
+    bool any = false;
+    for (const Onto &o : ontos) {
+      any = any || std::any_of(o.bones.begin(), o.bones.end(), [](const auto &b) { return b.first->selected; });
+    }
+    for (const PoseTarget &t : targets) {
+      any = any || std::any_of(t.points.begin(), t.points.end(),
+                               [&](const auto &m) { return t.layer->drawing.points[m.second].selected; });
+    }
+    if (any) {
+      for (Onto &o : ontos) {
+        std::erase_if(o.bones, [](const auto &b) { return !b.first->selected; });
+      }
+      for (PoseTarget &t : targets) {
+        std::erase_if(t.points, [&](const auto &m) { return !t.layer->drawing.points[m.second].selected; });
+      }
+      std::erase_if(targets, [](const PoseTarget &t) { return t.points.empty(); });
+    }
+  }
 
   /* Keep Place: where the pasted points' centre shows now, before anything moves (the bones pasted too). */
   float2 centre_was;
@@ -596,34 +658,15 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
 
   /* The bones first: the points' skins, for Ignore Bones and Keep Place, are the pasted pose's. */
   int bones_pasted = 0;
-  for (const json &lj : copied) {
-    if (!lj.contains("bones")) {
-      continue;
-    }
-    Layer *rig = pose_rig_for(C, lj, options.anywhere);
-    if (!rig) {
-      continue;
-    }
+  for (Onto &o : ontos) {
+    Layer *rig = o.rig;
+    const Layer &rig_was = was_layer(*rig);
     /* Flipped: each copied bone's pose goes on its other side (by _L and _R name, else itself), reflected across the
      * bone layer's vertical axis: its Transform through both bones' setups, its turn the other way. */
     /* (Posed: each pose's `setup` is then its setup pose, not this frame's pose shown as one.) */
-    const std::vector<BonePose> setups = flipped ? armature_pose(*rig, false) : std::vector<BonePose>();
+    const std::vector<BonePose> setups = flipped ? armature_pose(rig_was, false) : std::vector<BonePose>();
     const Transform2D flip{-1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
-    std::vector<std::pair<Bone *, const json *>> onto;
-    for (const json &bj : lj["bones"]) {
-      const std::string name = bj.value("name", std::string());
-      Bone *b = flipped ? bone_named(*rig, bone_mirror_name(name)) : nullptr;
-      if (Bone *same = bone_named(*rig, name); !b) {
-        b = same;
-      }
-      if (b) {
-        onto.push_back({b, &bj});
-      }
-    }
-    if (selected_only && std::any_of(onto.begin(), onto.end(), [](const auto &o) { return o.first->selected; })) {
-      std::erase_if(onto, [](const auto &o) { return !o.first->selected; });
-    }
-    for (auto &[b, bj] : onto) {
+    for (auto &[b, bj] : o.bones) {
       bone_changes_from_values(*b);
       float2 copied_transform = copied2(*bj, "transform", "transform_add", look);
       float copied_turn = copied1(*bj, "turn", "turn_add", look);
@@ -643,8 +686,13 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
         }
         copied_turn = -copied_turn;
       }
-      const float2 transform = copied_transform + added_here(b->position_keys, look);
-      const float turn = copied_turn + added_here(b->angle_keys, look);
+      float2 transform = copied_transform + added_here(b->position_keys, look);
+      float turn = copied_turn + added_here(b->angle_keys, look);
+      /* Against the setup as it was (its change put on once), worked into the setup as it is now. */
+      if (const Bone *was = bone_find(rig_was, b->id); was && was != b) {
+        transform = bone_transform_from_position(*b, bone_position_from_transform(*was, transform));
+        turn += was->setup_angle - b->setup_angle;
+      }
       const float2 scale = copied2(*bj, "scale", "scale_add", look) + added_here(b->scale_keys, look);
       b->transform = b->transform + (transform - b->transform) * factor;
       b->turn = b->turn + (turn - b->turn) * factor;
@@ -685,13 +733,13 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
        * its skin it came out a hair off, and recording took the hair for an edit (keys on what never moved). */
       const float2 pos = ignore && invertible(skin) ?
                              (distance(skin.apply(p.pos), shown) < SAME_PLACE_HAIR ? p.pos : skin.inverted().apply(shown)) :
-                             p.setup_pos + key + added_here(p.pos_keys, look);
+                             was_drawing(*t.layer).points[m->second].setup_pos + key + added_here(p.pos_keys, look);
       placed.push_back({t.layer, m->second, pos});
       const float radius = copied1(pj, "radius", "radius_add", look) + added_here(p.radius_keys, look);
       p.radius = p.radius + (radius - p.radius) * factor;
     }
     if (t.source) {
-      pose_paste_handles_flipped(t, skins, ignore, look, factor);
+      pose_paste_handles_flipped(t, was_drawing(*t.source), was_drawing(*t.layer), skins, ignore, look, factor);
       continue;
     }
     for (const json &cj : (*t.copied)["curve_points"]) {
@@ -703,6 +751,7 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
         continue;
       }
       CurvePoint &cp = d.curves[c].points[j];
+      const CurvePoint &cp_was = was_drawing(*t.layer).curves[c].points[j];
       const float curvature = copied1(cj, "curvature", "curvature_add", look) + added_here(cp.curvature_keys, look);
       cp.curvature = cp.curvature + (curvature - cp.curvature) * factor;
       if (!cj.contains("in") || !cp.handles_set) {
@@ -718,7 +767,7 @@ OpStatus pose_apply(Context &C, const json &pose, bool flipped, const PoseApplyO
         }
         else {
           const Channel<float2> &ch = in ? cp.handle_in_keys : cp.handle_out_keys;
-          handle = handle_from_change(in ? cp.setup_in : cp.setup_out,
+          handle = handle_from_change(in ? cp_was.setup_in : cp_was.setup_out,
                                       copied2(cj, in ? "in" : "out", in ? "in_add" : "out_add", look) + added_here(ch, look),
                                       in);
         }
@@ -810,6 +859,22 @@ static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
   };
   const bool again = options.as != PasteAs::Keys && options.factor >= 1.0f;
   options.quiet = again;
+  /* On the setup frame the first pass's recording moves the setup: the second pastes against the setup as it was
+   * (its change put on once, not twice) onto the first's targets. */
+  std::map<uint64_t, Layer> setup_was;
+  std::shared_ptr<void> targets_kept;
+  if (again && setup) {
+    for (Layer *l : pose_rigs(C)) {
+      setup_was.emplace(l->id, *l);
+    }
+    /* Flipped, the drawings copied from and their partners anywhere. */
+    for (const Layer *l : document_layers_flat(doc)) {
+      if (l->type == LayerType::Vector && !l->is_reference()) {
+        setup_was.emplace(l->id, *l);
+      }
+    }
+    options.targets_kept = &targets_kept;
+  }
   const OpStatus status = pose_apply(C, pose, flipped, options);
   if (status != OpStatus::Finished || !again) {
     return kept(status);
@@ -817,6 +882,9 @@ static OpStatus pose_paste(Context &C, const json &pose, bool flipped)
   animation_record(doc);
   animation_evaluate(doc, doc.frame_current);
   options.quiet = false;
+  if (setup) {
+    options.setup_was = &setup_was;
+  }
   return kept(pose_apply(C, pose, flipped, options));
 }
 

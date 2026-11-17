@@ -124,6 +124,17 @@ PENDING = [
     ("src/ops/layer_ops.cc", "      for (auto o = old_ids.begin(); it == old_ids.end() && o != old_ids.end(); ++o) {",
      "      for (auto o = old_ids.begin(); false && it == old_ids.end() && o != old_ids.end(); ++o) {",
      "symmetrize finds numbered partners", "tests/test_knob_distance_copies.py"),
+    # Paste Pose on frame 0: Same Look's second pass against the setup as it was, the change put on once.
+    ("src/ops/pose_clipboard.cc", "    options.setup_was = &setup_was;", "    (void)setup_was;",
+     "setup paste once", "tests/test_pose_paste_setup.py"),
+    # Paste Pose Flipped on frame 0: the second pass onto the first's targets (the setup no longer symmetric).
+    ("src/ops/pose_clipboard.cc", "  if (options.targets_kept && *options.targets_kept) {",
+     "  if (false && options.targets_kept && *options.targets_kept) {",
+     "flipped setup paste keeps targets", "tests/test_pose_paste_setup.py"),
+    # On Selected Only: the selection counted across bone layers and drawings.
+    ("src/ops/pose_clipboard.cc", "      any = any || std::any_of(o.bones.begin(), o.bones.end(), [](const auto &b) { return b.first->selected; });",
+     "      any = any || (&o == &ontos.front() && std::any_of(o.bones.begin(), o.bones.end(), [](const auto &b) { return b.first->selected; }));",
+     "selected only across sub groups", "tests/test_pose_paste_setup.py"),
 ]
 
 def build(root):
