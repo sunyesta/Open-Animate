@@ -4,6 +4,7 @@
 #include "data/fill_area.hh"
 
 #include <algorithm>
+#include <cfloat>
 #include <array>
 #include <cmath>
 #include <deque>
@@ -1553,6 +1554,37 @@ bool drawing_pick_segment(const VectorDrawing &drawing, float2 pos, float radius
           *r_t = (float(i - 1) + t_local) / PICK_STEPS;
         }
         prev = p;
+      }
+    }
+  }
+  return found;
+}
+
+std::vector<SegmentNear> drawing_segments_near(const VectorDrawing &drawing, float2 pos, float radius,
+                                               const std::function<float(ShapeEdge)> &half_width)
+{
+  std::vector<SegmentNear> found;
+  for (size_t c = 0; c < drawing.curves.size(); c++) {
+    const Curve &curve = drawing.curves[c];
+    for (int s = 0; s < curve.segment_count(); s++) {
+      const ShapeEdge edge{int(c), s};
+      float2 ctrl[4];
+      curve_segment_bezier(drawing, curve, s, ctrl);
+      float best = FLT_MAX, best_t = 0.0f;
+      float2 prev = ctrl[0];
+      for (int i = 1; i <= PICK_STEPS; i++) {
+        const float2 p = bezier_eval(ctrl, float(i) / PICK_STEPS);
+        float t_local;
+        const float d = distance_to_segment(pos, prev, p, &t_local);
+        if (d < best) {
+          best = d;
+          best_t = (float(i - 1) + t_local) / PICK_STEPS;
+        }
+        prev = p;
+      }
+      const float outside = std::max(best - half_width(edge), 0.0f);
+      if (outside <= radius) {
+        found.push_back({edge, best_t, best, outside});
       }
     }
   }

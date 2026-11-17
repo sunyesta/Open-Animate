@@ -13,6 +13,7 @@
  * Positions are in layer space. Document space has the camera frame 2 units tall, y up. */
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <tuple>
@@ -572,6 +573,18 @@ std::vector<ShapeEdge> drawing_segments_at_point(const VectorDrawing &drawing, i
 int drawing_pick_point(const VectorDrawing &drawing, float2 pos, float radius);
 /* Closest segment within `radius`; `r_t` gets the parameter along it. */
 bool drawing_pick_segment(const VectorDrawing &drawing, float2 pos, float radius, ShapeEdge *r_edge, float *r_t);
+/* A segment near a place: where along it is nearest (`t`), how far that is (`distance`, from its middle) and how far
+ * outside its painted line (`outside`). */
+struct SegmentNear {
+  ShapeEdge edge;
+  float t = 0.0f;
+  float distance = 0.0f;
+  float outside = 0.0f;
+};
+/* Every segment passing within `radius` of `pos` outside its painted line (`half_width` of it: half how wide it is
+ * painted; 0 for a bare wire), each where it is nearest. A place on the painted line is at distance 0. */
+std::vector<SegmentNear> drawing_segments_near(const VectorDrawing &drawing, float2 pos, float radius,
+                                               const std::function<float(ShapeEdge)> &half_width);
 /* Top-most shape whose fill contains pos, or whose outline is within radius. -1 if none. */
 int drawing_pick_shape(const VectorDrawing &drawing, float2 pos, float radius);
 /* Inserts a point into a segment at parameter t, keeping the curve's shape as closely as the

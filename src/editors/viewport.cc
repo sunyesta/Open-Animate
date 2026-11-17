@@ -7980,6 +7980,96 @@ static void split_curve_done(ToolSettings &ts)
   }
 }
 
+/* A line near the mouse in Edges and Strokes modes: the segment (its two points, by the drawing's own points), how
+ * far the mouse is from its middle in pixels, and how near the front its drawing is drawn. */
+struct LineHit {
+  Layer *layer = nullptr;
+  ShapeEdge edge{-1, 0};
+  int a = -1, b = -1;
+  float d = FLT_MAX;
+  size_t front = 0;
+};
+
+/* Every line within reach of the mouse across the layers being edited (within reach of its painted edge, so anywhere
+ * on a thick line reaches it), the one whose middle is nearest first; of lines as near, the one drawn in front first.
+ * Where the lines show: posed by bones, a reference matching its original, at each shape's detail level, as the wires
+ * are drawn. */
+static std::vector<LineHit> lines_near(Context &C, const ViewMapping &view, float2 mouse_document)
+{
+  std::vector<LineHit> hits;
+  std::unordered_map<uint64_t, size_t> front;
+  for (const Layer *l : document_layers_flat(*C.document)) {
+    front.emplace(l->id, front.size());
+  }
+  for (Layer *layer : editable_layers(C)) {
+    const Transform2D to_document = layer_world_transform(*C.document, layer->id);
+    const float pixel = 1.0f / std::max(view.zoom * to_document.scale(), 1e-6f);
+    const Posed shown = posed(*C.document, *layer);
+    const VectorDrawing *wires = posed_wires(shown);
+    const VectorDrawing lines = wires ? *wires : drawing_detail_shown_curves(*shown.drawing);
+    const VectorDrawing &own = wires ? *shown.drawing : lines;
+    /* A piece of a segment Resample split: the segment, by the drawing's own points before it. */
+    const auto own_edge = [&](ShapeEdge edge) {
+      if (wires) {
+        int seg = -1;
+        for (int i = 0; i <= edge.segment; i++) {
+          seg += wires->points[wires->curves[edge.curve].points[i].point].made_by < 0 ? 1 : 0;
+        }
+        edge.segment = std::max(seg, 0);
+      }
+      return edge;
+    };
+    const auto half_width = [&](ShapeEdge edge) {
+      edge = own_edge(edge);
+      if (edge.curve < 0 || edge.curve >= int(own.curves.size()) || edge.segment >= own.curves[edge.curve].segment_count()) {
+        return 0.0f;
+      }
+      float width = 0.0f;
+      for (const Shape &shape : own.shapes) {
+        if (!shape.has_outline || shape.hidden) {
+          continue;
+        }
+        for (const ShapeEdge &e : shape.edges) {
+          if (e.curve == edge.curve && e.segment == edge.segment) {
+            width = std::max(width, shape.style.line_width);
+            break;
+          }
+        }
+      }
+      int a, b;
+      curve_segment_points(own.curves[edge.curve], edge.segment, &a, &b);
+      return 0.5f * width * std::max(own.points[size_t(a)].radius, own.points[size_t(b)].radius);
+    };
+    const float2 mouse = to_document.inverted().apply(mouse_document);
+    for (const SegmentNear &seg : drawing_segments_near(lines, mouse, pick_line_pixels() * pixel, half_width)) {
+      LineHit hit;
+      hit.layer = layer;
+      hit.edge = own_edge(seg.edge);
+      curve_segment_points(own.curves[hit.edge.curve], hit.edge.segment, &hit.a, &hit.b);
+      hit.d = seg.distance / pixel;
+      const auto f = front.find(layer->id);
+      hit.front = f != front.end() ? f->second : front.size();
+      hits.push_back(hit);
+    }
+  }
+  std::stable_sort(hits.begin(), hits.end(), [](const LineHit &x, const LineHit &y) {
+    /* A pixel apart is as near: the one in front first. */
+    if (std::fabs(x.d - y.d) > 1.0f) {
+      return x.d < y.d;
+    }
+    return x.front < y.front;
+  });
+  return hits;
+}
+
+/* A click on lines where the last one was (the mouse within a couple of pixels): the next line under it, round to the
+ * nearest again, so lines on top of each other (a lid over an eye's white) can each be picked. */
+static struct {
+  ImVec2 pos{-1e9f, -1e9f};
+  uint64_t layer = 0;
+  ShapeEdge edge{-1, 0};
+} g_line_cycle;
+
 /* Picks the nearest point (or, in Edges and Strokes mode, the line) under the mouse across every
  * editable layer, and selects it as Blender does: a plain click replaces the selection, Shift
  * toggles, Ctrl removes. */
@@ -8077,35 +8167,35 @@ static void select_click(Context &C, const ViewMapping &view, float2 mouse_docum
     }
     return;
   }
-  if (!hit_layer && C.wm->tool_settings.select_mode != SelectMode::Point) {
-    /* A click on a line takes that edge (its two points) in Edges mode, and the whole line in
-     * Strokes mode. In Points mode only points are picked: a click on a line selects nothing. */
-    for (Layer *layer : layers) {
-      const Transform2D to_document = layer_world_transform(*C.document, layer->id);
-      const float pixel = 1.0f / std::max(view.zoom * to_document.scale(), 1e-6f);
-      ShapeEdge edge;
-      float t;
-      /* Where the lines show: posed by bones, and a reference matching its original where that is; at
-       * the shape's detail level, as its wires are drawn. */
-      const Posed shown = posed(*C.document, *layer);
-      const VectorDrawing *wires = posed_wires(shown);
-      const VectorDrawing lines = wires ? *wires : drawing_detail_shown_curves(*shown.drawing);
-      if (drawing_pick_segment(lines, to_document.inverted().apply(mouse_document), pick_line_pixels() * pixel, &edge, &t)) {
-        if (wires) {
-          /* A piece of a segment Resample split: the segment, by the drawing's own points before it. */
-          int own = -1;
-          for (int i = 0; i <= edge.segment; i++) {
-            own += wires->points[wires->curves[edge.curve].points[i].point].made_by < 0 ? 1 : 0;
+  /* A click on a line takes that edge (its two points) in Edges mode, and the whole line in Strokes mode: the line
+   * whose middle is nearest the mouse across every drawing (anywhere on its painted width reaches it), clicked again in
+   * the same place the next one there. In Strokes mode it beats a point no nearer (a point of another line beside it). In Points mode
+   * only points are picked: a click on a line selects nothing. */
+  if (C.wm->tool_settings.select_mode != SelectMode::Point) {
+    const std::vector<LineHit> lines = lines_near(C, view, mouse_document);
+    if (!lines.empty() && (!hit_layer || lines.front().d <= best)) {
+      size_t pick = 0;
+      const ImVec2 again = mouse_screen - g_line_cycle.pos;
+      if (again.x * again.x + again.y * again.y <= 16.0f) {
+        for (size_t k = 0; k < lines.size(); k++) {
+          if (lines[k].layer->id == g_line_cycle.layer && lines[k].edge.curve == g_line_cycle.edge.curve &&
+              lines[k].edge.segment == g_line_cycle.edge.segment)
+          {
+            pick = (k + 1) % lines.size();
+            break;
           }
-          edge.segment = std::max(own, 0);
         }
-        int a, b;
-        curve_segment_points((wires ? *shown.drawing : lines).curves[edge.curve], edge.segment, &a, &b);
-        hit_layer = layer;
-        picked = C.wm->tool_settings.select_mode == SelectMode::Edge ? std::vector<int>{a, b} : std::vector<int>{a};
-        hit_edge = edge;
-        break;
       }
+      const LineHit &line = lines[pick];
+      hit_layer = line.layer;
+      picked = C.wm->tool_settings.select_mode == SelectMode::Edge ? std::vector<int>{line.a, line.b}
+                                                                   : std::vector<int>{line.a};
+      hit_edge = line.edge;
+      g_line_cycle = {mouse_screen, line.layer->id, line.edge};
+      g_point_cycle = {};
+    }
+    else {
+      g_line_cycle = {};
     }
   }
   if (!shift && !ctrl) {
@@ -8150,46 +8240,41 @@ static PressGrab select_press_grab(Context &C, const ViewMapping &view, ImVec2 m
   const float2 mouse_document = view.to_document(mouse);
   const bool edges = C.wm->tool_settings.select_mode == SelectMode::Edge;
   float best = FLT_MAX;
-  for (Layer *layer : editable_layers(C)) {
+  for (Layer *layer : edges ? std::vector<Layer *>() : editable_layers(C)) {
     const Transform2D to_document = layer_world_transform(*C.document, layer->id);
     const float pixel = 1.0f / std::max(view.zoom * to_document.scale(), 1e-6f);
     const float2 at = to_document.inverted().apply(mouse_document);
     const Posed shown = posed(*C.document, *layer);
-    if (!edges) {
-      const float reach = pick_pixels(C.document->overlays.point_size);
-      for (int p = 0; p < int(shown.drawing->points.size()); p++) {
-        if (shown.drawing->points[size_t(p)].detail.hidden) {
-          continue;
-        }
-        const float d = distance(shown.drawing->points[size_t(p)].pos, at) / pixel;
-        if (d <= reach && d < best) {
-          best = d;
-          grab.layer = layer->id;
-          grab.points = {p};
-          grab.distance = d;
-        }
+    const float reach = pick_pixels(C.document->overlays.point_size);
+    for (int p = 0; p < int(shown.drawing->points.size()); p++) {
+      if (shown.drawing->points[size_t(p)].detail.hidden) {
+        continue;
       }
-      continue;
+      const float d = distance(shown.drawing->points[size_t(p)].pos, at) / pixel;
+      if (d <= reach && d < best) {
+        best = d;
+        grab.layer = layer->id;
+        grab.points = {p};
+        grab.distance = d;
+      }
     }
-    /* The segment under it, where its line shows (as a click in Edges mode picks it). */
-    const VectorDrawing *wires = posed_wires(shown);
-    const VectorDrawing lines = wires ? *wires : drawing_detail_shown_curves(*shown.drawing);
-    ShapeEdge edge;
-    float t;
-    if (drawing_pick_segment(lines, at, pick_line_pixels() * pixel, &edge, &t)) {
-      if (wires) {
-        int own = -1;
-        for (int i = 0; i <= edge.segment; i++) {
-          own += wires->points[wires->curves[edge.curve].points[i].point].made_by < 0 ? 1 : 0;
-        }
-        edge.segment = std::max(own, 0);
+  }
+  /* The segment under it, as a click in Edges mode picks it: the nearest line, a picked one first where it is as
+   * near (a press on the line just cycled to grabs that one). */
+  if (edges) {
+    const std::vector<LineHit> lines = lines_near(C, view, mouse_document);
+    const LineHit *take = lines.empty() ? nullptr : &lines.front();
+    for (const LineHit &line : lines) {
+      const auto &pts = line.layer->drawing.points;
+      if (line.d <= lines.front().d + 1.0f && pts[size_t(line.a)].selected && pts[size_t(line.b)].selected) {
+        take = &line;
+        break;
       }
-      int a, b;
-      curve_segment_points((wires ? *shown.drawing : lines).curves[edge.curve], edge.segment, &a, &b);
-      grab.layer = layer->id;
-      grab.points = {a, b};
-      grab.edge = edge;
-      break;
+    }
+    if (take) {
+      grab.layer = take->layer->id;
+      grab.points = {take->a, take->b};
+      grab.edge = take->edge;
     }
   }
   return grab;

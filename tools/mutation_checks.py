@@ -108,6 +108,21 @@ PENDING = [
     # A knob's sides follow its rename.
     ('src/anim/animation.cc', '      document_action_rename(doc, owner_id, action, controller_action_name_free(*owner, to + action.substr(from.size())));',
      '      (void)action;', "sides follow the knob's rename", 'tests/test_bone_own_actions.py'),
+    # Edges and Strokes: the nearest line wins, not the first drawing's.
+    ('src/editors/viewport.cc', '      return x.d < y.d;',
+     '      return false;', 'nearest line wins across drawings', 'tests/test_line_pick.py'),
+    # A line's painted width reaches it.
+    ('src/data/vector.cc', '      const float outside = std::max(best - half_width(edge), 0.0f);',
+     '      const float outside = best + 0.0f * half_width(edge);', 'painted width reaches a line', 'tests/test_line_pick.py'),
+    # Strokes: a line under the mouse beats a point beside it.
+    ('src/editors/viewport.cc', '    if (!lines.empty() && (!hit_layer || lines.front().d <= best)) {',
+     '    if (!lines.empty() && !hit_layer) {', 'line beats a point beside it', 'tests/test_line_pick.py'),
+    # Clicking again picks the next line there.
+    ('src/editors/viewport.cc', '            pick = (k + 1) % lines.size();',
+     '            pick = k;', 'clicking again picks the next line', 'tests/test_line_pick.py'),
+    # A press in Edges mode grabs the nearest line.
+    ('src/editors/viewport.cc', '    const LineHit *take = lines.empty() ? nullptr : &lines.front();',
+     '    const LineHit *take = lines.empty() ? nullptr : &lines.back();', 'press grabs the nearest line', 'tests/test_line_pick.py'),
 ]
 
 def build(root):
