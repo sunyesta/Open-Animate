@@ -114,6 +114,14 @@ PENDING = [
      "The iPad page is told when its input log is saved, so it can say whether it got there", 'tests/test_ipad.py'),
     ('scripts/modules/oanim/ipad.py', '    if t == "input_log":', '    if t == "input_log" and _drawing is None:',
      "The iPad's input log is saved while the PC thinks a stroke is going too", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py', '''        if '"kind":"erase"' in text:''', '        if False:',
+     "On the iPad an eraser erases as it goes: the canvas cut so far is sent while it's drawn", 'tests/test_ipad.py'),
+    ('src/wm/ipad_link.cc', '    layers[i]->drawing = std::move(kept[i]);', '    (void)kept[i];',
+     "The iPad's live erasing leaves the document as it was until the Pencil lifts", 'tests/test_ipad.py'),
+    ('scripts/modules/oanim/ipad.py',
+     "    # What the pages show isn't the document's canvas now: the next is sent whatever it is.\n"
+     "    _last_canvas_key = None", '    pass',
+     "After the iPad's live erasing (lifted or cancelled) the document's canvas is sent", 'tests/test_ipad.py'),
 ]
 
 def build(root):

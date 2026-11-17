@@ -457,7 +457,14 @@ std::string ipad_stroke_add(Context &C, const std::vector<IpadSample> &samples)
   if (g_stroke.ink.empty()) {
     return {};
   }
-  /* A brushed line stamps as it goes, a solid one, a fill and an eraser show as the viewport's preview. */
+  /* An eraser or the Trimmer: the page shows the cut itself as it goes (ipad_stroke_cut_canvas), with a circle the
+   * eraser's size at the Pencil, so all it needs is that size (canvas pixels). */
+  if (draw_mode_cuts(g_stroke.mode)) {
+    std::string out = "{\"t\":\"live\",\"kind\":\"erase\",\"r\":";
+    num(out, g_stroke.ink.view().half_width * g_stroke.to_canvas.scale());
+    return out + "}";
+  }
+  /* A brushed line stamps as it goes, a solid one and a fill show as the viewport's preview. */
   VectorDrawing live;
   if (g_stroke.mode == DrawMode::Freehand &&
       draw_live_line(ts, g_stroke.ink, g_stroke.ink.last_sample(), g_stroke.shapes_before, live, true))
@@ -515,6 +522,37 @@ std::string ipad_stroke_end(Context &C)
                                                       : "Draw";
   C.undo->push(name, doc);
   return name;
+}
+
+std::string ipad_stroke_cut_canvas(Context &C, int width, int height)
+{
+  if (!g_stroke.active || !draw_mode_cuts(g_stroke.mode) || g_stroke.ink.empty() || !ipad_draw_refused(C).empty()) {
+    return {};
+  }
+  Document &doc = *C.document;
+  Layer *layer = document_active_layer(doc);
+  if (!layer || layer->id != g_stroke.layer) {
+    return {};
+  }
+  /* The drawings the stroke may cut, kept to put back: the canvas shows the cut, the document stays as it was until
+   * the stroke ends (one undo step, cut from the drawings as they were). */
+  std::vector<Layer *> layers = {layer};
+  if (C.wm->tool_settings.draw_erase_all_layers) {
+    layers = editable_layers(C);
+  }
+  std::vector<VectorDrawing> kept;
+  kept.reserve(layers.size());
+  for (Layer *l : layers) {
+    kept.push_back(l->drawing);
+  }
+  std::string out;
+  if (draw_stroke_cut_so_far(C, *layer, g_stroke.ink, g_stroke.mode)) {
+    out = ipad_canvas_message(C, width, height, true);
+  }
+  for (size_t i = 0; i < layers.size(); i++) {
+    layers[i]->drawing = std::move(kept[i]);
+  }
+  return out;
 }
 
 void ipad_stroke_cancel()

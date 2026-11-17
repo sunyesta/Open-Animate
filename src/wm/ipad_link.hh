@@ -48,6 +48,9 @@ std::string ipad_stroke_begin(Context &C, int width, int height, float zoom, boo
 std::string ipad_stroke_add(Context &C, const std::vector<IpadSample> &samples);
 /* Ends it as the viewport's release does: the undo step's name it made ("Draw", "Erase Line", ...), "" for none. */
 std::string ipad_stroke_end(Context &C);
+/* While an eraser's or the Trimmer's stroke is drawn: the canvas (as ipad_canvas_message's) with what it has cut so
+ * far, the document left as it was; empty when it cuts nothing yet (or isn't one). */
+std::string ipad_stroke_cut_canvas(Context &C, int width, int height);
 void ipad_stroke_cancel();
 bool ipad_stroke_active();
 /* The brush images sent so far are forgotten (a page connecting has none of them). */

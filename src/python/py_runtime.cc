@@ -499,6 +499,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return out;
   });
   m.def("ipad_send", [](int client, const std::string &text) { ipad_server_send(client, text); });
+  m.def("ipad_stroke_cut_canvas", [](int width, int height) {
+    return py::bytes(ipad_stroke_cut_canvas(current_context(), std::clamp(width, 1, 8192), std::clamp(height, 1, 8192)));
+  });
   m.def(
       "ipad_canvas",
       [](int width, int height, bool cached) {

@@ -279,7 +279,51 @@ assert shapes() == 1
 cross = [[W * 0.45, H * 0.2 + i * H * 0.02, 0.8, 0, 0, i / 100] for i in range(40)]
 got = stroke(cross, eraser=True)
 assert of("done", got)[0]["undo"] == "Erase Line", of("done", got)
-assert of("live", got)[0]["color"] == [0.9, 0.3, 0.3, 0.4], "an eraser's path shows as the viewport's"
+# No trail: the page is told the eraser's size (canvas pixels), for a circle at the Pencil.
+assert all(m["kind"] == "erase" and m["r"] > 0 for m in of("live", got)), of("live", got)[:1]
+
+
+# It erases as it goes: while it's drawn the pages get the canvas cut so far, the document as it was (the cut is one
+# undo step, made when the Pencil lifts); cancelled, the canvas goes back.
+def erase_live(rows, end, mode=None):
+    doc, _ = fresh()
+    stroke(wave())
+    if mode:
+        ops.wm.tool_draw(mode=mode)
+    before, undo_before = points(), oanim.wm.undo_history()[1]
+    canvas_before = page["svg"]
+    canvases = []
+    for k in range(0, len(rows), 10):
+        time.sleep(ipad.ERASE_INTERVAL + 0.01)
+        got = messages({"t": "down" if k == 0 else "move", "zoom": 1, "eraser": mode is None, "s": rows[k:k + 10]})
+        canvases += of("canvas", got)
+    assert points() == before and oanim.wm.undo_history()[1] == undo_before, "the document as it was while it's drawn"
+    assert canvases and page["svg"] != canvas_before, "the canvas sent with the line cut, as the Pencil passes"
+    mid = page["svg"]
+    got = messages({"t": end, "s": []})
+    shown = whole(json.loads(_oanim.ipad_canvas(W, H))["svg"])
+    assert page["svg"] == shown, "then the document's canvas"
+    return before, canvas_before, mid, shown, got
+
+
+before, canvas_before, mid, shown, got = erase_live(cross, "up")
+assert of("done", got)[0]["undo"] == "Erase Line" and points() != before
+assert mid == shown, "what showed while erasing is what the eraser made"
+before, canvas_before, mid, shown, got = erase_live(cross, "cancel")
+assert points() == before and shown == canvas_before and of("canvas", got), "cancelled: the canvas as it was"
+# The Fill Eraser too, through a painted fill.
+blob = [[W * 0.45 + 30 * math.cos(i / 4), H * 0.5 + 30 * math.sin(i / 4), 1, 0, 0, i / 100] for i in range(30)]
+fresh()
+ops.wm.tool_draw(mode="FILL_PEN")
+stroke(blob)
+ops.wm.tool_draw(mode="FILL_ERASER")
+painted = points()
+canvas_before = page["svg"]
+messages({"t": "down", "zoom": 1, "s": cross[:20]})
+time.sleep(ipad.ERASE_INTERVAL + 0.01)
+got = messages({"t": "move", "s": cross[20:]})
+assert of("canvas", got) and page["svg"] != canvas_before and points() == painted, "the fill cut as it goes"
+assert of("done", messages({"t": "up", "s": []}))[0]["undo"] == "Erase Fill"
 ops.wm.tool_draw(mode="FILL_PEN")
 got = stroke([[W * 0.6 + 40 * math.cos(i / 6), H * 0.3 + 40 * math.sin(i / 6), 1, 0, 0, i / 100] for i in range(40)])
 assert of("done", got)[0]["undo"] == "Paint Fill"

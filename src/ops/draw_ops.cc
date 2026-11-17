@@ -323,7 +323,8 @@ static std::vector<FillPiece> pieces_moved(std::vector<FillPiece> pieces, const 
 }
 
 /* The Fill Eraser's stroke, on the active drawing or every one being edited. */
-static bool stroke_erase(Context &C, Layer &layer, const std::vector<FillPiece> &area, float pixel, float tolerance)
+static bool stroke_erase(Context &C, Layer &layer, const std::vector<FillPiece> &area, float pixel, float tolerance,
+                         bool quiet = false)
 {
   Document &doc = *C.document;
   const ToolSettings &ts = C.wm->tool_settings;
@@ -339,7 +340,7 @@ static bool stroke_erase(Context &C, Layer &layer, const std::vector<FillPiece> 
     cut |= drawing_fill_erase(other->drawing, other == &layer ? area : pieces_moved(area, to), pixel / to.scale(), tolerance,
                               ts.draw_erase_selected, &skipped);
   }
-  if (skipped > 0) {
+  if (skipped > 0 && !quiet) {
     report(ReportType::Info, skipped == 1 ? "A shape with keys wasn't cut: cutting rebuilds its points" :
                                             std::to_string(skipped) + " shapes with keys weren't cut: cutting rebuilds their points");
   }
@@ -390,6 +391,20 @@ bool draw_stroke_commit(Context &C, Layer &layer, InkStroke &ink, DrawMode mode)
   }
   drawing_fill_paint(layer.drawing, area, ts.style, pixel, tolerance);
   return true;
+}
+
+bool draw_stroke_cut_so_far(Context &C, Layer &layer, InkStroke ink, DrawMode mode)
+{
+  if (ink.empty() || !draw_mode_cuts(mode)) {
+    return false;
+  }
+  ink.finish();
+  if (mode == DrawMode::StrokeEraser || mode == DrawMode::Trimmer) {
+    return stroke_cut_lines(C, layer, ink, mode);
+  }
+  const float tolerance = ink_tolerance(ink.settings().fidelity) * 0.6f;
+  const std::vector<FillPiece> area = ink_area(ink.points(), ink.settings(), ink.view());
+  return !area.empty() && stroke_erase(C, layer, area, ink.view().pixel, tolerance, true);
 }
 
 /* "x,y,pressure,seconds;...": the stroke's samples in the active layer's space. */

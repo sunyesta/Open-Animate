@@ -42,6 +42,8 @@ import _oanim
 CANVAS_MAX = 2048
 # The least time between two canvases sent while the document keeps changing (playback, a drag), seconds.
 CANVAS_INTERVAL = 0.1
+# While an eraser is drawn, its cut so far is sent at most this often (seconds).
+ERASE_INTERVAL = 0.08
 TILE_SIZE = 64
 BRUSH_PREVIEW = (96, 28)
 
@@ -235,6 +237,8 @@ def _handle(client, message):
         _live(client, message.get("s", []))
         if t == "up":
             _drawing = None
+            # An eraser's canvas sent while it was drawn: the one after it goes at once.
+            _last_canvas_time = 0.0
             name = _oanim.ipad_stroke_end()
             if name:
                 _strokes_done += 1
@@ -245,6 +249,8 @@ def _handle(client, message):
         if _drawing == client:
             _oanim.ipad_stroke_cancel()
             _drawing = None
+            # An eraser's cut shown is put back.
+            _last_canvas_time = 0.0
         return False
     if t == "input_log":
         # Taken whenever it comes (a stroke the PC still thinks is going included), and answered, so the page can
@@ -357,6 +363,27 @@ def _live(client, rows):
     if text:
         text = text.decode("utf-8")
         _send(client, text[:-1] + ',"n":%d,"id":%s}' % (_live.count, json.dumps(_stroke_id)))
+        if '"kind":"erase"' in text:
+            _erase_live()
+
+
+def _erase_live(force=False):
+    """An eraser's or the Trimmer's stroke being drawn: the canvas with what it has cut so far, to every page, so the
+    lines go as the Pencil passes (the document stays as it was until the stroke ends)."""
+    global _last_canvas_key
+    now = time.monotonic()
+    if not force and now - getattr(_erase_live, "time", 0.0) < ERASE_INTERVAL:
+        return
+    _erase_live.time = now
+    w, h = canvas_size()
+    text = _oanim.ipad_stroke_cut_canvas(w, h)
+    if not text:
+        return
+    message = json.loads(text)
+    message["strokes"] = _strokes_done
+    _send(0, json.dumps(_canvas_pieces(message), separators=(",", ":")))
+    # What the pages show isn't the document's canvas now: the next is sent whatever it is.
+    _last_canvas_key = None
 
 
 def _send_changes(force_canvas=False):

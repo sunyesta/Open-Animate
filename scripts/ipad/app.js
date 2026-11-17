@@ -369,7 +369,7 @@ function redraw() {
   const half = penHalfWidth();
   const tipDabs = [];
   for (const s of strokes) {
-    if (s.done !== null || s.raw.length === 0 || !state) continue;
+    if (s.done !== null || s.raw.length === 0 || !state || s.cuts) continue;
     const tip = [];
     const first = Math.max(0, s.n - 1), along = alongAt(s, first);
     /* Before any of the line comes back the tip is its start, narrowing to it as the start taper narrows the line. */
@@ -388,16 +388,25 @@ function redraw() {
   }
   drawDabs(dabRenderer, strokes.filter((s) => s.kind === 'dabs').concat(tipDabs), V, innerWidth, innerHeight);
   /* The width circle round the hovering Pencil. */
-  if (hover && state && state.settings.cursor_circle && !penDown) {
-    const r = penHalfWidth() * zoomOf(V);
-    if (r >= 1.5) {
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = 'rgba(0,0,0,0.67)';
-      ctx.beginPath(); ctx.arc(hover[0], hover[1], r, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,255,255,0.67)';
-      ctx.beginPath(); ctx.arc(hover[0], hover[1], r + 1, 0, Math.PI * 2); ctx.stroke();
+  if (hover && state && state.settings.cursor_circle && !penDown) widthCircle(ctx, hover, penHalfWidth() * zoomOf(V));
+  /* An eraser being drawn: no trail (the lines go as it passes, the canvas sent with them cut), only its size at the
+   * Pencil. */
+  for (const s of strokes) {
+    if (s.done === null && s.cuts && s.raw.length) {
+      const p = s.raw[s.raw.length - 1];
+      widthCircle(ctx, apply(V, p[0], p[1]), (s.eraseR !== undefined ? s.eraseR : penHalfWidth()) * zoomOf(V));
     }
   }
+}
+
+/* A circle of radius `r` round `at` (screen pixels), dark inside light, to show on any drawing. */
+function widthCircle(ctx, at, r) {
+  if (r < 1.5) return;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,0.67)';
+  ctx.beginPath(); ctx.arc(at[0], at[1], r, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.67)';
+  ctx.beginPath(); ctx.arc(at[0], at[1], r + 1, 0, Math.PI * 2); ctx.stroke();
 }
 
 /* ---------------------------------------------------------------------------------------------------------------
@@ -503,6 +512,9 @@ function liveUpdate(into, m) {
     into.pts.length = Math.min(m.keep, into.pts.length);
     for (const v of m.add) into.pts.push(v);
   }
+  else if (m.kind === 'erase') {
+    into.eraseR = m.r;
+  }
   else if (m.kind === 'dabs') {
     into.own = m.own;
     addPngs(m.pngs || {});
@@ -574,6 +586,8 @@ function penStart(e) {
   penId = e.pointerId;
   penErasing = e.button === 5 || (e.buttons & 32) !== 0;
   live = newStroke(penErasing);
+  /* The Pencil's eraser end, or an eraser or the Trimmer picked: it cuts, shown by the canvas as it goes. */
+  live.cuts = penErasing || CUTS.includes(state.mode);
   strokes.push(live);
   const s = coalesced(e).map(sampleOf);
   live.raw.push(...s);

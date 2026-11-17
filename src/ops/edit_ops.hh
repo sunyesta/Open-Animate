@@ -59,6 +59,10 @@ bool draw_stroke_commit(Context &C, Layer &layer, InkStroke &ink, DrawMode mode)
  * neither tapers nor fades out, for a page that draws the line on past it (the iPad's tip). */
 bool draw_live_line(const ToolSettings &ts, const InkStroke &ink, float2 tip, int shapes_before,
                     VectorDrawing &r_drawing, bool open_end = false);
+/* What a cutting stroke (an eraser or the Trimmer) still being drawn has cut so far: `ink`'s samples cut as
+ * draw_stroke_commit cuts them, with no report and no undo step, for showing the cut as it goes (the iPad's live
+ * erasing). The caller keeps the drawings as they were and puts them back. False: it cut nothing. */
+bool draw_stroke_cut_so_far(Context &C, Layer &layer, InkStroke ink, DrawMode mode);
 /* The Draw tool's line brush was drawn with: first in the brush button's Recently Used. */
 void draw_brush_used(ToolSettings &ts);
 /* Makes `mode` the Draw tool's kind of pen, with the preset it last used. */
