@@ -139,4 +139,25 @@ now = fix_names(rid)
 assert now != ["Bone Up and Right"], ("named again when its bone goes", now)
 assert saved_and_opened(rid, "deleted_bone.oanim") == now
 
+# --- Two fixes named again to the same name (the knob made a Pin: neither has its sides now): each its own at once ------
+rid = build()
+layers.active = rig_of(rid)
+ops.armature.select_none()
+rig_of(rid).select_bone("Bone")
+knob(rid, 0.0, 24.0)
+rig_of(rid).select_bone("Bone")
+assert ops.armature.bone_fix_new() == {'FINISHED'}
+doc().frame_current = 30
+rig_of(rid).bone_set("Bone", knob=(24.0, 24.0))
+settle()
+mainline()
+assert len(fix_names(rid)) == 2 and all(n.startswith("Bone Up and Right") for n in fix_names(rid)), fix_names(rid)
+layers.active = rig_of(rid)
+ops.armature.select_none()
+rig_of(rid).select_bone("Bone")
+assert ops.armature.bone_convert(type="PIN") == {'FINISHED'}
+now = fix_names(rid)
+assert len(set(now)) == 2 and not any("Up" in n or "Right" in n for n in now), ("both named again at once", now)
+assert saved_and_opened(rid, "two_renamed.oanim") == now, "opening names them as they were"
+
 print("Fix names tests passed")

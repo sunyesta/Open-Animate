@@ -36,8 +36,8 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 # (file, old, new, name, test)
 PENDING = [
     # Pose library: Save Pose with a new collection puts the selection in it.
-    ("src/ops/pose_library.cc", "          for (Bone *b : picked_bones) {\n            b->collections.push_back(collection);\n          }",
-     "          for (Bone *b : picked_bones) {\n            (void)b;\n          }", "pose_new assigns the new collection",
+    ("src/ops/pose_library.cc", "            b->collections.push_back(collection);", "            (void)b;",
+     "pose_new assigns the new collection",
      "tests/test_pose_library.py"),
     # Save Flipped Copy puts the flipped bones in its collection, so it shows while they are selected.
     ("src/ops/pose_library.cc", "                    join(b.collections);", "                    (void)b;",
@@ -92,6 +92,10 @@ PENDING = [
     ("src/ops/pose_clipboard.cc", "    if (status == OpStatus::Finished && !before.empty()) {",
      "    if (false && status == OpStatus::Finished && !before.empty()) {", "paste on frame 0 keeps poses",
      "tests/test_pose_clipboard.py"),
+    # Fixes named again each in turn: two wanting the same name were both given one, the second refused.
+    ("src/anim/animation.cc", "    for (size_t i = 0; i < owner.bone_fixes.size(); i++) {\n      const BoneFix &fix = owner.bone_fixes[i];\n      /* The fix being edited has its keys out in the channels: it is named as it is left. */\n      if (!fix.auto_name || (doc.action == fix.name && doc.action_layer == owner.id)) {\n        continue;\n      }\n      const std::string from = fix.name;\n      const std::string renamed = bone_fix_unique(owner, bone_fix_name(owner, fix), from);\n      if (renamed != from) {\n        count += document_action_rename(doc, owner.id, from, renamed) ? 1 : 0;\n      }\n    }",
+     "    std::vector<std::pair<std::string, std::string>> later;\n    for (size_t i = 0; i < owner.bone_fixes.size(); i++) {\n      const BoneFix &fix = owner.bone_fixes[i];\n      /* The fix being edited has its keys out in the channels: it is named as it is left. */\n      if (!fix.auto_name || (doc.action == fix.name && doc.action_layer == owner.id)) {\n        continue;\n      }\n      const std::string from = fix.name;\n      const std::string renamed = bone_fix_unique(owner, bone_fix_name(owner, fix), from);\n      if (renamed != from) {\n        later.push_back({from, renamed});\n      }\n    }\n    for (const auto &[x, y] : later) {\n      count += document_action_rename(doc, owner.id, x, y) ? 1 : 0;\n    }",
+     "fixes renamed in turn", "tests/test_bone_fix_names.py"),
 ]
 
 def build(root):
