@@ -1,7 +1,6 @@
 #include "editors/pose_thumbnails.hh"
 
 #include <algorithm>
-#include <bit>
 #include <functional>
 #include <map>
 #include <memory>
@@ -43,9 +42,13 @@ uint64_t stamp_of(const Document &doc, const PoseAsset &pose, int size)
 {
   return mix(mix(mix(mix(controller_document_generation(), uint64_t(doc.frame_current)), uint64_t(size)),
                  media_generation()),
-             mix(mix(mix(uint64_t(std::hash<std::string>{}(pose.pose)), uint64_t(std::bit_cast<uint32_t>(pose.frame_size))),
-                     uint64_t(std::bit_cast<uint32_t>(pose.frame_offset.x))),
-                 mix(uint64_t(std::bit_cast<uint32_t>(pose.frame_offset.y)), uint64_t(pose.frame_points.size()))));
+             mix(uint64_t(std::hash<std::string>{}(pose.pose)), [&] {
+               uint64_t h = pose.frame_points.size();
+               for (const auto &[layer, point] : pose.frame_points) {
+                 h = mix(mix(h, layer), point);
+               }
+               return h;
+             }()));
 }
 
 }  // namespace
@@ -82,10 +85,10 @@ unsigned int pose_thumbnail(Document &doc, const PoseAsset &pose, int size)
   if (!any) {
     return thumb.texture;
   }
-  /* Framed as Save Pose or Edit Frame left it, else on what it moves, with room around. */
+  /* Framed on its Frame to Selected points, else what it moves, with room around. */
   float2 center;
   float extent = 0.0f;
-  pose_frame_choose(posed, pose, lo, hi, &center, &extent);
+  pose_thumbnail_square(lo, hi, &center, &extent);
   const float scale = float(size) / extent;
   const Transform2D to_pixels{scale, 0, 0, scale, float(size) * 0.5f - center.x * scale, float(size) * 0.5f - center.y * scale};
   if (!g_renderer) {

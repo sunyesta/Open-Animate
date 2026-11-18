@@ -6,7 +6,6 @@
  * shown. Operators poselib.*. */
 
 #include <cstdint>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -39,44 +38,12 @@ std::vector<PoseShelfRow> pose_shelf_rows(Context &C, const std::string &search,
                                           const std::vector<uint64_t> *collections = nullptr);
 
 /* A copy of `doc` with the pose put on (on frame 0, where poses don't go, on frame 1), for its thumbnail: nothing in
- * `doc` changes. The box (document space) of what it moves from the setup pose (all of the character when nothing),
- * and the layers to show (the bone layer and the drawings outside it). False when none of its bones and points is in
- * the file. */
+ * `doc` changes. The box (document space) its thumbnail frames: its Frame to Selected points where they show, else what
+ * it moves from the setup pose (all of the character when nothing); and the layers to show (the bone layer and the
+ * drawings outside it). False when none of its bones and points is in the file. */
 bool pose_posed_copy(const Document &doc, const PoseAsset &pose, Document &r_copy, float2 *r_lo, float2 *r_hi,
-                     std::vector<uint64_t> *r_layers, std::vector<std::pair<uint64_t, size_t>> *r_framed = nullptr);
-
-/* A thumbnail's frame (a square: its middle and side) round the box `lo`..`hi`, with room around. */
-void pose_frame_round(float2 lo, float2 hi, float2 *r_center, float *r_size);
-/* Where every drawing's points show (document space) and their ids, by layer. */
-struct PointsShown {
-  std::map<uint64_t, std::vector<float2>> at;
-  std::map<uint64_t, std::vector<uint64_t>> ids;
-};
-PointsShown pose_points_shown(const Document &doc);
-/* Where pose's given frame comes to with its points showing as in `shown` (holding them as it did when framed, grown to
- * hold them all if they spread), or from `anchor` for one framed on no points. False: none given, or none of its
- * points shows. */
-bool pose_frame_place(const PoseAsset &pose, const PointsShown &shown, float2 anchor, float2 *r_center, float *r_size);
-/* Frame `r_pose` on the square `center`, `size` as `doc` shows now (`shown`): the points of the drawings its thumbnail
- * shows (`layers`, pose_posed_copy's) inside it are kept with it, the square kept from them (from `anchor` with none
- * inside). */
-void pose_frame_capture(const Document &doc, const PointsShown &shown, const std::vector<uint64_t> &layers, float2 anchor,
-                        float2 center, float size, PoseAsset &r_pose);
-/* The frame pose's thumbnail is drawn in, `posed` its posed copy and `lo`..`hi` the box of what it moves there: the one
- * it was given (pose_frame_place), else round that. */
-void pose_frame_choose(const Document &posed, const PoseAsset &pose, float2 lo, float2 hi, float2 *r_center,
-                       float *r_size);
-/* The same worked out from a posed copy (pose_posed_copy); false when none of its bones and points is in the file. */
-bool pose_thumbnail_frame(const Document &doc, const PoseAsset &pose, float2 *r_center, float *r_size);
-/* Where the middle of what pose moves (pose_posed_copy's box) shows in `doc` now, which its frame is kept from (it
- * follows them to another frame, or the character moved), and the side of the frame round them. False when none of
- * its bones and points is in the file. */
-bool pose_frame_anchor(const Document &doc, const PoseAsset &pose, float2 *r_anchor, float *r_auto_size,
-                       std::vector<uint64_t> *r_layers = nullptr);
-/* The same for the selected bones' and points' pose now: what Save Pose's frame is kept from. */
-bool pose_frame_anchor_of_selection(Context &C, float2 *r_anchor, float *r_auto_size,
-                                    std::vector<uint64_t> *r_layers = nullptr);
-/* The selected bones' and points' pose now, as a pose (no name or id). */
-PoseAsset pose_of_selection(Context &C);
+                     std::vector<uint64_t> *r_layers);
+/* The square (middle and side, document space) a thumbnail shows round pose_posed_copy's box: the box with room round. */
+void pose_thumbnail_square(float2 lo, float2 hi, float2 *r_center, float *r_side);
 
 }  // namespace oanim

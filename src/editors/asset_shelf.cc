@@ -235,282 +235,131 @@ std::string trimmed(const std::string &s)
 }
 
 /* The Poses' state: the tile its menu is for, the pose being renamed, and the Save Pose dialog's fields (Save tried:
- * its errors show). While the dialog is open (or Edit Frame, for pose `framing`), the viewport shows the thumbnail's
- * frame, a square: as it fits the pose until it is moved or resized there (`frame_auto`). */
+ * its errors show). */
 struct PoseShelf {
   uint64_t menu_pose = 0;
   uint64_t renaming = 0;
   bool focus_rename = false;
   std::string rename_text;
-  bool dialog = false;
-  bool appearing = false;
-  int drawn = 0;
-  /* Opened from elsewhere (a test): the next shelf drawn shows Poses, where the dialog lives. */
-  bool show_poses = false;
-  ImVec2 at;
-  uint64_t framing = 0;
+  bool open_save = false;
   bool focus_name = false, focus_new = false;
   std::string name;
   uint64_t collection = 0;
   bool new_collection = false;
   std::string new_name;
   bool tried = false;
-  bool frame_auto = true;
-  /* Moved, resized or fitted since it opened (Done with none of that changes nothing). */
-  bool frame_edited = false;
-  /* Not auto: the frame as the pose keeps it (its frame_points, frame_offset and frame_size), from the points inside it. */
-  PoseAsset frame;
-  /* Where the middle of what the pose moves shows (pose_frame_anchor), the side that fits it, the layers its thumbnail
-   * shows and where every point shows, worked out again when the file, the frame shown or the pose changes. */
-  bool anchor_known = false, anchor_found = false;
-  uint64_t anchor_changes = 0, anchor_pose = 0;
-  int anchor_frame = 0;
-  float2 anchor;
-  float anchor_fits = 0.0f;
-  std::vector<uint64_t> anchor_layers;
-  PointsShown anchor_shown;
 };
 PoseShelf g_poses;
-
-void pose_dialog_begin(uint64_t framing)
-{
-  g_poses.dialog = true;
-  g_poses.appearing = true;
-  g_poses.drawn = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : 0;
-  /* At the mouse (the button pressed), else the middle of the window. */
-  g_poses.at = ImVec2(-1.0f, -1.0f);
-  if (ImGui::GetCurrentContext() && ImGui::IsMousePosValid()) {
-    g_poses.at = ImGui::GetMousePos();
-  }
-  g_poses.framing = framing;
-  g_poses.tried = false;
-  g_poses.frame_auto = true;
-  g_poses.frame_edited = false;
-  g_poses.frame = PoseAsset();
-  g_poses.anchor_known = false;
-}
-
-/* Where the frame is kept from now (and the side that fits): false when the pose moves nothing in the file. */
-bool pose_frame_anchor_now(Context &C, float2 *r_anchor, float *r_fits)
-{
-  const Document &doc = *C.document;
-  const uint64_t changes = C.undo ? C.undo->change_count() : 0;
-  if (!C.undo || !g_poses.anchor_known || g_poses.anchor_changes != changes || g_poses.anchor_frame != doc.frame_current ||
-      g_poses.anchor_pose != g_poses.framing)
-  {
-    const PoseAsset *pose = g_poses.framing ? pose_asset_find(doc, g_poses.framing) : nullptr;
-    g_poses.anchor_found =
-        pose ? pose_frame_anchor(doc, *pose, &g_poses.anchor, &g_poses.anchor_fits, &g_poses.anchor_layers)
-             : !g_poses.framing &&
-                   pose_frame_anchor_of_selection(C, &g_poses.anchor, &g_poses.anchor_fits, &g_poses.anchor_layers);
-    g_poses.anchor_shown = g_poses.anchor_found ? pose_points_shown(doc) : PointsShown();
-    g_poses.anchor_known = true;
-    g_poses.anchor_changes = changes;
-    g_poses.anchor_frame = doc.frame_current;
-    g_poses.anchor_pose = g_poses.framing;
-  }
-  *r_anchor = g_poses.anchor;
-  *r_fits = g_poses.anchor_fits;
-  return g_poses.anchor_found;
-}
-
-/* The frame as it fits the pose (or the selection's, saving one). */
-void pose_frame_fit()
-{
-  g_poses.frame_auto = true;
-  g_poses.frame = PoseAsset();
-}
 
 /* The Save Pose dialog, its collection `collection` (0: the selection's first, else a new one). */
 void pose_save_open(Context &C, uint64_t collection)
 {
-  pose_dialog_begin(0);
+  g_poses.open_save = true;
   g_poses.focus_name = true;
   g_poses.name.clear();
   g_poses.new_name.clear();
+  g_poses.tried = false;
   if (!collection || !collection_find(*C.document, collection)) {
     const std::vector<uint64_t> held = pose_selection_collections(C);
     collection = held.empty() ? 0 : held.front();
   }
   g_poses.collection = collection;
   g_poses.new_collection = collection == 0;
-  pose_frame_fit();
-}
-
-/* Edit Frame: pose `id`'s thumbnail frame shown in the viewport to move and resize, as it was given or fits it. */
-void pose_frame_edit_open(Context &C, uint64_t id)
-{
-  const PoseAsset *pose = pose_asset_find(*C.document, id);
-  if (!pose) {
-    return;
-  }
-  pose_dialog_begin(id);
-  if (pose->frame_size > 0.0f) {
-    g_poses.frame_auto = false;
-    g_poses.frame = *pose;
-  }
-  else {
-    pose_frame_fit();
-  }
-}
-
-std::string frame_number(float v)
-{
-  char buf[32];
-  std::snprintf(buf, sizeof(buf), "%.9g", double(v));
-  return buf;
 }
 
 void pose_save_dialog(Context &C)
 {
-  if (!g_poses.dialog) {
+  if (g_poses.open_save) {
+    ImGui::OpenPopup("##pose_save");
+    g_poses.open_save = false;
+  }
+  if (!ImGui::BeginPopup("##pose_save")) {
     return;
   }
   Document &doc = *C.document;
-  const PoseAsset *framing = g_poses.framing ? pose_asset_find(doc, g_poses.framing) : nullptr;
-  if (g_poses.framing && !framing) {
-    g_poses.dialog = false;
-    return;
-  }
-  g_poses.drawn = ImGui::GetFrameCount();
-  if (g_poses.appearing) {
-    if (g_poses.at.x >= 0.0f) {
-      ImGui::SetNextWindowPos(g_poses.at, ImGuiCond_Always);
-    }
-    else {
-      ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    }
-    ImGui::SetNextWindowFocus();
-    g_poses.appearing = false;
-  }
-  const std::string title = (framing ? "Edit Frame: " + framing->name : std::string("Save Pose")) + "###pose_dialog";
-  bool open = true;
-  if (!ImGui::Begin(title.c_str(), &open,
-                    ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse |
-                        ImGuiWindowFlags_NoSavedSettings))
-  {
-    ImGui::End();
-    g_poses.dialog = open;
-    return;
-  }
   const ImVec4 red(0.95f, 0.45f, 0.45f, 1.0f);
-  const bool selected = framing || pose_anything_selected(C);
+  const bool selected = pose_anything_selected(C);
   const float label_w = ImGui::CalcTextSize("Collection").x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
   const float field_w = ImGui::GetFontSize() * 14.0f;
   const float left = ImGui::GetCursorPosX();
+  ImGui::TextUnformatted("Save Pose");
+  ImGui::Separator();
   bool save = false;
 
-  if (!framing) {
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Name");
-    ImGui::SameLine(left + label_w);
-    ImGui::SetNextItemWidth(field_w);
-    if (g_poses.focus_name) {
-      ImGui::SetKeyboardFocusHere();
-      g_poses.focus_name = false;
-    }
-    save |= ImGui::InputText("##pose_name", &g_poses.name, ImGuiInputTextFlags_EnterReturnsTrue);
-    if (g_poses.tried && trimmed(g_poses.name).empty()) {
-      ImGui::SetCursorPosX(left + label_w);
-      ImGui::TextColored(red, "Enter a name");
-    }
-
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Collection");
-    ImGui::SameLine(left + label_w);
-    ImGui::SetNextItemWidth(field_w);
-    const std::string shown = g_poses.new_collection ? "New collection" : collection_name(doc, g_poses.collection);
-    if (ImGui::BeginCombo("##pose_collection", shown.c_str())) {
-      for (const Collection &c : doc.collections) {
-        ImGui::PushID(int(c.id));
-        if (ImGui::Selectable(c.name.c_str(), !g_poses.new_collection && g_poses.collection == c.id)) {
-          g_poses.collection = c.id;
-          g_poses.new_collection = false;
-        }
-        ImGui::PopID();
-      }
-      if (!doc.collections.empty()) {
-        ImGui::Separator();
-      }
-      if (ImGui::Selectable("New collection", g_poses.new_collection)) {
-        g_poses.new_collection = true;
-        g_poses.focus_new = true;
-      }
-      ImGui::EndCombo();
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("The pose shows on the shelf while anything in this collection is selected.\n"
-                        "A new collection is made from the selection");
-    }
-    if (g_poses.new_collection) {
-      ImGui::SetCursorPosX(left + label_w);
-      ImGui::SetNextItemWidth(field_w);
-      if (g_poses.focus_new) {
-        ImGui::SetKeyboardFocusHere();
-        g_poses.focus_new = false;
-      }
-      save |= ImGui::InputTextWithHint("##pose_new_collection", "Name", &g_poses.new_name,
-                                       ImGuiInputTextFlags_EnterReturnsTrue);
-      if (g_poses.tried && trimmed(g_poses.new_name).empty()) {
-        ImGui::SetCursorPosX(left + label_w);
-        ImGui::TextColored(red, "Name the new collection");
-      }
-    }
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted("Name");
+  ImGui::SameLine(left + label_w);
+  ImGui::SetNextItemWidth(field_w);
+  if (g_poses.focus_name) {
+    ImGui::SetKeyboardFocusHere();
+    g_poses.focus_name = false;
+  }
+  save |= ImGui::InputText("##pose_name", &g_poses.name, ImGuiInputTextFlags_EnterReturnsTrue);
+  if (g_poses.tried && trimmed(g_poses.name).empty()) {
+    ImGui::SetCursorPosX(left + label_w);
+    ImGui::TextColored(red, "Enter a name");
   }
 
   ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted("Frame");
+  ImGui::TextUnformatted("Collection");
   ImGui::SameLine(left + label_w);
-  ImGui::BeginDisabled(g_poses.frame_auto);
-  if (ImGui::Button("Fit to Pose", ImVec2(field_w, 0.0f))) {
-    pose_frame_fit();
-    g_poses.frame_edited = true;
+  ImGui::SetNextItemWidth(field_w);
+  const std::string shown = g_poses.new_collection ? "New collection" : collection_name(doc, g_poses.collection);
+  if (ImGui::BeginCombo("##pose_collection", shown.c_str())) {
+    for (const Collection &c : doc.collections) {
+      ImGui::PushID(int(c.id));
+      if (ImGui::Selectable(c.name.c_str(), !g_poses.new_collection && g_poses.collection == c.id)) {
+        g_poses.collection = c.id;
+        g_poses.new_collection = false;
+      }
+      ImGui::PopID();
+    }
+    if (!doc.collections.empty()) {
+      ImGui::Separator();
+    }
+    if (ImGui::Selectable("New collection", g_poses.new_collection)) {
+      g_poses.new_collection = true;
+      g_poses.focus_new = true;
+    }
+    ImGui::EndCombo();
   }
-  ImGui::EndDisabled();
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("The thumbnail shows what is inside the square in the viewport: drag it to move it, a corner to "
-                      "resize it.\nFit to Pose frames it on what the pose moves again");
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("The pose shows on the shelf while anything in this collection is selected.\n"
+                      "A new collection is made from the selection");
+  }
+  if (g_poses.new_collection) {
+    ImGui::SetCursorPosX(left + label_w);
+    ImGui::SetNextItemWidth(field_w);
+    if (g_poses.focus_new) {
+      ImGui::SetKeyboardFocusHere();
+      g_poses.focus_new = false;
+    }
+    save |= ImGui::InputTextWithHint("##pose_new_collection", "Name", &g_poses.new_name,
+                                     ImGuiInputTextFlags_EnterReturnsTrue);
+    if (g_poses.tried && trimmed(g_poses.new_name).empty()) {
+      ImGui::SetCursorPosX(left + label_w);
+      ImGui::TextColored(red, "Name the new collection");
+    }
   }
   if (!selected) {
     ImGui::TextColored(red, "Select bones or points to save a pose");
   }
   ImGui::Spacing();
-  const char *ok = framing ? "Done" : "Save";
-  const float buttons_w = ImGui::CalcTextSize(ok).x + ImGui::CalcTextSize("Cancel").x +
+  const float buttons_w = ImGui::CalcTextSize("Save").x + ImGui::CalcTextSize("Cancel").x +
                           ImGui::GetStyle().FramePadding.x * 4.0f + ImGui::GetStyle().ItemSpacing.x;
   ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), left + label_w + field_w - buttons_w));
   ImGui::BeginDisabled(!selected);
-  save |= ImGui::Button(ok);
+  save |= ImGui::Button("Save");
   ImGui::EndDisabled();
   ImGui::SameLine();
-  const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-  bool close = ImGui::Button("Cancel") || (focused && ImGui::IsKeyPressed(ImGuiKey_Escape));
-  if (focused && !ImGui::GetIO().WantTextInput &&
-      (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)))
-  {
+  bool close = ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape);
+  if (!ImGui::GetIO().WantTextInput && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) {
     save = true;
   }
   if (save && !close) {
     g_poses.tried = true;
-    OpArgs frame;
-    float2 center;
-    float size = 0.0f;
-    if (!g_poses.frame_auto && pose_frame_shown(C, &center, &size)) {
-      frame = {{"frame_x", frame_number(center.x)}, {"frame_y", frame_number(center.y)}, {"frame_size", frame_number(size)}};
-    }
-    if (framing) {
-      if (g_poses.frame_edited) {
-        OpArgs args = frame.empty() ? OpArgs{{"frame_size", "0"}} : frame;
-        args["pose"] = std::to_string(framing->id);
-        operator_call(C, "poselib.frame_set", args);
-      }
-      close = true;
-    }
-    else if (selected && !trimmed(g_poses.name).empty() &&
-             (!g_poses.new_collection || !trimmed(g_poses.new_name).empty()))
-    {
-      OpArgs args = frame;
-      args["name"] = g_poses.name;
+    if (selected && !trimmed(g_poses.name).empty() && (!g_poses.new_collection || !trimmed(g_poses.new_name).empty())) {
+      OpArgs args{{"name", g_poses.name}};
       if (g_poses.new_collection) {
         args["new_collection"] = g_poses.new_name;
       }
@@ -520,10 +369,10 @@ void pose_save_dialog(Context &C)
       close = operator_call(C, "poselib.pose_new", args) == OpStatus::Finished;
     }
   }
-  ImGui::End();
-  if (close || !open) {
-    g_poses.dialog = false;
+  if (close) {
+    ImGui::CloseCurrentPopup();
   }
+  ImGui::EndPopup();
 }
 
 void pose_tile_menu(Context &C, uint64_t id)
@@ -563,13 +412,42 @@ void pose_tile_menu(Context &C, uint64_t id)
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
     ImGui::SetTooltip("Save the selected bones' and points' pose on this frame over it");
   }
-  if (ui_menu_item("Edit Frame...")) {
-    pose_frame_edit_open(C, id);
+  ImGui::Separator();
+  const bool points_picked = [&] {
+    for (const Layer *l : pose_drawings(C)) {
+      for (const MeshPoint &p : l->drawing.points) {
+        if (p.selected) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }();
+  if (ui_menu_item("Frame to Selected", nullptr, false, points_picked)) {
+    operator_call(C, "poselib.frame_selected", {{"pose", sid}});
     return;
   }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip("Choose what its thumbnail shows: a square in the viewport to move and resize");
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Its thumbnail shows the selected points, wherever the pose puts them");
   }
+  if (in_collection) {
+    if (ui_menu_item("Frame Collection to Selected", nullptr, false, points_picked)) {
+      operator_call(C, "poselib.frame_selected", {{"pose", sid}, {"collection", "1"}});
+      return;
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::SetTooltip("%s", ("Every pose in " + collection_name(doc, in_collection) +
+                               " shows the selected points, so their thumbnails line up").c_str());
+    }
+  }
+  if (ui_menu_item("Frame to Pose", nullptr, false, !pose->frame_points.empty())) {
+    operator_call(C, "poselib.frame_pose", {{"pose", sid}});
+    return;
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Its thumbnail shows what the pose moves again");
+  }
+  ImGui::Separator();
   if (ui_menu_item("Rename", "F2")) {
     g_poses.renaming = id;
     g_poses.rename_text = pose->name;
@@ -1178,10 +1056,6 @@ void asset_shelf_draw(Area &area, Context &C)
   area_editor_type_menu(area);
   /* Its sections, as tabs: what the switches show, the pose library, actions. */
   ImGui::SameLine();
-  if (g_poses.show_poses) {
-    area.shelf_section = 1;
-    g_poses.show_poses = false;
-  }
   static const char *const sections[] = {"Switches", "Poses", "Actions"};
   for (int s = 0; s < 3; s++) {
     ImGui::SameLine(0, s == 0 ? 8.0f : 1.0f);
@@ -1208,51 +1082,6 @@ void asset_shelf_draw(Area &area, Context &C)
   else {
     switches_section(area, C);
   }
-}
-
-bool pose_frame_shown(Context &C, float2 *r_center, float *r_size)
-{
-  /* The Poses tab put away (or its editor closed): the dialog goes with it. */
-  if (g_poses.dialog && ImGui::GetCurrentContext() && ImGui::GetFrameCount() - g_poses.drawn > 2) {
-    g_poses.dialog = false;
-  }
-  float2 anchor;
-  float fits = 0.0f;
-  if (!g_poses.dialog || !pose_frame_anchor_now(C, &anchor, &fits)) {
-    return false;
-  }
-  if (g_poses.frame_auto || !pose_frame_place(g_poses.frame, g_poses.anchor_shown, anchor, r_center, r_size)) {
-    *r_center = anchor;
-    *r_size = fits;
-  }
-  return *r_size > 0.0f;
-}
-
-void pose_frame_shown_set(Context &C, float2 center, float size)
-{
-  float2 anchor;
-  float fits = 0.0f;
-  if (g_poses.dialog && std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(size) && size > 0.0f &&
-      pose_frame_anchor_now(C, &anchor, &fits))
-  {
-    pose_frame_capture(*C.document, g_poses.anchor_shown, g_poses.anchor_layers, anchor, center, size, g_poses.frame);
-    g_poses.frame_auto = false;
-    g_poses.frame_edited = true;
-  }
-}
-
-void pose_frame_dialog_test(Context &C, int64_t pose)
-{
-  if (pose < 0) {
-    g_poses.dialog = false;
-  }
-  else if (pose) {
-    pose_frame_edit_open(C, uint64_t(pose));
-  }
-  else {
-    pose_save_open(C, 0);
-  }
-  g_poses.show_poses = pose >= 0;
 }
 
 }  // namespace oanim

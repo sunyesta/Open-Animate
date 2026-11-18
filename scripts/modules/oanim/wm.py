@@ -691,30 +691,6 @@ def select_click(x, y, zoom=100.0):
     _oanim.select_click(float(x), float(y), float(zoom))
 
 
-def pose_frame_open(pose=0):
-    """Test hook: opens the Asset Shelf's Save Pose dialog (pose 0) or Edit Frame for pose `pose` (its id), as the
-    shelf does; -1 closes it."""
-    _oanim.pose_frame_open(int(pose))
-
-
-def pose_frame():
-    """Test hook: the thumbnail frame the viewport shows while Save Pose or Edit Frame is open, (x, y, size): its
-    middle and side in document space; None while neither is."""
-    return _oanim.pose_frame()
-
-
-def pose_frame_drag(start, end, reach=0.05):
-    """Test hook: a press on the shown frame at `start` dragged to `end` (document space): inside moves it, a corner
-    within `reach` resizes it, still square. False when the press is off it."""
-    return bool(_oanim.pose_frame_drag(float(start[0]), float(start[1]), float(end[0]), float(end[1]), float(reach)))
-
-
-def pose_thumbnail_frame(pose):
-    """Test hook: the frame pose `pose`'s thumbnail is drawn in, (x, y, size): the one it was given, else round what it
-    moves. None when none of its bones and points is in the file."""
-    return _oanim.pose_thumbnail_frame(int(pose))
-
-
 def points_panel():
     """Test hook: what Properties' Selected Points shows (None when it doesn't): label ("Point" or "Median"), median
     (x, y) where the points show, count, key and width_key (0 not animated, 1 animated, 2 every point keyed here),

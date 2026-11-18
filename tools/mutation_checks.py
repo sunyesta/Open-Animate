@@ -146,32 +146,16 @@ PENDING = [
     # A point's weight set from Point Weights.
     ('src/ops/rig_ops.cc', '                   w->weight = value;', '                   w->weight = value * 0.0f;',
      'point weight set', 'tests/test_points_panel.py'),
-    # A pose's thumbnail is framed on the frame it was given.
-    ('src/ops/pose_library.cc', '  if (!pose_frame_place(pose, pose_points_shown(posed), (lo + hi) * 0.5f, r_center, r_size)) {',
-     '  if (true) {', 'thumbnail uses its frame', 'tests/test_pose_frame.py'),
-    # The frame holds the points that were inside it, and scales with them.
-    ('src/ops/pose_library.cc', '      r_pose.frame_points.emplace_back(layer, ids->second[i]);',
-     '      (void)ids;', 'pose frame keeps the points inside it', 'tests/test_pose_frame.py'),
-    ('src/ops/pose_library.cc', '  float size = pose.frame_size * side;', '  float size = pose.frame_size;',
-     'pose frame scales with the points inside', 'tests/test_pose_frame.py'),
-    ('src/ops/pose_library.cc', '  size = std::max(size, reach * 2.0f);', '  size = std::max(size, reach * 0.0f);',
-     'pose frame grows to hold points that spread', 'tests/test_pose_frame.py'),
-
-    ('src/ops/pose_library.cc', '  if (any) {\n    *r_anchor = (a + b) * 0.5f;',
-     '  if (any && false) {\n    *r_anchor = (a + b) * 0.5f;', 'frame shown follows the points where they show now',
+    # Frame to Selected: a pose's thumbnail framed on the points picked, kept in the file, Frame Collection to Selected.
+    ('src/ops/pose_library.cc', '      if (found) {\n        *r_lo = lo;', '      if (found && false) {\n        *r_lo = lo;',
+     'thumbnail framed on its Frame to Selected points', 'tests/test_pose_frame.py'),
+    ('src/ops/pose_library.cc', '            if (p.selected) {\n              picked.emplace_back(l->id, p.id);',
+     '            if (!p.selected) {\n              picked.emplace_back(l->id, p.id);', 'Frame to Selected takes the selected points',
      'tests/test_pose_frame.py'),
-    # Save Pose keeps the frame given.
-    ('src/ops/pose_library.cc', '        frame_args_capture(C, asset);',
-     '        (void)frame_args_capture;', 'Save Pose keeps its frame', 'tests/test_pose_frame.py'),
-    ('src/io/oanim_file.cc', '              p.frame_points.emplace_back(e[0].get<uint64_t>(), e[1].get<uint64_t>());',
-     '              (void)e;', 'pose frame points kept in the file', 'tests/test_pose_frame.py'),
-    # The frame is read back from the file.
-    ('src/io/oanim_file.cc', '        p.frame_size = size;', '        p.frame_size = size * 0.0f;', 'pose frame kept in the file',
+    ('src/ops/pose_library.cc', '(all && p.collection == collection)', '(all && false)', 'Frame Collection to Selected',
      'tests/test_pose_frame.py'),
-    # A corner dragged resizes the frame about the corner across.
-    ('src/editors/viewport.cc', '      g_pose_frame = {2, center - corner * half, at, center};',
-     '      g_pose_frame = {2, center + corner * half, at, center};', 'frame corner resizes about the one across',
-     'tests/test_pose_frame.py'),
+    ('src/io/oanim_file.cc', '          p.frame_points.emplace_back(e[0].get<uint64_t>(), e[1].get<uint64_t>());', '          (void)e;',
+     'Frame to Selected points kept in the file', 'tests/test_pose_frame.py'),
 ]
 
 def build(root):

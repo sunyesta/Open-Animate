@@ -3,7 +3,6 @@
 #include <numeric>
 #include <execution>
 #include <algorithm>
-#include <cmath>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
@@ -1363,15 +1362,12 @@ std::string oanim_document_to_json(const Document &doc)
                                 {"name", p.name},
                                 {"collection", p.collection},
                                 {"pose", pose.is_discarded() ? json::object() : pose}});
-                if (p.frame_size > 0.0f) {
-                  list.back()["frame_offset"] = {p.frame_offset.x, p.frame_offset.y, p.frame_size};
-                  if (!p.frame_points.empty()) {
-                    json held = json::array();
-                    for (const auto &[layer, point] : p.frame_points) {
-                      held.push_back({layer, point});
-                    }
-                    list.back()["frame_points"] = std::move(held);
+                if (!p.frame_points.empty()) {
+                  json framed = json::array();
+                  for (const auto &[layer, point] : p.frame_points) {
+                    framed.push_back({layer, point});
                   }
+                  list.back()["frame_points"] = std::move(framed);
                 }
               }
               return list;
@@ -4287,20 +4283,10 @@ bool oanim_document_from_json(const std::string &text, Document &r_doc, std::str
     p.name = get_string(pj, "name", "Pose");
     p.collection = pj.value("collection", uint64_t(0));
     p.pose = pj["pose"].dump();
-    if (const auto f = pj.find("frame_offset"); f != pj.end() && f->is_array() && f->size() == 3 && (*f)[0].is_number() &&
-                                         (*f)[1].is_number() && (*f)[2].is_number())
-    {
-      const float2 center((*f)[0].get<float>(), (*f)[1].get<float>());
-      const float size = (*f)[2].get<float>();
-      if (std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(size) && size > 0.0f) {
-        p.frame_offset = center;
-        p.frame_size = size;
-        if (const auto h = pj.find("frame_points"); h != pj.end() && h->is_array()) {
-          for (const json &e : *h) {
-            if (e.is_array() && e.size() == 2 && e[0].is_number_unsigned() && e[1].is_number_unsigned()) {
-              p.frame_points.emplace_back(e[0].get<uint64_t>(), e[1].get<uint64_t>());
-            }
-          }
+    if (const auto f = pj.find("frame_points"); f != pj.end() && f->is_array()) {
+      for (const json &e : *f) {
+        if (e.is_array() && e.size() == 2 && e[0].is_number_unsigned() && e[1].is_number_unsigned()) {
+          p.frame_points.emplace_back(e[0].get<uint64_t>(), e[1].get<uint64_t>());
         }
       }
     }
