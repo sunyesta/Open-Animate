@@ -633,7 +633,7 @@ static void piece_as_shown(VectorDrawing &piece, const json &shown)
 
 /* `piece` carried by `to`, keys and all: a key holds a change from setup, so it takes the turn and scale only. A
  * handle's key is a turn and a length. */
-static void piece_transform(VectorDrawing &piece, const Transform2D &to)
+void piece_transform(VectorDrawing &piece, const Transform2D &to)
 {
   const float scale = std::sqrt(std::fabs(to.a * to.d - to.b * to.c));
   const auto keys_along = [&](Channel<float2> &ch) {

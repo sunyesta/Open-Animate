@@ -1727,7 +1727,11 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   m.def("select_click", [](float x, float y, float zoom) { select_click_test(current_context(), {x, y}, zoom); });
   m.def("move_menu_rows", [](const std::string &search) { return move_menu_rows_test(current_context(), search); },
         py::arg("search") = "");
-  m.def("move_pick_click", [](uint64_t layer) { return move_pick_test(current_context(), layer); });
+  m.def("move_pick_click", [](uint64_t layer, uint64_t bone) { return move_pick_test(current_context(), layer, bone); },
+        py::arg("layer"), py::arg("bone") = 0);
+  m.def("move_group_rows", [](const std::string &search) { return move_group_rows_test(current_context(), search); },
+        py::arg("search") = "");
+  m.def("menu_request", []() { return current_context().wm->menu_request; });
   m.def("points_panel", []() {
     const PointsPanelValues v = points_panel_values_test(current_context());
     py::dict d;

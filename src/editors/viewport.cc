@@ -14326,6 +14326,7 @@ static void point_gizmo_place(Context &C, ModalTransform &moving, const Transfor
 }
 
 static std::vector<uint64_t> move_sources(Context &C);
+static bool move_bones_mode(Context &C);
 
 /* The header's fields and buttons: mesh.transform_selected, one map of the selection as one undo step. */
 static void point_gizmo_apply(Context &C, float2 pivot, float2 move, float2 scale, float degrees)
@@ -15649,11 +15650,15 @@ void viewport_operators_register()
   move_menu.idname = "mesh.move_to_layer_menu";
   move_menu.name = "Move to Layer";
   move_menu.description = "Choose where the selected points go: a new layer (Separate), a drawing clicked in the "
-                          "viewport or the Layers editor (Pick Layer), or one from the list";
+                          "viewport or the Layers editor (Pick Layer), or one from the list. With bones selected in the "
+                          "active bone layer, where they go: a new bone group inside it, a bone or bone group picked, "
+                          "or one from the list";
   move_menu.flag = OPTYPE_REGISTER;
-  move_menu.poll = [](Context &C) { return C.document != nullptr && C.wm != nullptr && !move_sources(C).empty(); };
+  move_menu.poll = [](Context &C) {
+    return C.document != nullptr && C.wm != nullptr && (move_bones_mode(C) || !move_sources(C).empty());
+  };
   move_menu.exec = [](Context &C) {
-    C.wm->menu_request = "move_to_layer";
+    C.wm->menu_request = move_bones_mode(C) ? "move_to_group" : "move_to_layer";
     return OpStatus::Finished;
   };
   operators().add(std::move(move_menu));
@@ -16640,6 +16645,134 @@ static std::vector<const Layer *> move_rows(Context &C, const std::string &searc
   return rows;
 }
 
+/* The UI frame, 0 with no UI (background runs pick through test hooks). */
+static int move_pick_frame()
+{
+  return ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : 0;
+}
+
+/* P with bones selected in the active bone layer: they go to another bone group. */
+static bool move_bones_mode(Context &C)
+{
+  const Layer *active = document_active_layer(*C.document);
+  const Layer *armature = active && active->is_bone_layer() ? active_armature(C) : nullptr;
+  return armature && std::any_of(armature->bones.begin(), armature->bones.end(), [](const Bone &b) { return b.selected; });
+}
+
+/* Where they can go: the other bone groups of their rig (the outermost bone layer around them and every one inside it)
+ * whose names hold `search` (any case), the ones moved into last first, then in Layers-editor order. */
+static std::vector<const Layer *> move_group_rows(Context &C, const std::string &search)
+{
+  const auto lower = [](std::string t) {
+    for (char &ch : t) {
+      ch = char(std::tolower((unsigned char)ch));
+    }
+    return t;
+  };
+  std::vector<const Layer *> rows;
+  const Layer *source = active_armature(C);
+  if (!source) {
+    return rows;
+  }
+  const Document &doc = *C.document;
+  const Layer *root = armature_root(doc, *source);
+  const std::string want = lower(search);
+  const auto take = [&](const Layer *l) {
+    if (l && l->is_bone_layer() && l->id != source->id && armature_root(doc, *l) == root &&
+        std::find(rows.begin(), rows.end(), l) == rows.end() &&
+        (want.empty() || lower(l->name).find(want) != std::string::npos))
+    {
+      rows.push_back(l);
+    }
+  };
+  for (const uint64_t id : C.wm->move_to_group_recent) {
+    take(layer_find(doc, id));
+  }
+  for (const Layer *l : document_layers_flat(doc)) {
+    take(l);
+  }
+  return rows;
+}
+
+/* The bone group a layer picked stands for: itself, or the one a drawing is in (null: none of the rig's others). */
+static const Layer *move_group_of(Context &C, uint64_t id)
+{
+  const Layer *l = layer_find(*C.document, id);
+  const Layer *group = l && l->is_bone_layer() ? l : l ? layer_armature(*C.document, id) : nullptr;
+  const std::vector<const Layer *> rows = move_group_rows(C, "");
+  return std::find(rows.begin(), rows.end(), group) != rows.end() ? group : nullptr;
+}
+
+/* P with bones selected: Move to Bone Group. New Bone Group makes one inside theirs (Enter with nothing typed); Pick
+ * Bone waits for a click on a bone (they hang from it) or a drawing or bone group (into its bone group); below, the
+ * rig's other bone groups, the ones moved into last first, found by typing. */
+static void move_to_group_menu(Context &C, bool hovered)
+{
+  WindowManager &wm = *C.wm;
+  if (hovered && wm.menu_request == "move_to_group") {
+    ImGui::OpenPopup("##move_to_group");
+    wm.menu_request.clear();
+  }
+  if (!ui_menu_begin("##move_to_group")) {
+    return;
+  }
+  ImGui::TextDisabled("Move to Bone Group");
+  ImGui::Separator();
+  const auto move = [&](const std::string &target) {
+    operator_call(C, "armature.move_to_group", {{"target", target}});
+  };
+  if (ui_menu_item("New Bone Group")) {
+    move("NEW");
+  }
+  if (ui_menu_item("Pick Bone")) {
+    wm.move_pick = {};
+    wm.move_pick.active = true;
+    wm.move_pick.bones = true;
+  }
+  ImGui::Separator();
+  static std::string search;
+  if (ImGui::IsWindowAppearing()) {
+    search.clear();
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+  const bool entered =
+      ImGui::InputTextWithHint("##move_group_search", "Search", &search, ImGuiInputTextFlags_EnterReturnsTrue);
+  const std::vector<const Layer *> rows = move_group_rows(C, search);
+  if (rows.empty()) {
+    ImGui::TextDisabled(search.empty() ? "No other bone group" : "No bone group of that name");
+  }
+  const float row_h = ImGui::GetFrameHeightWithSpacing();
+  const bool scroll = rows.size() > 16;
+  if (scroll) {
+    ImGui::BeginChild("##move_group_rows", ImVec2(ImGui::GetFontSize() * 14.0f, row_h * 16.0f));
+  }
+  for (const Layer *l : rows) {
+    ImGui::PushID(int(l->id));
+    Layer *parent = layer_parent(*C.document, l->id);
+    if (ui_menu_item(l->name.c_str(), parent ? parent->name.c_str() : nullptr)) {
+      move(std::to_string(l->id));
+    }
+    if (ImGui::IsItemHovered()) {
+      move_target_light(wm, l->id);
+    }
+    ImGui::PopID();
+  }
+  if (scroll) {
+    ImGui::EndChild();
+  }
+  if (entered) {
+    if (search.empty()) {
+      move("NEW");
+    }
+    else if (!rows.empty()) {
+      move(std::to_string(rows.front()->id));
+    }
+    ImGui::CloseCurrentPopup();
+  }
+  ui_menu_end();
+}
+
 /* P: Move to Layer, as Grease Pencil's. New Layer is Separate (Enter with nothing typed); Pick Layer waits for a click on
  * a drawing, in the viewport or the Layers editor; below, the drawings it can go into, the ones moved into last first,
  * then in Layers-editor order, found by typing. */
@@ -16726,6 +16859,7 @@ static void move_pick_update(Context &C, uint64_t under_mouse)
       pick.hover = under_mouse;
       pick.hover_frame = ImGui::GetFrameCount();
       pick.hover_name = l ? l->name : "";
+      pick.hover_bone = 0;
     }
     if (pick.hover && pick.hover_frame >= ImGui::GetFrameCount() - 1) {
       move_target_light(wm, pick.hover);
@@ -16734,6 +16868,38 @@ static void move_pick_update(Context &C, uint64_t under_mouse)
   }
   pick.started = true;
   WindowManager *w = &wm;
+  if (pick.bones) {
+    ui_layer_eyedropper_start_with(
+        [w](Context &C, uint64_t id) {
+          const WindowManager::MovePick &p = w->move_pick;
+          const Layer *group = move_group_of(C, id);
+          /* A bone clicked: they hang from it. */
+          if (p.hover_bone && id == p.hover && p.hover_frame >= move_pick_frame() - 1 && group) {
+            operator_call(C, "armature.move_to_group",
+                          {{"target", std::to_string(group->id)}, {"parent", std::to_string(p.hover_bone)}});
+            return true;
+          }
+          if (!group) {
+            const Layer *l = layer_find(*C.document, id);
+            const Layer *source = active_armature(C);
+            report_banner(ReportType::Warning,
+                          source && l && (l->id == source->id || layer_armature(*C.document, id) == source)
+                              ? "The bones are in that bone group already"
+                              : "Pick a bone, or a bone group or drawing of the same rig",
+                          "Click a bone or bone group to move the bones into", "Can't move there");
+            return false;
+          }
+          operator_call(C, "armature.move_to_group", {{"target", std::to_string(group->id)}});
+          return true;
+        },
+        [w]() {
+          const WindowManager::MovePick &p = w->move_pick;
+          const bool over = p.hover && p.hover_frame >= move_pick_frame() - 1 && !p.hover_name.empty();
+          return (over ? p.hover_name + " (click)" : std::string("Click a bone or bone group to move the bones into")) +
+                 "  |  Esc cancels";
+        });
+    return;
+  }
   ui_layer_eyedropper_start_with(
       [w](Context &C, uint64_t id) {
         const Layer *l = layer_find(*C.document, id);
@@ -16767,11 +16933,50 @@ std::vector<uint64_t> move_menu_rows_test(Context &C, const std::string &search)
   return ids;
 }
 
-bool move_pick_test(Context &C, uint64_t layer)
+/* Pick Bone's names at the mouse: the bone under it (they hang from it), else the bone group of the layer under it. */
+static void move_pick_bone_hover(Context &C, const ViewMapping &view, ImVec2 mouse)
+{
+  WindowManager::MovePick &pick = C.wm->move_pick;
+  if (!pick.active || !pick.started || !pick.bones) {
+    return;
+  }
+  const Document &doc = *C.document;
+  for (const Layer *g : move_group_rows(C, "")) {
+    if (const Bone *b = bone_find(*g, pick_bone(doc, *g, view, mouse))) {
+      pick.hover = g->id;
+      pick.hover_bone = b->id;
+      pick.hover_frame = ImGui::GetFrameCount();
+      pick.hover_name = "Under " + b->name + " in " + g->name;
+      return;
+    }
+  }
+  if (pick.hover_frame >= ImGui::GetFrameCount() - 1) {
+    const Layer *group = move_group_of(C, pick.hover);
+    pick.hover_bone = 0;
+    pick.hover_name = group ? "Into " + group->name : "";
+  }
+}
+
+std::vector<uint64_t> move_group_rows_test(Context &C, const std::string &search)
+{
+  std::vector<uint64_t> ids;
+  for (const Layer *l : move_group_rows(C, search)) {
+    ids.push_back(l->id);
+  }
+  return ids;
+}
+
+bool move_pick_test(Context &C, uint64_t layer, uint64_t bone)
 {
   C.wm->move_pick = {};
   C.wm->move_pick.active = true;
+  C.wm->move_pick.bones = move_bones_mode(C);
   move_pick_update(C, 0);
+  if (bone) {
+    C.wm->move_pick.hover = layer;
+    C.wm->move_pick.hover_bone = bone;
+    C.wm->move_pick.hover_frame = move_pick_frame();
+  }
   ui_layer_eyedropper_pick(C, layer);
   const bool picked = !ui_layer_eyedropper_active();
   ui_layer_eyedropper_cancel();
@@ -18281,6 +18486,9 @@ static void viewport_draw_contents(Area &area, Context &C)
   move_pick_update(C, mouse_here && wm.move_pick.started && ui_layer_eyedropper_active()
                           ? layer_under_mouse(doc, view, io.MousePos, wm.local_view)
                           : 0);
+  if (mouse_here && ui_layer_eyedropper_active()) {
+    move_pick_bone_hover(C, view, io.MousePos);
+  }
   if (mouse_here && wm.draw_order_pick.mode != 0) {
     /* The group beside the layers being moved; Ctrl: the drawing itself. */
     const uint64_t hit = layer_under_mouse(doc, view, io.MousePos, wm.local_view);
@@ -18329,6 +18537,12 @@ static void viewport_draw_contents(Area &area, Context &C)
       uint64_t hit = layer_under_mouse(doc, view, io.MousePos, wm.local_view);
       if (hit && wm.draw_order_pick.mode != 0 && !io.KeyCtrl) {
         hit = draw_order_pick_target(doc, hit, wm.draw_order_pick.layers);
+      }
+      /* Pick Bone: the bone under the mouse wins over the drawing. */
+      if (wm.move_pick.started && wm.move_pick.bones && wm.move_pick.hover_bone &&
+          wm.move_pick.hover_frame >= ImGui::GetFrameCount() - 1)
+      {
+        hit = wm.move_pick.hover;
       }
       ui_layer_eyedropper_pick(C, hit);
     }
@@ -19585,6 +19799,7 @@ static void viewport_draw_contents(Area &area, Context &C)
   }
   bone_parent_menus(C, hovered);
   move_to_layer_menu(C, hovered);
+  move_to_group_menu(C, hovered);
   ui_bone_collection_menus(C, hovered, false);
   if (!ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
     g_right_click_spent = false;

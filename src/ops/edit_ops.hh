@@ -94,6 +94,11 @@ std::vector<std::string> mask_row_phrases(const Document &doc, const Layer &laye
 
 /* The bone layer rigging works on: the active layer if it is one, else the bone layer it is in. */
 Layer *active_armature(Context &C);
+/* The outermost bone layer around a bone layer, or itself: Move to Bone Group never takes bones out of it. */
+const Layer *armature_root(const Document &doc, const Layer &armature);
+/* Carries a drawing by `to`: its points, handles and their keys (a piece moved into another layer). */
+struct VectorDrawing;
+void piece_transform(VectorDrawing &piece, const Transform2D &to);
 /* Adds a bone running from `head` to `tail` (bone layer space, setup pose) under `parent` (0 for
  * a root), selects it and makes it active. */
 struct Bone;

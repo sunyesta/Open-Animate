@@ -441,6 +441,9 @@ bool document_remove_layer(Document &doc, uint64_t id);
 bool document_move_layer(Document &doc, uint64_t id, int direction);
 /* Moves a layer into a group (at the top), or out to its parent's level when target is 0. */
 bool document_reparent_layer(Document &doc, uint64_t id, uint64_t new_parent, int index);
+/* A layer and the drawings inside it bound to other bones: each weight and Parent Bone on a bone of `bones`' keys
+ * goes to its value, one on any other bone is let go. */
+void layer_bones_rebind(Layer &layer, const std::map<uint64_t, uint64_t> &bones);
 /* Turns a reference into an ordinary layer with a copy of the drawing. */
 void layer_break_reference(Document &doc, uint64_t id);
 

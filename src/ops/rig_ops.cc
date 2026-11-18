@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <map>
 #include <numbers>
@@ -556,6 +557,30 @@ static bool armature_poll(Context &C)
   return active_armature(C) != nullptr;
 }
 
+/* How much a frame scales lengths. */
+static float frame_size(const Transform2D &t)
+{
+  return std::sqrt(std::fabs(t.a * t.d - t.b * t.c));
+}
+
+/* A bone's length and position keys are in its parent's frame: hung from one of another size (a bone layer around it
+ * scaled), they are scaled by `by` to stay the same size. */
+static void bone_frame_resize(Bone &bone, float length, float by)
+{
+  bone.length = length * by;
+  if (std::fabs(by - 1.0f) <= 1e-6f) {
+    return;
+  }
+  for (Key<float2> &k : bone.position_keys.keys) {
+    k.value = k.value * by;
+  }
+  for (auto &[name, keys] : bone.position_keys.actions) {
+    for (Key<float2> &k : keys) {
+      k.value = k.value * by;
+    }
+  }
+}
+
 /* A bone's frame from where it runs in bone layer space, given its parent's frame. */
 static void bone_place(Bone &bone, const Transform2D &parent, float2 head, float2 tail)
 {
@@ -581,7 +606,7 @@ static bool bone_outer_parent_set(Document &doc, Layer &inner, Bone &b, Layer &o
   const float length = b.length;
   const float2 scale = b.scale;
   bone_place(b, frame, self->setup_head, self->setup_tail);
-  b.length = length;
+  bone_frame_resize(b, length, frame_size(self->setup) / std::max(frame_size(frame), 1e-12f));
   b.scale = scale;
   b.setup_position = b.position;
   b.setup_angle = b.angle;
@@ -601,7 +626,7 @@ static void bone_outer_parent_clear(const Layer &inner, Bone &b)
   const float length = b.length;
   const float2 scale = b.scale;
   bone_place(b, Transform2D(), self->setup_head, self->setup_tail);
-  b.length = length;
+  bone_frame_resize(b, length, frame_size(self->setup));
   b.scale = scale;
   b.setup_position = b.position;
   b.setup_angle = b.angle;
@@ -1118,8 +1143,491 @@ static void bone_clipboard_register()
   }
 }
 
+/* --- Move to Bone Group (P with bones picked): bones into another bone layer of the same rig ----------------------- */
+
+const Layer *armature_root(const Document &doc, const Layer &armature)
+{
+  const Layer *root = &armature;
+  while (const Layer *around = layer_armature(doc, root->id)) {
+    root = around;
+  }
+  return root;
+}
+
+/* Bone `bone` of bone layer `of` as it rests, in bone layer `in`'s space: an outer parent's frame. */
+static Transform2D bone_setup_in(const Document &doc, uint64_t in, uint64_t of, uint64_t bone)
+{
+  const Layer *outer = layer_find(doc, of);
+  if (!outer) {
+    return Transform2D();
+  }
+  const std::vector<BonePose> poses = armature_pose(*outer);
+  const BonePose *p = bone_pose_find(poses, bone);
+  return p ? layer_setup_relative_transform(doc, in, of) * p->setup : Transform2D();
+}
+
+static std::string names_joined(const std::vector<std::string> &names)
+{
+  std::string text;
+  for (const std::string &n : names) {
+    text += (text.empty() ? "" : ", ") + n;
+  }
+  return text;
+}
+
+static OpStatus move_to_group(Context &C)
+{
+  Document &doc = *C.document;
+  if (!on_setup_frame(C)) {
+    return OpStatus::Cancelled;
+  }
+  if (!doc.action.empty()) {
+    report_banner(ReportType::Warning, "Leave the action to move bones to another bone group");
+    return OpStatus::Cancelled;
+  }
+  Layer *source = active_armature(C);
+  if (!source) {
+    return OpStatus::Cancelled;
+  }
+  const uint64_t source_id = source->id;
+  /* The picked bones and, unless Selected Only, every bone hanging from them. */
+  std::set<uint64_t> moved;
+  for (const Bone &b : source->bones) {
+    if (b.selected) {
+      moved.insert(b.id);
+    }
+  }
+  if (moved.empty()) {
+    report(ReportType::Warning, "Select bones to move");
+    return OpStatus::Cancelled;
+  }
+  if (!op_arg_bool(C, "selected_only")) {
+    for (bool grew = true; grew;) {
+      grew = false;
+      for (const Bone &b : source->bones) {
+        if (b.parent && moved.count(b.parent) && moved.insert(b.id).second) {
+          grew = true;
+        }
+      }
+    }
+  }
+  const auto name_of = [&](uint64_t id) {
+    const Bone *b = bone_find(*source, id);
+    return b ? b->name : std::string("?");
+  };
+  const auto refuse = [](const std::string &why) {
+    report(ReportType::Warning, why);
+    return OpStatus::Cancelled;
+  };
+
+  /* Where they go: a bone layer of the same rig, or (NEW) a new one inside this one. */
+  const std::string target_arg = op_arg(C, "target");
+  const bool make_new = target_arg == "NEW";
+  const Layer *root = armature_root(doc, *source);
+  const Layer *target = make_new ? nullptr : layer_by_name_or_id(doc, target_arg);
+  if (!make_new) {
+    if (!target || !target->is_bone_layer()) {
+      return refuse("\"" + target_arg + "\" isn't a bone group");
+    }
+    if (target->id == source_id) {
+      return refuse("The bones are in " + target->name + " already");
+    }
+    if (armature_root(doc, *target) != root) {
+      return refuse("Bones stay inside " + root->name + ": " + target->name + " is outside it");
+    }
+  }
+  const auto inside_target = [&](uint64_t layer) {
+    return !make_new && (layer == target->id || layer_inside(doc, layer, target->id));
+  };
+  /* Below the source: the target, or the new bone layer made there. */
+  const bool target_below = make_new || layer_inside(doc, target->id, source_id);
+
+  /* What can't come apart. Their own actions (a knob's sides, turns, fixes) are this bone layer's. */
+  if (const std::vector<std::string> own = bones_own_actions(*source, moved); !own.empty()) {
+    return refuse("Bones with actions of their own stay in their bone group (" + names_joined(own) + ")");
+  }
+  for (const Bone &b : source->bones) {
+    std::vector<uint64_t> tied;
+    for (const BoneConstraint &c : b.constraints) {
+      tied.push_back(c.target);
+    }
+    tied.push_back(b.controller_knob_parent);
+    for (const uint64_t other : tied) {
+      if (other && bone_find(*source, other) && moved.count(other) != moved.count(b.id)) {
+        return refuse(b.name + " is tied to " + name_of(other) + " (a constraint or Knob Parent): move them together");
+      }
+    }
+  }
+  /* A bone they hang from in the target, given: it mustn't hang from them itself. */
+  uint64_t parent_id = 0;
+  if (const std::string parent_arg = op_arg(C, "parent"); !parent_arg.empty() && target) {
+    const Bone *p = bone_find_by_name(*target, parent_arg);
+    if (!p) {
+      p = bone_find(*target, std::strtoull(parent_arg.c_str(), nullptr, 10));
+    }
+    if (!p) {
+      return refuse("No bone \"" + parent_arg + "\" in " + target->name);
+    }
+    for (const Bone *up = p; up; up = up->parent ? bone_find(*target, up->parent) : nullptr) {
+      if (up->outer_layer == source_id && moved.count(up->outer_bone)) {
+        return refuse(p->name + " hangs from " + name_of(up->outer_bone) + ", which is moving");
+      }
+    }
+    parent_id = p->id;
+  }
+  /* Drawings bound to them (weights, Parent Bone) go along; one bound to bones that stay too can't. */
+  std::vector<Layer *> below;
+  layers_below(*source, below);
+  std::set<uint64_t> uses_moved, uses_kept;
+  for (const Layer *l : below) {
+    if (layer_armature(doc, l->id) != source) {
+      continue;
+    }
+    const auto use = [&](uint64_t bone) {
+      if (bone && bone_find(*source, bone)) {
+        (moved.count(bone) ? uses_moved : uses_kept).insert(l->id);
+      }
+    };
+    use(l->parent_bone);
+    for (const MeshPoint &p : l->drawing.points) {
+      for (const BoneWeight &w : p.weights) {
+        use(w.bone);
+      }
+    }
+    for (const auto &[point, weights] : l->reference.weights) {
+      for (const BoneWeight &w : weights) {
+        use(w.bone);
+      }
+    }
+  }
+  /* The outermost of them, each with what is inside it. */
+  std::vector<uint64_t> carried;
+  std::map<uint64_t, Transform2D> carried_rest;
+  for (const Layer *l : below) {
+    if (!uses_moved.count(l->id) ||
+        std::any_of(carried.begin(), carried.end(), [&](uint64_t c) { return layer_inside(doc, l->id, c); }))
+    {
+      continue;
+    }
+    std::vector<Layer *> inside{const_cast<Layer *>(l)};
+    layers_below(*const_cast<Layer *>(l), inside);
+    for (const Layer *d : inside) {
+      if (d->is_bone_layer()) {
+        return refuse(d->name + " (a bone group) follows a bone that's moving");
+      }
+      if (uses_kept.count(d->id)) {
+        return refuse(d == l ? l->name + " is bound to bones that move and bones that stay"
+                             : d->name + " is bound to bones that stay, inside " + l->name + ", which goes with the bones");
+      }
+      if (d->has_drawing() && !d->is_reference()) {
+        carried_rest[d->id] = layer_setup_relative_transform(doc, source_id, d->id);
+      }
+    }
+    if (!make_new && (l->id == target->id || layer_inside(doc, target->id, l->id))) {
+      return refuse(target->name + " is inside " + l->name + ", which goes with the bones");
+    }
+    carried.push_back(l->id);
+  }
+  /* Bones elsewhere hanging from them must still reach them. */
+  for (const Layer *l : document_layers_flat(doc)) {
+    if (!l->is_bone_layer() || l->id == source_id) {
+      continue;
+    }
+    for (const Bone &b : l->bones) {
+      if (b.outer_layer == source_id && moved.count(b.outer_bone) && !inside_target(l->id)) {
+        return refuse(b.name + " in " + l->name + " hangs from " + name_of(b.outer_bone) + ", which wouldn't be around it");
+      }
+    }
+  }
+  /* Keys of actions the target has no part in are left out. */
+  std::set<std::string> keep_actions;
+  for (const Layer *owner : action_owners(doc, make_new ? source_id : target->id)) {
+    keep_actions.insert(owner->actions.begin(), owner->actions.end());
+  }
+
+  /* Where everything rests now. */
+  const std::vector<BonePose> source_poses = armature_pose(*source);
+  /* Where each bone placed rests (target space), and how big its frame is there (its length and keys are in its
+   * parent's frame, which carries the scale of the bone layers around it). */
+  std::map<uint64_t, std::pair<float2, float2>> rest_at;
+  std::map<uint64_t, float> size_at;
+  if (target) {
+    const std::vector<BonePose> target_poses = armature_pose(*target);
+    for (const Bone &b : target->bones) {
+      if (b.outer_layer == source_id && moved.count(b.outer_bone)) {
+        const BonePose *p = bone_pose_find(target_poses, b.id);
+        rest_at[b.id] = {p->setup_head, p->setup_tail};
+        size_at[b.id] = frame_size(p->setup);
+      }
+    }
+  }
+
+  /* A new bone layer, inside this one at the top. */
+  uint64_t target_id = target ? target->id : 0;
+  if (make_new) {
+    target_id = document_add_layer(doc, LayerType::Bone, "").id;
+    document_reparent_layer(doc, target_id, source_id, 0);
+  }
+  source = layer_find(doc, source_id);
+  Layer *into = layer_find(doc, target_id);
+  /* Source space to target space, as they rest. */
+  const Transform2D to_target = layer_setup_relative_transform(doc, target_id, source_id);
+  const float size = frame_size(to_target);
+  const float2 x_axis = to_target.apply_vector({1.0f, 0.0f});
+  const float turn = std::atan2(x_axis.y, x_axis.x);
+
+  std::map<uint64_t, uint64_t> ids;
+  std::map<std::string, std::string> renamed;
+  for (const Bone &b : source->bones) {
+    if (moved.count(b.id)) {
+      ids[b.id] = into->next_bone_id++;
+    }
+  }
+  for (Bone &b : into->bones) {
+    bone_select(b, false);
+    if (b.outer_layer == source_id && ids.count(b.outer_bone)) {
+      /* It hung from one of them across the bone layers: now its parent here. */
+      b.parent = ids[b.outer_bone];
+      b.outer_layer = b.outer_bone = 0;
+      b.outer_setup = b.outer_pose = Transform2D();
+      b.connected = false;
+    }
+  }
+  std::set<std::string> dropped;
+  uint64_t first = 0;
+  for (const Bone &b : source->bones) {
+    if (!moved.count(b.id)) {
+      continue;
+    }
+    Bone copy = b;
+    copy.id = ids[b.id];
+    copy.name = armature_unique_bone_name(*into, b.name);
+    renamed[b.name] = copy.name;
+    copy.outer_carried = false;
+    if (moved.count(b.parent)) {
+      copy.parent = ids[b.parent];
+    }
+    else {
+      /* It leaves its parent: under the bone given, else hanging across from where it was, else a root. */
+      copy.parent = 0;
+      copy.connected = false;
+      copy.outer_layer = copy.outer_bone = 0;
+      copy.outer_setup = copy.outer_pose = Transform2D();
+      if (parent_id) {
+        copy.parent = parent_id;
+      }
+      else if (b.parent && target_below) {
+        copy.outer_layer = source_id;
+        copy.outer_bone = b.parent;
+      }
+      else if (!b.parent && b.outer_layer == target_id) {
+        copy.parent = b.outer_bone;
+      }
+      else if (!b.parent && b.outer_layer && layer_inside(doc, target_id, b.outer_layer)) {
+        copy.outer_layer = b.outer_layer;
+        copy.outer_bone = b.outer_bone;
+      }
+    }
+    for (BoneConstraint &c : copy.constraints) {
+      if (ids.count(c.target)) {
+        c.target = ids[c.target];
+      }
+    }
+    if (ids.count(copy.controller_knob_parent)) {
+      copy.controller_knob_parent = ids[copy.controller_knob_parent];
+    }
+    for (const uint64_t collection : copy.collections) {
+      if (collection_find(doc, collection) && !bone_collection_find(*into, collection)) {
+        bone_collection_add(*into, collection);
+      }
+    }
+    /* Sizes in the target's units. */
+    if (std::fabs(size - 1.0f) > 1e-6f) {
+      copy.depth *= size;
+      copy.controller_frame_size *= size;
+    }
+    if (bone_is_controller(copy)) {
+      copy.controller_box_angle += turn;
+    }
+    Layer holder;
+    holder.bones.push_back(std::move(copy));
+    layer_actions_rename(holder, [&](const std::string &name) -> std::optional<std::string> {
+      if (keep_actions.count(name)) {
+        return name;
+      }
+      dropped.insert(name);
+      return std::nullopt;
+    });
+    copy = std::move(holder.bones.front());
+    const BonePose *p = bone_pose_find(source_poses, b.id);
+    rest_at[copy.id] = {to_target.apply(p->setup_head), to_target.apply(p->setup_tail)};
+    size_at[copy.id] = frame_size(p->setup) * size;
+    bone_select(copy, true);
+    if (!first || b.id == source->active_bone) {
+      first = copy.id;
+    }
+    into->bones.push_back(std::move(copy));
+  }
+  /* Each where it rested, parents first. */
+  for (bool placed = true; placed && !rest_at.empty();) {
+    placed = false;
+    const std::vector<BonePose> poses = armature_pose(*into);
+    std::set<uint64_t> now;
+    for (Bone &b : into->bones) {
+      const auto it = rest_at.find(b.id);
+      if (it == rest_at.end() || (b.parent && (rest_at.count(b.parent) || now.count(b.parent)))) {
+        continue;
+      }
+      Transform2D frame;
+      if (b.parent) {
+        const BonePose *pp = bone_pose_find(poses, b.parent);
+        frame = pp ? pp->setup : Transform2D();
+      }
+      else if (b.outer_bone) {
+        frame = bone_setup_in(doc, target_id, b.outer_layer, b.outer_bone);
+        b.outer_setup = b.outer_pose = frame;
+      }
+      const float2 scale = b.scale;
+      const float length = b.length;
+      bone_place(b, frame, it->second.first, it->second.second);
+      bone_frame_resize(b, length, size_at[b.id] / std::max(frame_size(frame), 1e-12f));
+      b.scale = scale;
+      b.setup_position = b.position;
+      b.setup_angle = b.angle;
+      rest_at.erase(it);
+      now.insert(b.id);
+      placed = true;
+    }
+  }
+  into->active_bone = first;
+
+  /* Bones left behind under them (Selected Only) hang from the nearest that stays, where they rest. */
+  for (Bone &b : source->bones) {
+    if (moved.count(b.id) || !moved.count(b.parent)) {
+      continue;
+    }
+    uint64_t parent = b.parent;
+    const Bone *top = nullptr;
+    while (parent && moved.count(parent)) {
+      top = bone_find(*source, parent);
+      parent = top ? top->parent : 0;
+    }
+    Transform2D frame;
+    b.outer_layer = b.outer_bone = 0;
+    b.outer_setup = b.outer_pose = Transform2D();
+    if (const BonePose *pp = parent ? bone_pose_find(source_poses, parent) : nullptr) {
+      frame = pp->setup;
+    }
+    else if (top && top->outer_bone) {
+      b.outer_layer = top->outer_layer;
+      b.outer_bone = top->outer_bone;
+      frame = b.outer_setup = b.outer_pose = bone_setup_in(doc, source_id, b.outer_layer, b.outer_bone);
+    }
+    const BonePose *self = bone_pose_find(source_poses, b.id);
+    const float length = b.length;
+    const float2 scale = b.scale;
+    bone_place(b, frame, self->setup_head, self->setup_tail);
+    bone_frame_resize(b, length, frame_size(self->setup) / std::max(frame_size(frame), 1e-12f));
+    b.scale = scale;
+    b.setup_position = b.position;
+    b.setup_angle = b.angle;
+    b.parent = parent;
+    b.connected = false;
+  }
+  std::erase_if(source->bones, [&](const Bone &b) { return moved.count(b.id) > 0; });
+  if (moved.count(source->active_bone)) {
+    source->active_bone = 0;
+  }
+
+  /* What named them elsewhere: swaps, bones hanging from them in bone layers inside the target, drivers. */
+  for (const Layer *seen : document_layers_flat(doc)) {
+    Layer *l = layer_find(doc, seen->id);
+    if (!l->is_bone_layer()) {
+      continue;
+    }
+    for (Bone &b : l->bones) {
+      if (b.swap_layer == source_id && ids.count(b.swap_bone)) {
+        b.swap_layer = target_id;
+        b.swap_bone = ids[b.swap_bone];
+      }
+      if (l->id != target_id && b.outer_layer == source_id && ids.count(b.outer_bone)) {
+        bone_outer_parent_set(doc, *l, b, *layer_find(doc, target_id), ids[b.outer_bone]);
+      }
+    }
+  }
+  const auto driver_ref = [&](DriverRef &r) {
+    if (r.layer != source_id) {
+      return;
+    }
+    for (const auto &[was, now] : renamed) {
+      const std::string prefix = "bones[\"" + was + "\"]";
+      if (r.path.rfind(prefix, 0) == 0) {
+        r.layer = target_id;
+        r.path = "bones[\"" + now + "\"]" + r.path.substr(prefix.size());
+        r.bone = 0;
+        return;
+      }
+    }
+  };
+  for (Driver &d : doc.drivers) {
+    driver_ref(d.target);
+    for (DriverVar &v : d.vars) {
+      driver_ref(v.source);
+    }
+  }
+
+  /* The drawings bound only to them, into the target at the top, looking as they did. */
+  for (const uint64_t id : carried) {
+    int index = 0;
+    std::vector<Layer> *container = layer_container(doc, id, &index);
+    Layer moving = std::move((*container)[size_t(index)]);
+    container->erase(container->begin() + index);
+    layer_bones_rebind(moving, ids);
+    Layer *t = layer_find(doc, target_id);
+    t->children.insert(t->children.begin(), std::move(moving));
+  }
+  for (const auto &[id, was] : carried_rest) {
+    const Transform2D carry = layer_setup_relative_transform(doc, target_id, id).inverted() * to_target * was;
+    if (std::fabs(carry.a - 1.0f) + std::fabs(carry.b) + std::fabs(carry.c) + std::fabs(carry.d - 1.0f) +
+            std::fabs(carry.tx) + std::fabs(carry.ty) > 1e-6f)
+    {
+      piece_transform(layer_find(doc, id)->drawing, carry);
+    }
+  }
+
+  std::vector<uint64_t> &recent = C.wm->move_to_group_recent;
+  std::erase(recent, target_id);
+  recent.insert(recent.begin(), target_id);
+  if (recent.size() > 8) {
+    recent.resize(8);
+  }
+  Layer *t = layer_find(doc, target_id);
+  doc.active_layer = target_id;
+  t->selected = false;
+  document_sync_armature_modifiers(doc);
+  animation_evaluate(doc, doc.frame_current);
+  const size_t count = moved.size();
+  std::string text = "Moved " + std::to_string(count) + (count == 1 ? " bone" : " bones") + " into " + t->name;
+  if (!dropped.empty()) {
+    text += "; their keys in " + names_joined(std::vector<std::string>(dropped.begin(), dropped.end())) +
+            " were left out (" + t->name + " has no part in " + (dropped.size() == 1 ? "it)" : "them)");
+  }
+  report(dropped.empty() ? ReportType::Info : ReportType::Warning, text);
+  return OpStatus::Finished;
+}
+
 void rig_operators_register()
 {
+  rig_operator("armature.move_to_group", "Move to Bone Group",
+               "Move the selected bones, and the bones hanging from them, into another bone group of the same rig "
+               "(target=<id or name>, or NEW for a new bone group inside this one; P on the setup frame), where they "
+               "rest, with their keys (those of actions it has no part in left out) and the drawings bound only to "
+               "them; parent=<a bone there> hangs them from it",
+               [](Context &C) { return bone_layer_active(C) && bones_picked(*active_armature(C)); }, move_to_group,
+               {op_bool_property("selected_only", "Selected Only",
+                                 "Only the selected bones: the ones hanging from them stay, under the nearest that stays",
+                                 "0")});
+
   rig_operator("layer.new_bone", "New Bone Layer",
                "Add a bone layer: a group whose bones move the layers inside it", nullptr, [](Context &C) {
                  document_add_layer(*C.document, LayerType::Bone, "");

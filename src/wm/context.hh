@@ -471,9 +471,14 @@ struct WindowManager {
     uint64_t hover = 0;
     int hover_frame = -10;
     std::string hover_name;
+    /* Pick Bone (P with bones picked): the bone under the mouse, of bone layer `hover`, and picking bones at all. */
+    bool bones = false;
+    uint64_t hover_bone = 0;
   } move_pick;
   /* The drawings moved into last (P's list puts them first), the latest first. */
   std::vector<uint64_t> move_to_layer_recent;
+  /* The bone groups P moved bones into, last first. */
+  std::vector<uint64_t> move_to_group_recent;
   /* A mask chip under the mouse in the Layers editor: its layers are outlined in the viewport. */
   std::vector<uint64_t> mask_hover;
   /* Layers a mask's field in Properties names, under the mouse: highlighted in the Layers editor.

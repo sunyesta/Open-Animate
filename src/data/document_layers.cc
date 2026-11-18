@@ -911,6 +911,11 @@ static void bones_rebind(Layer &l, const std::map<uint64_t, uint64_t> &to)
   }
 }
 
+void layer_bones_rebind(Layer &layer, const std::map<uint64_t, uint64_t> &bones)
+{
+  bones_rebind(layer, bones);
+}
+
 bool document_reparent_layer(Document &doc, uint64_t id, uint64_t new_parent, int index)
 {
   if (id == new_parent) {
