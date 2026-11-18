@@ -14315,6 +14315,39 @@ static void point_gizmo_apply(Context &C, float2 pivot, float2 move, float2 scal
                  {"setup", C.document->frame_current == 0 ? "1" : "0"}, {"keep_poses", keep_poses_on(*C.document) ? "1" : "0"}});
 }
 
+/* Properties' Selected Points: the picked points' (and handles picked on their own) median where they show, bent by
+ * the bones, in the active layer's space, and how many there are. */
+bool points_picked_median(Context &C, float2 &r_median, int &r_count)
+{
+  const std::vector<float2> places = point_gizmo_places(C, point_gizmo_space(*C.document).inverted(), true);
+  r_count = int(places.size());
+  if (places.empty()) {
+    return false;
+  }
+  float2 sum;
+  for (const float2 p : places) {
+    sum += p;
+  }
+  r_median = sum / float(places.size());
+  return true;
+}
+
+/* The same map as mesh.transform_selected with no undo step and no poses kept: what a field dragged in Properties
+ * shows until it is let go (each update starts again from the drawings as the drag began). */
+void points_transform_preview(Context &C, float2 pivot, float2 move, float2 scale, float degrees)
+{
+  static Area area;
+  ModalTransform moving;
+  if (modal_collect(C, area, 'G', {}, moving, false)) {
+    point_gizmo_place(C, moving, point_gizmo_space(*C.document), map_about(pivot, move, scale, degrees * PI / 180.0f));
+  }
+}
+
+void points_transform_apply(Context &C, float2 pivot, float2 move, float2 scale, float degrees)
+{
+  point_gizmo_apply(C, pivot, move, scale, degrees);
+}
+
 /* An option of the ViewportActionPanel. */
 static OpProperty panel_float(const char *name, const char *label, const char *description, const char *fallback,
                               float min, float max, float step)

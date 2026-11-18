@@ -1710,6 +1710,55 @@ void rig_operators_register()
                },
                {weight_property, keep_animation_property});
 
+  rig_operator("weight.point_set", "Set Point Weight",
+               "Set how strongly one bone moves one point: layer (id), point (its index), bone (id), weight 0-1, as "
+               "Blender's Vertex Weights panel; remove=1 takes the bone off the point. The other bones keep theirs",
+               weight_poll, [](Context &C) {
+                 Document &doc = *C.document;
+                 const std::vector<Layer *> layers = weight_layers(C);
+                 const uint64_t id = std::strtoull(op_arg(C, "layer").c_str(), nullptr, 10);
+                 const auto it = std::find_if(layers.begin(), layers.end(), [&](const Layer *l) { return l->id == id; });
+                 const int index = int(op_arg_float(C, "point", -1.0f));
+                 const uint64_t bone = std::strtoull(op_arg(C, "bone").c_str(), nullptr, 10);
+                 const Layer *armature = it == layers.end() ? nullptr : layer_armature(doc, id);
+                 if (!armature || index < 0 || index >= int((*it)->drawing.points.size()) || !bone_find(*armature, bone)) {
+                   report(ReportType::Error, "layer, point and bone name a point being edited and a bone it can follow");
+                   return OpStatus::Cancelled;
+                 }
+                 const bool remove = op_arg_bool(C, "remove");
+                 const float value = op_arg_float(C, "weight", 1.0f);
+                 if (!remove && !(value >= 0.0f && value <= 1.0f)) {
+                   report(ReportType::Error, "weight is 0 to 1");
+                   return OpStatus::Cancelled;
+                 }
+                 const DrawingsShownAll kept = weight_keep_begin(C);
+                 Layer &layer = **it;
+                 std::vector<BoneWeight> &weights = layer.drawing.points[size_t(index)].weights;
+                 const std::vector<BoneWeight> was = weights;
+                 auto w = std::find_if(weights.begin(), weights.end(), [&](const BoneWeight &b) { return b.bone == bone; });
+                 if (remove) {
+                   if (w != weights.end()) {
+                     weights.erase(w);
+                   }
+                 }
+                 else if (w == weights.end()) {
+                   weights.push_back({bone, value});
+                 }
+                 else {
+                   w->weight = value;
+                 }
+                 if (weights == was) {
+                   return OpStatus::Cancelled;
+                 }
+                 if (layer.parent_bone != 0) {
+                   /* Weighted points follow their weights, not a parent bone. */
+                   layer.parent_bone = 0;
+                   report(ReportType::Info, "\"" + layer.name + "\" now follows its weights instead of its parent bone");
+                 }
+                 return weight_keep_end(C, kept, true);
+               },
+               {keep_animation_property});
+
   rig_operator("weight.remove", "Remove",
                "Take the selected points out of the active bone (as Blender's Remove); a point left with no bones "
                "stays where it is",

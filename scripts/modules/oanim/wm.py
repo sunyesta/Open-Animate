@@ -691,6 +691,21 @@ def select_click(x, y, zoom=100.0):
     _oanim.select_click(float(x), float(y), float(zoom))
 
 
+def points_panel():
+    """Test hook: what Properties' Selected Points shows (None when it doesn't): label ("Point" or "Median"), median
+    (x, y) where the points show, count, key and width_key (0 not animated, 1 animated, 2 every point keyed here),
+    width, opacity, and weights, the one picked point's [(bone name, weight)] (None unless one point is picked inside
+    a bone layer with bones)."""
+    return _oanim.points_panel()
+
+
+def points_panel_drag(field, values, during=None):
+    """Test hook: a Transform field of Selected Points ("x", "y", "rotation", "scale_x", "scale_y") dragged through
+    `values`, each update shown from the drawings as the drag began, `during()` after each but the last, which is let
+    go as one undo step. False when the panel isn't shown."""
+    return bool(_oanim.points_panel_drag(str(field), [float(v) for v in values], during))
+
+
 def bone_rotate_drag(steps, confirm=True, at=(0.0, 0.0), during=None):
     """R on the picked bones (and the points picked with them) as the drag does it: one update turned each of `steps`
     degrees from where it began, `during(degrees)` called after each, then confirmed (or cancelled). False when no drag

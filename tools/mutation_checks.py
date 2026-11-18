@@ -132,6 +132,20 @@ PENDING = [
     ('src/ops/motion_path_ops.cc', '[&](const auto &d) { return d.first.same(t) || d.first.same(owner); });',
      '[&](const auto &d) { return d.first.same(t) || (false && d.first.same(owner)); });',
      'Shift Alt keeps a whole drawing pick', 'tests/test_drawing_stretch_add.py'),
+    # Selected Points: each update of a dragged field starts again from the drawings as the drag began.
+    ('src/editors/properties.cc', '  points_drag_restore(C);\n  const float2 pivot = g_points_drag.pivot;',
+     '  const float2 pivot = g_points_drag.pivot;', 'panel drags start from the drawings', 'tests/test_points_panel.py'),
+    # Yellow only when every picked point is keyed here.
+    ('src/editors/properties.cc', '  return !any ? 0 : (all && animated) ? 2 : animated ? 1 : 0;',
+     '  return !any ? 0 : (all || animated) ? 2 : animated ? 1 : 0;', 'points keyed here only when all are',
+     'tests/test_points_panel.py'),
+    # Width scales the picked widths.
+    ('src/ops/vector_ops.cc', '        v = mean > 1e-6f ? std::clamp(v * value / mean, 0.0f, POINT_RADIUS_MAX) : value;',
+     '        v = mean > 1e-6f ? std::clamp(v + value - mean, 0.0f, POINT_RADIUS_MAX) : value;', 'width scales the widths',
+     'tests/test_points_panel.py'),
+    # A point's weight set from Point Weights.
+    ('src/ops/rig_ops.cc', '                   w->weight = value;', '                   w->weight = value * 0.0f;',
+     'point weight set', 'tests/test_points_panel.py'),
 ]
 
 def build(root):

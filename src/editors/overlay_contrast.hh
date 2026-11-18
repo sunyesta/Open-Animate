@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -111,6 +112,23 @@ bool bone_press_test(Context &C, float2 at, float zoom, bool transform_tool, boo
 bool bone_rotate_drag_begin_test(Context &C, float2 at);
 bool bone_rotate_drag_update_test(Context &C, float degrees);
 bool bone_rotate_drag_end_test(Context &C, float degrees, bool confirm);
+/* Properties' Selected Points (properties.cc): what it shows (the Drawing tab's drawings with a bone layer worked in,
+ * else the drawings being edited), and a Transform field ("x", "y", "rotation", "scale_x", "scale_y") dragged through
+ * `values`, each update shown from the drawings as the drag began, `during` after each but the last, which is let go
+ * as one undo step. */
+struct PointsPanelValues {
+  bool shown = false;
+  std::string label;
+  float2 median;
+  int count = 0;
+  int key = 0, width_key = 0;
+  float width = -1.0f, opacity = -1.0f;
+  bool weights_shown = false;
+  std::vector<std::pair<std::string, float>> weights;
+};
+PointsPanelValues points_panel_values_test(Context &C);
+bool points_panel_drag_test(Context &C, const std::string &field, const std::vector<float> &values,
+                            const std::function<void()> &during);
 std::vector<std::pair<uint64_t, std::vector<int>>> select_press_grab_test(Context &C, float2 at, float zoom,
                                                                           bool shift_or_ctrl, bool drag);
 

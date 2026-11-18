@@ -1725,6 +1725,33 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return std::string(select_press_takes_test(current_context(), {x, y}, zoom));
   });
   m.def("select_click", [](float x, float y, float zoom) { select_click_test(current_context(), {x, y}, zoom); });
+  m.def("points_panel", []() {
+    const PointsPanelValues v = points_panel_values_test(current_context());
+    py::dict d;
+    if (!v.shown) {
+      return py::object(py::none());
+    }
+    d["label"] = v.label;
+    d["median"] = py::make_tuple(v.median.x, v.median.y);
+    d["count"] = v.count;
+    d["key"] = v.key;
+    d["width_key"] = v.width_key;
+    d["width"] = v.width;
+    d["opacity"] = v.opacity;
+    py::list weights;
+    for (const auto &[bone, w] : v.weights) {
+      weights.append(py::make_tuple(bone, w));
+    }
+    d["weights"] = v.weights_shown ? py::object(weights) : py::object(py::none());
+    return py::object(d);
+  });
+  m.def("points_panel_drag", [](const std::string &field, const std::vector<float> &values, py::object during) {
+    return points_panel_drag_test(current_context(), field, values, [&]() {
+      if (!during.is_none()) {
+        during();
+      }
+    });
+  });
   m.def("bone_rotate_drag_begin", [](float x, float y) { return bone_rotate_drag_begin_test(current_context(), {x, y}); });
   m.def("bone_rotate_drag_update", [](float degrees) { return bone_rotate_drag_update_test(current_context(), degrees); });
   m.def("bone_rotate_drag_end", [](float degrees, bool confirm) {

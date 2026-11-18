@@ -40,6 +40,7 @@
 #include "assets/brushes.hh"
 #include "editors/brush_editor.hh"
 #include "editors/controller_thumbnails.hh"
+#include "editors/overlay_contrast.hh"
 #include "editors/ui.hh"
 #include "editors/text_panel.hh"
 #include "ops/edit_ops.hh"
@@ -2361,6 +2362,8 @@ static void drawing_color_rows(Context &C, const std::vector<Layer *> &drawings,
 
 /* The Bone tab as Drawing: with a bone layer worked in and only points of the drawings edited with its bones picked, those
  * drawings' colour with the bones and their collections (the first's shown; edits go to them all). */
+static void selected_points_panel(Context &C, const std::vector<Layer *> &layers);
+
 static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &drawings)
 {
   Layer &first = *drawings.front();
@@ -2375,6 +2378,7 @@ static void bone_tab_drawing_panels(Context &C, const std::vector<Layer *> &draw
     drawing_color_rows(C, drawings, "Color", "Set on every drawing with points picked", true);
     ui_panel_end();
   }
+  selected_points_panel(C, drawings);
   if (ui_collapsing_header("Collections", true)) {
     collection_chips(C, first.collections, "layer.collection_link",
                      {{"layer", std::to_string(first.id)}, {"layers", others}}, "every picked layer", nullptr, &first);
@@ -8901,7 +8905,7 @@ static void media_tab(Context &C)
 
 static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, Shape &shape);
 static void shared_mark(ImDrawList *dl, ImVec2 corner, float s);
-static void point_panel(Context &C, VectorDrawing &drawing);
+static std::vector<Layer *> layers_points_picked(Context &C, Layer *first);
 static void edge_panel(Context &C, VectorDrawing &drawing);
 
 /* `driver_layer`, `driver_path`: what drives the row's X and Y (a shape's "shapes[<id>].position"), if
@@ -9289,7 +9293,7 @@ static void drawing_tab(Context &C, bool shapes_tab)
       return;
     }
     point_groups_panel(C, *drawing);
-    point_panel(C, *drawing);
+    selected_points_panel(C, layers_points_picked(C, layer));
     edge_panel(C, *drawing);
     return;
   }
@@ -10236,82 +10240,467 @@ static void edge_panel(Context &C, VectorDrawing &drawing)
   ui_panel_end();
 }
 
-/* The selected points. Mean Radius and Mean Opacity show their average radius and opacity; changing one moves every
- * selected point's by the same amount, as Blender's Mean Radius field does. */
-static void point_panel(Context &C, VectorDrawing &drawing)
+/* What a Transform field of the Selected Points panel is dragging: the drawings as the drag began (each update starts
+ * again from them, so nothing builds on the last), where it turns and scales about, and the median then. */
+struct PointsPanelDrag {
+  std::string field;
+  std::vector<Layer> kept;
+  float2 pivot;
+  float2 start;
+  float value = 0.0f;
+};
+static PointsPanelDrag g_points_drag;
+
+static void points_drag_restore(Context &C)
 {
-  const float mean = drawing_selected_mean_radius(drawing);
-  if (mean < 0.0f) {
-    /* Only a handle picked on its own: just its row. */
-    if (!point_panel_handles(drawing).empty() && ui_panel_begin("Selected Points")) {
-      handle_rows(C, drawing);
-      ui_panel_end();
+  for (const Layer &kept : g_points_drag.kept) {
+    if (Layer *layer = layer_find(*C.document, kept.id)) {
+      *layer = kept;
     }
+  }
+}
+
+static void points_drag_begin(Context &C, const char *field, float2 median)
+{
+  PointsPanelDrag &d = g_points_drag;
+  d = {};
+  d.field = field;
+  d.pivot = d.start = median;
+  d.value = std::string(field).rfind("scale", 0) == 0 ? 1.0f : 0.0f;
+  for (Layer *layer : editable_layers(C)) {
+    d.kept.push_back(*layer);
+  }
+}
+
+/* The change so far, from the drawings as the drag began; with `done`, as one undo step, and the drag over. */
+static void points_drag_update(Context &C, float2 move, float2 scale, float degrees, bool done)
+{
+  points_drag_restore(C);
+  const float2 pivot = g_points_drag.pivot;
+  if (done) {
+    g_points_drag = {};
+    points_transform_apply(C, pivot, move, scale, degrees);
+  }
+  else {
+    points_transform_preview(C, pivot, move, scale, degrees);
+  }
+}
+
+/* After a Transform field: begins its drag, shows the change made so far live and makes it one undo step when let
+ * go (mesh.transform_selected). `map` gives the move, scale and turn for the field's value. */
+static void points_field_after(Context &C, const char *field, bool changed, float2 median,
+                               const std::function<void(float2 &move, float2 &scale, float &degrees)> &map)
+{
+  if (ImGui::IsItemActivated()) {
+    points_drag_begin(C, field, median);
+  }
+  if (g_points_drag.field != field) {
     return;
   }
-  if (!ui_panel_begin("Selected Points")) {
-    return;
+  const bool done = ImGui::IsItemDeactivatedAfterEdit();
+  if (changed || done) {
+    float2 move, scale(1.0f, 1.0f);
+    float degrees = 0.0f;
+    map(move, scale, degrees);
+    points_drag_update(C, move, scale, degrees, done);
   }
-  mean_position_row(C, "Mean Position", drawing, drawing_selected_points(drawing),
-                    "The average position of the selected points; changing it moves them all", "Move Points", true);
+  if (ImGui::IsItemDeactivated()) {
+    g_points_drag = {};
+  }
+}
+
+/* The picked points' keys of their position (or width) on this frame: 2 every one keyed here (yellow), 1 some of them
+ * animated (green), 0 none. */
+static int points_key_state(const std::vector<Layer *> &layers, bool width, int frame)
+{
+  bool all = true, animated = false, any = false;
+  for (const Layer *layer : layers) {
+    for (const MeshPoint &p : layer->drawing.points) {
+      if (p.selected) {
+        any = true;
+        animated |= width ? p.radius_keys.animated() : p.pos_keys.animated();
+        all &= (width ? p.radius_keys.key_at(frame) != nullptr : p.pos_keys.key_at(frame) != nullptr);
+      }
+    }
+  }
+  return !any ? 0 : (all && animated) ? 2 : animated ? 1 : 0;
+}
+
+/* Right-click on a keyed field of the panel: Insert Keyframe / Delete Keyframe on the picked points. */
+static void points_key_menu(Context &C, const char *id, const char *what, int state)
+{
+  if (ImGui::BeginPopupContextItem(id)) {
+    if (ImGui::MenuItem("Insert Keyframe")) {
+      operator_call(C, "mesh.points_keyframe", {{"what", what}, {"mode", "INSERT"}});
+    }
+    if (ImGui::MenuItem("Delete Keyframe", nullptr, false, state == 2)) {
+      operator_call(C, "mesh.points_keyframe", {{"what", what}, {"mode", "DELETE"}});
+    }
+    ImGui::EndPopup();
+  }
+}
+
+static void points_key_button(Context &C, const char *id, const char *what, int state)
+{
+  ImGui::SameLine(0, 4);
+  if (ui_key_button(id, state)) {
+    operator_call(C, "mesh.points_keyframe", {{"what", what}, {"mode", state == 2 ? "DELETE" : "INSERT"}});
+  }
+}
+
+static void points_row_label(const char *label)
+{
   ImGui::TableNextRow();
   ImGui::TableSetColumnIndex(0);
   ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted("Mean Radius");
+  ImGui::TextUnformatted(label);
   ImGui::TableSetColumnIndex(1);
-  ImGui::SetNextItemWidth(-1);
-  float value = mean;
-  if (ui_drag_float("##mean_radius", &value, 0.005f, 0.0f, POINT_RADIUS_MAX, "%.3f", ImGuiSliderFlags_AlwaysClamp)) {
-    drawing_set_selected_mean_radius(drawing, value);
+}
+
+/* Median (Point, with one), Rotation and Scale, as Blender's Transform panel in edit mode: where the picked points show
+ * (bent by the bones), in the active layer's space; a turn and a scale about their median, resting at 0 and 1. */
+static void points_transform_rows(Context &C, const std::vector<Layer *> &layers)
+{
+  float2 median;
+  int count = 0;
+  if (!points_picked_median(C, median, count)) {
+    return;
   }
+  const PointsPanelDrag &d = g_points_drag;
+  const float spacing = 2.0f;
+  const float key_w = ui_key_button_width() + 4.0f;
+  const int pos_state = points_key_state(layers, false, C.document->frame_current);
+  points_row_label(count == 1 ? "Point" : "Median");
+  ImGui::PushID("points_median");
+  {
+    const float w = (ImGui::GetContentRegionAvail().x - key_w - spacing) * 0.5f;
+    const int tint = ui_key_tint_push(pos_state);
+    for (int axis = 0; axis < 2; axis++) {
+      if (axis > 0) {
+        ImGui::SameLine(0.0f, spacing);
+      }
+      ImGui::SetNextItemWidth(w);
+      float value = axis == 0 ? median.x : median.y;
+      const bool changed = ui_drag_float(axis == 0 ? "##x" : "##y", &value, 0.005f, -100000.0f, 100000.0f,
+                                         axis == 0 ? "X  %.3f" : "Y  %.3f");
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip(count == 1 ? "Where the point shows, bent by the bones (the active layer's space)" :
+                                       "The middle of the selected points as they show, bent by the bones (the active "
+                                       "layer's space); changing it moves them all");
+      }
+      points_field_after(C, axis == 0 ? "x" : "y", changed, median, [&](float2 &move, float2 &, float &) {
+        move = axis == 0 ? float2(value - g_points_drag.start.x, 0.0f) : float2(0.0f, value - g_points_drag.start.y);
+      });
+      points_key_menu(C, axis == 0 ? "##x_menu" : "##y_menu", "POSITION", pos_state);
+    }
+    ImGui::PopStyleColor(tint);
+    points_key_button(C, "##median_key", "POSITION", pos_state);
+  }
+  ImGui::PopID();
+
+  points_row_label("Rotation");
+  ImGui::PushID("points_rotation");
+  {
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - key_w);
+    float degrees = d.field == "rotation" ? d.value : 0.0f;
+    const bool changed = ui_drag_float("##rotation", &degrees, 0.5f, -36000.0f, 36000.0f, "%.1f\xC2\xB0");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Turn the selected points about their median (degrees, counter-clockwise)");
+    }
+    points_field_after(C, "rotation", changed, median, [&](float2 &, float2 &, float &turn) {
+      g_points_drag.value = degrees;
+      turn = degrees;
+    });
+  }
+  ImGui::PopID();
+
+  points_row_label("Scale");
+  ImGui::PushID("points_scale");
+  {
+    const float w = (ImGui::GetContentRegionAvail().x - key_w - spacing) * 0.5f;
+    for (int axis = 0; axis < 2; axis++) {
+      if (axis > 0) {
+        ImGui::SameLine(0.0f, spacing);
+      }
+      const char *field = axis == 0 ? "scale_x" : "scale_y";
+      ImGui::SetNextItemWidth(w);
+      float value = d.field == field ? d.value : 1.0f;
+      const bool changed = ui_drag_float(axis == 0 ? "##x" : "##y", &value, 0.005f, -1000.0f, 1000.0f,
+                                         axis == 0 ? "X  %.3f" : "Y  %.3f");
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip("Scale the selected points about their median");
+      }
+      points_field_after(C, field, changed, median, [&](float2 &, float2 &scale, float &) {
+        g_points_drag.value = value;
+        scale = axis == 0 ? float2(value, 1.0f) : float2(1.0f, value);
+      });
+    }
+  }
+  ImGui::PopID();
+}
+
+/* Width and Opacity: the picked points' means over every drawing; Width scales the widths, Opacity moves each by as
+ * much (mesh.points_mean_set). Width can be keyed. */
+static void points_mean_rows(Context &C, const std::vector<Layer *> &layers)
+{
+  const float key_w = ui_key_button_width() + 4.0f;
+  const int width_state = points_key_state(layers, true, C.document->frame_current);
+  points_row_label("Width");
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - key_w);
+  const int tint = ui_key_tint_push(width_state);
+  float width = points_mean(layers, true);
+  if (ui_drag_float("##points_width", &width, 0.005f, 0.0f, POINT_RADIUS_MAX, "%.3f", ImGuiSliderFlags_AlwaysClamp)) {
+    points_mean_set(layers, true, width);
+  }
+  ImGui::PopStyleColor(tint);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip("Stroke radius at the selected points, as a multiple of the shape's line width (Alt S in the "
-                      "viewport scales it)");
+    ImGui::SetTooltip("The selected points' stroke width, on average, as a multiple of their shape's line width: "
+                      "changing it scales them all (Alt S in the viewport)");
   }
   if (ImGui::IsItemDeactivatedAfterEdit()) {
-    C.undo->push("Point Radius", *C.document);
+    C.undo->push("Point Width", *C.document);
   }
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted("Mean Opacity");
-  ImGui::TableSetColumnIndex(1);
-  ImGui::SetNextItemWidth(-1);
-  float opacity = drawing_selected_mean_opacity(drawing);
-  if (ui_drag_float("##mean_opacity", &opacity, 0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp)) {
-    drawing_set_selected_mean_opacity(drawing, opacity);
+  points_key_menu(C, "##width_menu", "WIDTH", width_state);
+  points_key_button(C, "##width_key", "WIDTH", width_state);
+
+  points_row_label("Opacity");
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - key_w);
+  float opacity = points_mean(layers, false);
+  if (ui_drag_float("##points_opacity", &opacity, 0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp)) {
+    points_mean_set(layers, false, opacity);
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip("How solid the line is at the selected points, under the shape's line opacity (pen pressure "
-                      "sets it with Opacity's pressure on); the same on every frame");
+    ImGui::SetTooltip("How solid the line is at the selected points, on average, under the shape's line opacity: "
+                      "changing it moves each by as much; the same on every frame");
   }
   if (ImGui::IsItemDeactivatedAfterEdit()) {
     C.undo->push("Point Opacity", *C.document);
   }
+}
 
+/* The one point picked (over every drawing), when there is just one. */
+static bool points_lone(const std::vector<Layer *> &layers, Layer **r_layer, int *r_point)
+{
+  int count = 0;
+  for (Layer *layer : layers) {
+    for (int i = 0; i < int(layer->drawing.points.size()); i++) {
+      if (layer->drawing.points[size_t(i)].selected && count++ == 0) {
+        *r_layer = layer;
+        *r_point = i;
+      }
+    }
+  }
+  return count == 1;
+}
 
-  /* Align: the handles stay in line (moving one turns the other); a mix shows a dash. */
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted("Handles");
-  ImGui::TableSetColumnIndex(1);
-  const int alignment = drawing_selected_alignment(drawing);
-  bool aligned = alignment == 1;
-  if (alignment == -2) {
-    ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
+/* Blender's Vertex Weights: the bones the one picked point follows and how strongly, each changed by dragging
+ * (weight.point_set, one undo step when let go) or taken off with x. */
+static void point_weights_panel(Context &C, const std::vector<Layer *> &layers)
+{
+  Layer *layer = nullptr;
+  int index = -1;
+  if (!points_lone(layers, &layer, &index)) {
+    return;
   }
-  if (ImGui::Checkbox("Aligned", &aligned)) {
-    operator_call(C, aligned ? "mesh.handles_align" : "mesh.handles_unalign");
+  const Layer *armature = layer_armature(*C.document, layer->id);
+  if (!armature || armature->bones.empty() || !ui_panel_begin("Point Weights")) {
+    return;
   }
-  if (alignment == -2) {
-    ImGui::PopItemFlag();
+  static float started = 0.0f;
+  const std::vector<BoneWeight> weights = layer->drawing.points[size_t(index)].weights;
+  bool any = false;
+  for (const BoneWeight &w : weights) {
+    const Bone *bone = bone_find(*armature, w.bone);
+    if (!bone) {
+      continue;
+    }
+    any = true;
+    ImGui::PushID(int(w.bone));
+    points_row_label(bone->name.c_str());
+    const float x_w = ImGui::GetFrameHeight();
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - x_w - 4.0f);
+    float value = w.weight;
+    if (ui_drag_float("##weight", &value, 0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp)) {
+      for (BoneWeight &own : layer->drawing.points[size_t(index)].weights) {
+        if (own.bone == w.bone) {
+          own.weight = value;
+        }
+      }
+    }
+    if (ImGui::IsItemActivated()) {
+      started = w.weight;
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("How strongly %s moves the point (0-1)", bone->name.c_str());
+    }
+    const auto set = [&](const OpArgs &extra) {
+      OpArgs args = {{"layer", std::to_string(layer->id)}, {"point", std::to_string(index)},
+                     {"bone", std::to_string(w.bone)}};
+      args.insert(extra.begin(), extra.end());
+      operator_call(C, "weight.point_set", args);
+    };
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+      /* One undo step from the weight as the drag began. */
+      for (BoneWeight &own : layer->drawing.points[size_t(index)].weights) {
+        if (own.bone == w.bone) {
+          own.weight = started;
+        }
+      }
+      char text[32];
+      std::snprintf(text, sizeof(text), "%g", double(value));
+      set({{"weight", text}});
+    }
+    ImGui::SameLine(0, 4);
+    if (ImGui::Button("x", ImVec2(x_w, 0.0f))) {
+      set({{"remove", "1"}});
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Take %s off the point", bone->name.c_str());
+    }
+    ImGui::PopID();
   }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip("Keep each point's two handles in line: moving one turns the other (Alt moves one alone)");
+  if (!any) {
+    points_row_label("");
+    ImGui::TextDisabled("No bones");
   }
-  handle_rows(C, drawing);
   ui_panel_end();
+}
+
+/* The selected points of every drawing being edited (`layers`, the one whose handles show first): their Transform
+ * (Median, Rotation, Scale), Width and Opacity, the handles' alignment and the first drawing's handle rows; then the
+ * one picked point's weights. */
+static void selected_points_panel(Context &C, const std::vector<Layer *> &layers)
+{
+  if (layers.empty()) {
+    return;
+  }
+  VectorDrawing &first = layers.front()->drawing;
+  if (points_mean(layers, true) < 0.0f) {
+    /* Only a handle picked on its own: just its row. */
+    if (!point_panel_handles(first).empty() && ui_panel_begin("Selected Points")) {
+      handle_rows(C, first);
+      ui_panel_end();
+    }
+    return;
+  }
+  if (ui_panel_begin("Selected Points")) {
+    points_transform_rows(C, layers);
+    points_mean_rows(C, layers);
+    /* Align: the handles stay in line (moving one turns the other); a mix shows a dash. */
+    points_row_label("Handles");
+    const int alignment = drawing_selected_alignment(first);
+    bool aligned = alignment == 1;
+    if (alignment == -2) {
+      ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
+    }
+    if (ImGui::Checkbox("Aligned", &aligned)) {
+      operator_call(C, aligned ? "mesh.handles_align" : "mesh.handles_unalign");
+    }
+    if (alignment == -2) {
+      ImGui::PopItemFlag();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Keep each point's two handles in line: moving one turns the other (Alt moves one alone)");
+    }
+    handle_rows(C, first);
+    ui_panel_end();
+  }
+  point_weights_panel(C, layers);
+}
+
+/* The drawings being edited with points or handles picked, `first` first. */
+static std::vector<Layer *> layers_points_picked(Context &C, Layer *first)
+{
+  std::vector<Layer *> out;
+  for (Layer *layer : editable_layers(C)) {
+    bool picked = std::any_of(layer->drawing.points.begin(), layer->drawing.points.end(),
+                              [](const MeshPoint &p) { return p.selected; });
+    for (const Curve &c : layer->drawing.curves) {
+      for (const CurvePoint &cp : c.points) {
+        picked = picked || cp.select_in || cp.select_out;
+      }
+    }
+    if (picked) {
+      out.insert(layer == first ? out.begin() : out.end(), layer);
+    }
+  }
+  return out;
+}
+
+/* What the Selected Points panel shows over: the Drawing tab's drawings with a bone layer worked in, else the drawings
+ * being edited with points picked, the active one first. */
+static std::vector<Layer *> points_panel_layers(Context &C)
+{
+  Layer *active = document_active_layer(*C.document);
+  if (active && active->is_bone_layer()) {
+    return bone_tab_drawings(*C.document);
+  }
+  Layer *layer = nullptr;
+  editable_drawing(C, &layer);
+  return layers_points_picked(C, layer);
+}
+
+PointsPanelValues points_panel_values_test(Context &C)
+{
+  PointsPanelValues v;
+  const std::vector<Layer *> layers = points_panel_layers(C);
+  if (layers.empty() || !points_picked_median(C, v.median, v.count)) {
+    return v;
+  }
+  v.shown = true;
+  v.label = v.count == 1 ? "Point" : "Median";
+  v.key = points_key_state(layers, false, C.document->frame_current);
+  v.width_key = points_key_state(layers, true, C.document->frame_current);
+  v.width = points_mean(layers, true);
+  v.opacity = points_mean(layers, false);
+  Layer *layer = nullptr;
+  int index = -1;
+  if (points_lone(layers, &layer, &index)) {
+    if (const Layer *armature = layer_armature(*C.document, layer->id)) {
+      v.weights_shown = !armature->bones.empty();
+      for (const BoneWeight &w : layer->drawing.points[size_t(index)].weights) {
+        if (const Bone *bone = bone_find(*armature, w.bone)) {
+          v.weights.emplace_back(bone->name, w.weight);
+        }
+      }
+    }
+  }
+  return v;
+}
+
+bool points_panel_drag_test(Context &C, const std::string &field, const std::vector<float> &values,
+                            const std::function<void()> &during)
+{
+  float2 median;
+  int count = 0;
+  if (values.empty() || points_panel_layers(C).empty() || !points_picked_median(C, median, count)) {
+    return false;
+  }
+  points_drag_begin(C, field.c_str(), median);
+  for (size_t i = 0; i < values.size(); i++) {
+    const float value = values[i];
+    float2 move, scale(1.0f, 1.0f);
+    float degrees = 0.0f;
+    if (field == "x" || field == "y") {
+      move = field == "x" ? float2(value - g_points_drag.start.x, 0.0f) : float2(0.0f, value - g_points_drag.start.y);
+    }
+    else if (field == "rotation") {
+      degrees = value;
+    }
+    else if (field == "scale_x" || field == "scale_y") {
+      scale = field == "scale_x" ? float2(value, 1.0f) : float2(1.0f, value);
+    }
+    else {
+      g_points_drag = {};
+      return false;
+    }
+    const bool done = i + 1 == values.size();
+    points_drag_update(C, move, scale, degrees, done);
+    if (during && !done) {
+      during();
+    }
+  }
+  return true;
 }
 
 void properties_show_bone(Context &C, uint64_t armature, bool bone, const std::string &fix)

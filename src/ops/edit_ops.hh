@@ -141,6 +141,11 @@ std::vector<Layer *> drawings_points_picked(Document &doc);
 /* What a bone layer's Bone tab shows as Drawing: those drawings, the one clicked last first (Document::picked_drawing)
  * while it has points picked, bones picked beside them or not; else only while none of its family's bones are picked. */
 std::vector<Layer *> bone_tab_drawings(Document &doc);
+/* The selected points' mean width (radius) or opacity over `layers` (-1 with none picked), and giving them a new mean:
+ * widths scaled by as much (all set to it where the mean is 0), opacities each moved by as much. False when nothing
+ * changed. Properties' Selected Points and mesh.points_mean_set. */
+float points_mean(const std::vector<Layer *> &layers, bool width);
+bool points_mean_set(const std::vector<Layer *> &layers, bool width, float value);
 /* What the Layer tab's Bone Group panel edits: the active layer when it is a drawing inside a bone layer (none
  * otherwise: no panel), then every other drawing inside a bone layer picked in the Layers editor. */
 std::vector<Layer *> layer_tab_bone_group_drawings(Document &doc);

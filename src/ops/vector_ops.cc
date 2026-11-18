@@ -7,6 +7,7 @@
 #include "ops/edit_ops.hh"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <unordered_set>
@@ -87,6 +88,48 @@ std::vector<Layer *> bone_tab_drawings(Document &doc)
     }
   }
   return out;
+}
+
+float points_mean(const std::vector<Layer *> &layers, bool width)
+{
+  float sum = 0.0f;
+  int count = 0;
+  for (const Layer *layer : layers) {
+    for (const MeshPoint &p : layer->drawing.points) {
+      if (p.selected) {
+        sum += width ? p.radius : p.opacity;
+        count++;
+      }
+    }
+  }
+  return count ? sum / float(count) : -1.0f;
+}
+
+bool points_mean_set(const std::vector<Layer *> &layers, bool width, float value)
+{
+  const float mean = points_mean(layers, width);
+  if (mean < 0.0f || std::isnan(value)) {
+    return false;
+  }
+  value = std::clamp(value, 0.0f, width ? POINT_RADIUS_MAX : 1.0f);
+  bool changed = false;
+  for (Layer *layer : layers) {
+    for (MeshPoint &p : layer->drawing.points) {
+      if (!p.selected) {
+        continue;
+      }
+      float &v = width ? p.radius : p.opacity;
+      const float was = v;
+      if (width) {
+        v = mean > 1e-6f ? std::clamp(v * value / mean, 0.0f, POINT_RADIUS_MAX) : value;
+      }
+      else {
+        v = std::clamp(v + value - mean, 0.0f, 1.0f);
+      }
+      changed |= v != was;
+    }
+  }
+  return changed;
 }
 
 std::vector<Layer *> layer_tab_bone_group_drawings(Document &doc)
@@ -410,6 +453,52 @@ static constexpr unsigned MIRRORED = UNDO | OPTYPE_MIRROR;
 
 void vector_operators_register()
 {
+  /* --- Properties' Selected Points: its key buttons and its Width and Opacity, over every drawing being edited ---- */
+  vector_operator(
+      "mesh.points_keyframe", "Key Selected Points",
+      "Key the selected points' position (what=POSITION) or width (WIDTH) on this frame in every drawing being edited, "
+      "or with mode=DELETE take those keys away (frame 0's setup keys stay)",
+      UNDO, editable_with_selection_poll, [](Context &C) {
+        Document &doc = *C.document;
+        const std::string what = op_arg(C, "what", "POSITION"), mode = op_arg(C, "mode", "INSERT");
+        if ((what != "POSITION" && what != "WIDTH") || (mode != "INSERT" && mode != "DELETE")) {
+          report(ReportType::Error, "what is POSITION or WIDTH; mode is INSERT or DELETE");
+          return OpStatus::Cancelled;
+        }
+        /* Edits not yet recorded belong to the frame they were made at. */
+        animation_record(doc);
+        int changed = 0;
+        for (Layer *layer : editable_layers(C)) {
+          std::vector<std::string> paths;
+          for (int i = 0; i < int(layer->drawing.points.size()); i++) {
+            if (layer->drawing.points[size_t(i)].selected) {
+              paths.push_back("points[" + std::to_string(i) + "]." + (what == "POSITION" ? "pos" : "radius"));
+            }
+          }
+          if (!paths.empty()) {
+            changed += std::abs(layer_toggle_keys(*layer, paths, doc.frame_current, mode == "INSERT" ? 1 : -1));
+          }
+        }
+        if (changed == 0) {
+          return OpStatus::Cancelled;
+        }
+        animation_evaluate(doc, doc.frame_current);
+        return OpStatus::Finished;
+      });
+  vector_operator("mesh.points_mean_set", "Set Selected Points",
+                  "Give the selected points of every drawing being edited the mean `value`: what=WIDTH scales their "
+                  "widths by as much (all set to it where the mean is 0), OPACITY moves each by as much",
+                  UNDO, editable_with_selection_poll, [](Context &C) {
+                    const std::string what = op_arg(C, "what", "WIDTH");
+                    const float value = op_arg_float(C, "value", -1.0f);
+                    if ((what != "WIDTH" && what != "OPACITY") || !(value >= 0.0f)) {
+                      report(ReportType::Error, "what is WIDTH or OPACITY; value is 0 or more");
+                      return OpStatus::Cancelled;
+                    }
+                    std::vector<Layer *> layers = editable_layers(C);
+                    return points_mean_set(layers, what == "WIDTH", value) ? OpStatus::Finished : OpStatus::Cancelled;
+                  });
+
   /* --- Handles --------------------------------------------------------------- */
   for (const bool align : {true, false}) {
     vector_operator(align ? "mesh.handles_align" : "mesh.handles_unalign", align ? "Align Handles" : "Unalign Handles",

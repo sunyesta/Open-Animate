@@ -135,6 +135,12 @@ struct Area {
 bool area_draw(Area &area, Context &C);
 /* The viewport's own operators (mesh.transform_selected). */
 void viewport_operators_register();
+/* Properties' Selected Points (viewport.cc): the picked points' median where they show (the active layer's space)
+ * and their count; a move, scale and turn about `pivot` shown with no undo step while a field is dragged; and the
+ * same as one undo step (mesh.transform_selected). */
+bool points_picked_median(Context &C, float2 &r_median, int &r_count);
+void points_transform_preview(Context &C, float2 pivot, float2 move, float2 scale, float degrees);
+void points_transform_apply(Context &C, float2 pivot, float2 move, float2 scale, float degrees);
 /* The ViewportActionPanel checkboxes kept for the next moves until the frame or action changes. */
 struct MoveOptions {
   bool keep_poses = false;
