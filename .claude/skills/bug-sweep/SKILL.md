@@ -80,6 +80,15 @@ shows on each of its poses (frames keyed anywhere on it) is the same before and 
 Smooth keys too (they lean on their neighbours, so a key bends the stretches past it), and right after opening a file
 (state rebuilt on the first edit, such as a filler not yet taken, behaves differently from mid-session).
 
+Moves between containers (Move to Layer, Move to Bone Group, Paste): data copied raw from one drawing or layer carries
+that place's bookkeeping (a channel's `synced`, what its drawing last keyed) into the other, where it reads as edits
+(the target's own keys went); Paste through JSON dropped it, so it only showed for the direct move. Check the target's
+own keys and poses, not only the moved part's. And everything that binds a drawing to bones: Parent Bone (Layer and
+Points) wins over point weights, a bound group over what is inside it, and a switch or masking group must go whole or
+not at all. For solvers (IK), build the chain under a parent flipped one way, stretched one way, and in a mirrored bone
+group; a turn of a bone goes the other way or bends there. Many small float rotations of points stretch them (3e-4 over
+thousands of steps): keep a light model as angles and lengths, not rotated points.
+
 ## 3. Confirm every report
 
 A probe's report is a claim. Rerun each repro yourself (in parallel) and read the numbers before telling the user it's

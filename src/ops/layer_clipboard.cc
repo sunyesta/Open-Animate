@@ -683,7 +683,11 @@ void piece_transform(VectorDrawing &piece, const Transform2D &to)
 static void piece_append(VectorDrawing &drawing, const VectorDrawing &piece)
 {
   const size_t first_point = drawing.points.size(), first_shape = drawing.shapes.size();
-  drawing_append_selected(drawing, piece);
+  /* New to this drawing: what its own drawing last keyed it with says nothing here (kept, each of this drawing's keyed
+   * frames it misses read as a key deleted, and went from every channel). */
+  VectorDrawing fresh = piece;
+  drawing_channels(fresh, [](auto &ch) { ch.synced = ch.together_synced = false; });
+  drawing_append_selected(drawing, fresh);
   for (size_t k = first_shape; k < drawing.shapes.size(); k++) {
     drawing.shapes[k].id = 0;
     const std::string &name = piece.shapes[k - first_shape].name;
@@ -799,6 +803,13 @@ static OpStatus move_to_layer(Context &C)
   const size_t had_points = drawing.points.size();
   std::set<std::string> skipped;
   int shapes = 0;
+  /* The one bone moving a drawing as a whole (Parent Bone, a group's above it first), else 0. */
+  const auto whole_bone = [&](const Layer &l) -> uint64_t {
+    if (const Layer *group = layer_binding_group(doc, l.id); group && group->id != l.id) {
+      return group->parent_bone;
+    }
+    return l.parent_bone && !(l.is_reference() && l.reference.match_original) ? l.parent_bone : 0;
+  };
   for (auto &[id, piece] : pieces) {
     Layer *source = layer_find(doc, id);
     /* The source loses it, as with Separate (points other shapes still use stay). */
@@ -818,6 +829,13 @@ static OpStatus move_to_layer(Context &C)
     if (layer_armature(doc, id) != target_bones) {
       for (MeshPoint &p : piece.points) {
         p.weights.clear();
+      }
+    }
+    else if (const uint64_t bone = whole_bone(*source); bone && !whole_bone(*target)) {
+      /* Moved by one bone there (Parent Bone, its own or a group's), not by its weights: here all of it is on that
+       * bone, so it moves as it did. */
+      for (MeshPoint &p : piece.points) {
+        p.weights = {BoneWeight{bone, 1.0f}};
       }
     }
     piece_transform(piece, here * layer_world_transform(doc, id));

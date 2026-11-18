@@ -1283,12 +1283,20 @@ static OpStatus move_to_group(Context &C)
     if (layer_armature(doc, l->id) != source) {
       continue;
     }
+    /* What moves it: a group's Parent Bone above it moves it with the group; its own Parent Bone wins over its points'
+     * weights (old ones left there move nothing, so they tie it to nothing). */
+    if (const Layer *group = layer_binding_group(doc, l->id); group && group->id != l->id) {
+      continue;
+    }
     const auto use = [&](uint64_t bone) {
       if (bone && bone_find(*source, bone)) {
         (moved.count(bone) ? uses_moved : uses_kept).insert(l->id);
       }
     };
     use(l->parent_bone);
+    if (l->parent_bone && bone_find(*source, l->parent_bone) && !(l->is_reference() && l->reference.match_original)) {
+      continue;
+    }
     for (const MeshPoint &p : l->drawing.points) {
       for (const BoneWeight &w : p.weights) {
         use(w.bone);
@@ -1300,14 +1308,46 @@ static OpStatus move_to_group(Context &C)
       }
     }
   }
-  /* The outermost of them, each with what is inside it. */
+  /* The outermost of them, each with what is inside it: in a group or switch holding nothing else (nothing that stays,
+   * nothing unbound, no bone group), the group, so a switch keeps its drawings and a group its masks. */
+  const auto only_moving = [&](const Layer *group) {
+    std::vector<Layer *> inside;
+    layers_below(*const_cast<Layer *>(group), inside);
+    return std::all_of(inside.begin(), inside.end(), [&](const Layer *d) {
+      if (d->is_bone_layer() || uses_kept.count(d->id)) {
+        return false;
+      }
+      if (d->is_group() || uses_moved.count(d->id)) {
+        return true;
+      }
+      /* Moved by a group inside that follows them. */
+      const Layer *by = layer_binding_group(doc, d->id);
+      return by && uses_moved.count(by->id) > 0;
+    });
+  };
   std::vector<uint64_t> carried;
-  std::map<uint64_t, Transform2D> carried_rest;
-  for (const Layer *l : below) {
-    if (!uses_moved.count(l->id) ||
-        std::any_of(carried.begin(), carried.end(), [&](uint64_t c) { return layer_inside(doc, l->id, c); }))
+  std::map<uint64_t, Transform2D> carried_rest, carried_place;
+  for (const Layer *bound : below) {
+    if (!uses_moved.count(bound->id)) {
+      continue;
+    }
+    const Layer *l = bound;
+    for (const Layer *up = layer_parent(doc, l->id); up && up->id != source_id && only_moving(up);
+         up = layer_parent(doc, up->id))
+    {
+      l = up;
+    }
+    if (std::any_of(carried.begin(), carried.end(),
+                    [&](uint64_t c) { return c == l->id || layer_inside(doc, l->id, c); }))
     {
       continue;
+    }
+    /* Out of a switch on its own, the switch would lose a drawing it switches to. */
+    for (const Layer *up = layer_parent(doc, l->id); up && up->id != source_id; up = layer_parent(doc, up->id)) {
+      if (up->is_switch()) {
+        return refuse(l->name + " is one of " + up->name + "'s drawings, which don't all follow the moving bones: it "
+                                "can't leave the switch on its own");
+      }
     }
     std::vector<Layer *> inside{const_cast<Layer *>(l)};
     layers_below(*const_cast<Layer *>(l), inside);
@@ -1326,6 +1366,7 @@ static OpStatus move_to_group(Context &C)
     if (!make_new && (l->id == target->id || layer_inside(doc, target->id, l->id))) {
       return refuse(target->name + " is inside " + l->name + ", which goes with the bones");
     }
+    carried_place[l->id] = layer_setup_relative_transform(doc, source_id, l->id);
     carried.push_back(l->id);
   }
   /* Bones elsewhere hanging from them must still reach them. */
@@ -1586,6 +1627,32 @@ static OpStatus move_to_group(Context &C)
     Layer *t = layer_find(doc, target_id);
     t->children.insert(t->children.begin(), std::move(moving));
   }
+  /* Where the new place differs from the old by a turn, an even scale and a move, the layer's own place takes it, keys
+   * and all, so it looks as it did on every frame (carried into its points instead, a keyed place of its own went
+   * off on its keys' frames, its keys meant in the old place). Any other change goes into its points. */
+  for (const uint64_t id : carried) {
+    Layer *l = layer_find(doc, id);
+    const Transform2D by = to_target * carried_place[id] * layer_setup_relative_transform(doc, target_id, id).inverted();
+    const float det = by.a * by.d - by.b * by.c, s = std::sqrt(std::fabs(det));
+    if (det <= 1e-12f || std::fabs(by.a - by.d) > 1e-5f * s || std::fabs(by.b + by.c) > 1e-5f * s) {
+      continue;
+    }
+    const float degrees = std::atan2(by.b, by.a) * 180.0f / float(std::numbers::pi);
+    const auto each = [](auto &ch, auto &value, auto &&f) {
+      value = f(value);
+      for (auto &k : ch.keys) {
+        k.value = f(k.value);
+      }
+      for (auto &[name, keys] : ch.actions) {
+        for (auto &k : keys) {
+          k.value = f(k.value);
+        }
+      }
+    };
+    each(l->position_keys, l->position, [&](float2 p) { return by.apply(p); });
+    each(l->rotation_keys, l->rotation, [&](float r) { return r + degrees; });
+    each(l->scale_keys, l->scale, [&](float2 v) { return v * s; });
+  }
   for (const auto &[id, was] : carried_rest) {
     const Transform2D carry = layer_setup_relative_transform(doc, target_id, id).inverted() * to_target * was;
     if (std::fabs(carry.a - 1.0f) + std::fabs(carry.b) + std::fabs(carry.c) + std::fabs(carry.d - 1.0f) +
@@ -1595,11 +1662,13 @@ static OpStatus move_to_group(Context &C)
     }
   }
 
-  std::vector<uint64_t> &recent = C.wm->move_to_group_recent;
-  std::erase(recent, target_id);
-  recent.insert(recent.begin(), target_id);
-  if (recent.size() > 8) {
-    recent.resize(8);
+  if (C.wm) {
+    std::vector<uint64_t> &recent = C.wm->move_to_group_recent;
+    std::erase(recent, target_id);
+    recent.insert(recent.begin(), target_id);
+    if (recent.size() > 8) {
+      recent.resize(8);
+    }
   }
   Layer *t = layer_find(doc, target_id);
   doc.active_layer = target_id;

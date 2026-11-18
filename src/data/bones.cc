@@ -6,6 +6,7 @@
 #include <cmath>
 #include <map>
 #include <mutex>
+#include <numbers>
 
 #include "anim/controller.hh"
 #include "data/document.hh"
@@ -825,16 +826,43 @@ static std::vector<int> ik_chain(const std::vector<Bone> &bones, const std::map<
   return chain;
 }
 
+/* The axes a chain's base turns in (bone layer space, linear part): its parent's, as bone_on_parent hangs it from
+ * them, an outer bone's for a bone group's root. */
+static Transform2D ik_axes(const std::vector<Bone> &bones, const std::map<uint64_t, int> &index,
+                           const std::vector<BonePose> &poses, int base)
+{
+  const Bone &b = bones[base];
+  if (const auto it = index.find(b.parent); it != index.end() && it->second != base) {
+    const BonePose &p = poses[it->second];
+    return bone_parent_axes(b, b.follow_knob ? p.knob : p.pose, p.setup, false);
+  }
+  if (b.outer_bone != 0) {
+    return bone_parent_axes(b, bone_outer_frame(b, false), b.outer_setup, false);
+  }
+  return Transform2D();
+}
+
 /* Turns a chain's bones so its last bone's tip reaches `goal`: cyclic coordinate descent, or, for
  * an arc, the even bend (with a turn at its base) that comes closest. `turn(j, radians)` turns
- * bone j; `pose()` works the bones out again; `tip()` and `head(j)` read them. */
-static void ik_solve(const std::vector<int> &chain, float2 goal, bool arc, const std::function<void(int, float)> &turn,
-                     const std::function<void()> &pose, const std::function<float2()> &tip,
-                     const std::function<float2(int)> &head)
+ * bone j and gives back how far it turned (less where a limit holds it); `pose()` works the bones out again; `tip()`
+ * and `head(j)` read them. `axes`: what ik_axes gives for the chain's base. */
+static void ik_solve(const std::vector<int> &chain, float2 goal_at, bool arc, const Transform2D &axes,
+                     const std::function<float(int, float)> &turn, const std::function<void()> &pose,
+                     const std::function<float2()> &tip_at, const std::function<float2(int)> &head_at)
 {
   if (chain.empty()) {
     return;
   }
+  /* Worked out in the base's parent's axes, where turning a bone turns it (and what hangs from it) as much: under a
+   * parent flipped, or stretched one way, a turn in the layer goes the other way or bends (the chain missed, its
+   * joint swung to the other side). */
+  Transform2D to_axes;
+  if (const float det = axes.a * axes.d - axes.b * axes.c; std::abs(det) > 1e-12f) {
+    to_axes = Transform2D{axes.a, axes.b, axes.c, axes.d, 0.0f, 0.0f}.inverted();
+  }
+  const float2 goal = to_axes.apply(goal_at);
+  const auto tip = [&] { return to_axes.apply(tip_at()); };
+  const auto head = [&](int j) { return to_axes.apply(head_at(j)); };
   /* How the chain bends now, from its base to its tip: the turns from each bone to the next, added up (positive to
    * the left). A solve keeps this side, as a knee keeps bending the way it rests. */
   const auto bent_now = [&] {
@@ -869,6 +897,66 @@ static void ik_solve(const std::vector<int> &chain, float2 goal, bool arc, const
     }
   }
   if (!arc || chain.size() < 2) {
+    /* Stepping toward the goal one bone at a time, first on the chain as it stands (its heads and tip, each turn
+     * carrying what hangs from the bone rigidly), until it reaches: as many steps as that takes cost little there,
+     * where on the bones 24 left a long chain short of a goal in reach. Then the turns go on the bones, and steps on
+     * the bones themselves take up what isn't rigid (a bone stretched one way, a limit). */
+    if (const size_t n = chain.size(); distance(tip(), goal) > 1e-5f) {
+      /* The chain as each bone's way and length (from its head to the next head, the last to the tip), in doubles and
+       * worked out from its base each step: rotating points over and over stretched it a hair each time, enough over
+       * thousands of steps to miss near full stretch. */
+      std::vector<double> way(n), length(n), heads_x(n), heads_y(n);
+      const float2 root = head(chain[n - 1]);
+      for (size_t k = 0; k < n; k++) {
+        const float2 v = (k > 0 ? head(chain[k - 1]) : tip()) - head(chain[k]);
+        way[k] = std::atan2(double(v.y), double(v.x));
+        length[k] = std::hypot(double(v.x), double(v.y));
+      }
+      const std::vector<double> way_from = way;
+      double end_x = 0.0, end_y = 0.0;
+      const auto place = [&] {
+        double x = root.x, y = root.y;
+        for (size_t k = n; k-- > 0;) {
+          heads_x[k] = x;
+          heads_y[k] = y;
+          x += length[k] * std::cos(way[k]);
+          y += length[k] * std::sin(way[k]);
+        }
+        end_x = x;
+        end_y = y;
+      };
+      place();
+      const double gx = goal.x, gy = goal.y;
+      /* Until it reaches, or a pass gains nothing (out of reach, it points at the goal after a few). */
+      double was = std::hypot(end_x - gx, end_y - gy);
+      for (int iteration = 0; iteration < 2000 && was > 1e-7; iteration++) {
+        for (size_t k = 0; k < n; k++) {
+          const double hx = heads_x[k], hy = heads_y[k];
+          if (std::hypot(end_x - hx, end_y - hy) < 1e-9 || std::hypot(gx - hx, gy - hy) < 1e-9) {
+            continue;
+          }
+          const double a = std::remainder(std::atan2(gy - hy, gx - hx) - std::atan2(end_y - hy, end_x - hx),
+                                          2.0 * std::numbers::pi);
+          for (size_t m = 0; m <= k; m++) {
+            way[m] += a;
+          }
+          place();
+        }
+        const double now = std::hypot(end_x - gx, end_y - gy);
+        if (was - now < 1e-12) {
+          break;
+        }
+        was = now;
+      }
+      /* Each bone turned by how far its way swung, less its parent's. */
+      for (size_t k = 0; k < n; k++) {
+        const double t = (way[k] - way_from[k]) - (k + 1 < n ? way[k + 1] - way_from[k + 1] : 0.0);
+        if (const float d = wrap_pi(float(std::remainder(t, 2.0 * std::numbers::pi))); d != 0.0f) {
+          turn(chain[k], d);
+        }
+      }
+      pose();
+    }
     for (int iteration = 0; iteration < 24 && distance(tip(), goal) > 1e-5f; iteration++) {
       for (const int j : chain) {
         const float2 h = head(j);
@@ -884,14 +972,15 @@ static void ik_solve(const std::vector<int> &chain, float2 goal, bool arc, const
   }
   /* The arc: every bone bends by the same k; the base turns the whole chain to face the goal. */
   const int base = chain.back();
-  float bent = 0.0f;
+  /* How far each bone has bent so far: a limit can hold one short of what it was asked (counted as asked, the
+   * search read poses other than the ones it meant, and Auto IK missed inside the limits). */
+  std::vector<float> bent(chain.size(), 0.0f);
   const auto bend = [&](float k) {
-    for (const int j : chain) {
-      if (j != base) {
-        turn(j, k - bent);
+    for (size_t m = 0; m < chain.size(); m++) {
+      if (chain[m] != base) {
+        bent[m] += turn(chain[m], k - bent[m]);
       }
     }
-    bent = k;
     pose();
   };
   const auto miss = [&](float k) {
@@ -980,9 +1069,16 @@ static std::vector<BonePose> bones_full_pose(const std::vector<Bone> &bones, boo
       const std::vector<float> before = ik_angle;
       const float2 goal = poses[target->second].head;
       const auto pose = [&] { poses = bones_pose(armature.bones, false, extras); };
+      if (chain.empty()) {
+        continue;
+      }
       ik_solve(
-          chain, goal, armature.bones[i].arc_ik, [&](int j, float d) { ik_angle[j] += d; }, pose,
-          [&] { return poses[i].tail; }, [&](int j) { return poses[j].head; });
+          chain, goal, armature.bones[i].arc_ik, ik_axes(armature.bones, index, poses, chain.back()),
+          [&](int j, float d) {
+            ik_angle[j] += d;
+            return d;
+          },
+          pose, [&] { return poses[i].tail; }, [&](int j) { return poses[j].head; });
       /* Out of reach: the chain may stretch, up to max_stretch. The stretch goes on the chain's
        * base (the bones above it stretch with it, along the chain) and is corrected until the tip
        * just reaches. */
@@ -1109,10 +1205,12 @@ bool armature_reach(Layer &armature, uint64_t bone_id, float2 goal)
   };
   std::vector<BonePose> poses = armature_keyed_pose(armature, false);
   ik_solve(
-      chain, goal, armature.bones[i].arc_ik,
+      chain, goal, armature.bones[i].arc_ik, ik_axes(armature.bones, index, poses, chain.back()),
       [&](int j, float d) {
+        const float was = armature.bones[j].angle;
         armature.bones[j].angle += d;
         clamp_limits(armature.bones[j]);
+        return armature.bones[j].angle - was;
       },
       [&] { poses = armature_keyed_pose(armature, false); }, [&] { return poses[i].tail; },
       [&](int j) { return poses[j].head; });
