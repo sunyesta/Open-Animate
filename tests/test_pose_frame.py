@@ -196,4 +196,92 @@ art().select_points([0, 1])
 assert ops.mesh.delete() == {'FINISHED'}
 assert _oanim.pose_thumbnail_frame(arm) is not None, "still a thumbnail, round what the pose moves"
 
+# --- The same points framed again with another layer active: nothing to change ------------------------------------------
+assert ops.wm.read_homefile() == {'FINISHED'}
+L = oanim.data.layers
+oanim.data.document.frame_current = 1
+assert ops.layer.new() == {'FINISHED'}
+a = L.active
+a.add_curve([(0, 0), (1, 0), (1, 1)])
+assert ops.layer.new() == {'FINISHED'}
+b = L.active
+b.add_curve([(3, 0), (4, 0), (4, 1)])
+
+
+def pick(active, other):
+    L.active = active
+    other.selected = True
+    for l in (a, b):
+        l.select_points([0, 1, 2], False)
+        l.select_points([0, 1])
+
+
+L.active = a
+a.select_points([0, 1])
+assert ops.poselib.pose_new(name="P") == {'FINISHED'}
+pid = _oanim.poses()[0]["id"]
+pick(a, b)
+assert ops.poselib.frame_selected(pose=str(pid)) == {'FINISHED'}
+pick(b, a)
+step = wm.undo_history()[1]
+assert ops.poselib.frame_selected(pose=str(pid)) == {'CANCELLED'}, "the same four points"
+assert wm.undo_history()[1] == step, "no undo step"
+
+
+# --- Drawings never drawn (a hidden group's, a switch's switched-out child) leave the thumbnail alone --------------------
+def hidden_scene(switch):
+    """A bone layer with B; a drawing near it and one far off, both bent by B, the far one inside a group (or the near and
+    far ones a switch's children, near shown). A pose turning B saved on frame 1."""
+    assert ops.wm.read_homefile() == {'FINISHED'}
+    L = oanim.data.layers
+    d = oanim.data.document
+    d.auto_freeze_keys = False
+    d.frame_current = 0
+    assert ops.layer.new_bone() == {'FINISHED'}
+    rig = L.active
+    assert ops.armature.bone_add(name="B", head_x="0", head_y="0", tail_x="1", tail_y="0", parent="") == {'FINISHED'}
+    ops.armature.select_none()
+    if switch:
+        assert ops.layer.new_switch() == {'FINISHED'}
+    else:
+        assert ops.layer.new_group() == {'FINISHED'}
+    holder = L.active
+    holder.name = "Holder"
+    assert ops.layer.move_to_group(group=str(rig.id)) == {'FINISHED'}
+
+    def drawing(name, pts, inside):
+        assert ops.layer.new() == {'FINISHED'}
+        l = L.active
+        l.name = name
+        assert ops.layer.move_to_group(group=str(inside.id)) == {'FINISHED'}
+        l.add_curve(pts)
+        assert ops.layer.parent_bone_set(bone="B", deform="POINTS") == {'FINISHED'}
+        return l
+
+    near = drawing("near", [(0.8, 0.1), (1.0, 0.2), (0.9, 0.3)], holder if switch else rig)
+    far = drawing("far", [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0)], holder)
+    if switch:
+        assert ops.layer.switch_set(layer=str(holder.id), child="near") == {'FINISHED'}
+    d.frame_current = 1
+    L.active = rig
+    rig.bone_set("B", angle=0.6)
+    rig.select_bone("B")
+    assert ops.poselib.pose_new(name="Turn") == {'FINISHED'}
+    return holder, far, _oanim.poses()[0]["id"]
+
+
+holder, far, pid = hidden_scene(False)
+holder.visible = False
+in_hidden_group = _oanim.pose_thumbnail_frame(pid)
+holder.visible = True
+far.visible = False
+hidden_itself = _oanim.pose_thumbnail_frame(pid)
+assert close(in_hidden_group, hidden_itself), ("a hidden group's drawing left out", in_hidden_group, hidden_itself)
+
+holder, far, pid = hidden_scene(True)
+switched_out = _oanim.pose_thumbnail_frame(pid)
+far.visible = False
+hidden_itself = _oanim.pose_thumbnail_frame(pid)
+assert close(switched_out, hidden_itself), ("a switched-out child left out", switched_out, hidden_itself)
+
 print("test_pose_frame: OK")

@@ -112,6 +112,8 @@ while probes keep reporting:
 - A test that passes with its fix undone tests nothing: undo the fix by hand once (`if (false && ...)`), rebuild and
   see the test fail before relying on it. Build its scene like the repro's (the eye file's Look At had an Eye Shape;
   without one the bug never showed).
+- Points bent by a deform: bend hard (one cage corner pulled far out) and move far (0.3). A point's skin is a
+  linear guess round where it was, so a mild bend lands a move that skips the settle within a test's tolerance.
 - A mutation entry's test is `'tests/test_x.py'` or a bare stem (`'timing_curve'`); a bare `'test_x.py'` finds no
   test and shows as missed. `--lanes N` counts this folder as one, so with `--not-here` `--lanes 1` runs nothing ("0
   caught, 0 not"): one lane is `--lanes 2`. An entry whose undone code doesn't compile at `/W4` (a variable left

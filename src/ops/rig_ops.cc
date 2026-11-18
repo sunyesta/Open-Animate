@@ -1740,6 +1740,10 @@ void rig_operators_register()
                    if (w != weights.end()) {
                      weights.erase(w);
                    }
+                   /* Its last bone taken off: no bones, not weighed again from its neighbours as a new point. */
+                   if (weights.empty() && !was.empty()) {
+                     weights.push_back({0, 0.0f});
+                   }
                  }
                  else if (w == weights.end()) {
                    weights.push_back({bone, value});

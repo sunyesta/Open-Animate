@@ -18,6 +18,7 @@
 #include "anim/animation.hh"
 #include "anim/controller_preview.hh"
 #include "anim/deform.hh"
+#include "anim/merge.hh"
 #include "core/log.hh"
 #include "data/bones.hh"
 #include "data/document.hh"
@@ -306,12 +307,13 @@ std::vector<PoseShelfRow> pose_shelf_rows(Context &C, const std::string &search,
   return rows;
 }
 
-/* Where every drawing's points show (document space), by layer. */
+/* Where every drawing drawn shows its points (document space), by layer: not one hidden by a group above it or
+ * switched out. */
 static std::map<uint64_t, std::vector<float2>> points_shown(const Document &doc)
 {
   std::map<uint64_t, std::vector<float2>> out;
   for (const Layer *l : document_layers_flat(doc)) {
-    if (l->type != LayerType::Vector || l->is_reference() || !l->visible) {
+    if (l->type != LayerType::Vector || l->is_reference() || !layer_shown_in_document(doc, l->id)) {
       continue;
     }
     std::vector<Transform2D> skins = layer_point_skins(doc, *l);
@@ -626,6 +628,8 @@ void pose_library_operators_register()
           report(ReportType::Warning, "Select the points its thumbnail should show");
           return OpStatus::Cancelled;
         }
+        /* In one order whichever drawing is active, so the same points are the same frame. */
+        std::sort(picked.begin(), picked.end());
         return frame_points_set(C, *asset, picked);
       },
       {op_bool_property("collection", "Whole Collection", "Every pose in its collection", "0")});

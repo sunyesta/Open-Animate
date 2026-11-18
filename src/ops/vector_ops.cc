@@ -470,8 +470,18 @@ void vector_operators_register()
         int changed = 0;
         for (Layer *layer : editable_layers(C)) {
           std::vector<std::string> paths;
+          const auto own_key = [&](const auto &keys) {
+            const auto *k = keys.key_at(doc.frame_current);
+            return k != nullptr && !k->filler;
+          };
           for (int i = 0; i < int(layer->drawing.points.size()); i++) {
-            if (layer->drawing.points[size_t(i)].selected) {
+            const MeshPoint &p = layer->drawing.points[size_t(i)];
+            /* Keyed here already (by a key of its own, not a filler): nothing to put in. */
+            const bool own = what == "POSITION" ? own_key(p.pos_keys) : own_key(p.radius_keys);
+            if (mode == "INSERT" && own) {
+              continue;
+            }
+            if (p.selected) {
               paths.push_back("points[" + std::to_string(i) + "]." + (what == "POSITION" ? "pos" : "radius"));
             }
           }
@@ -495,7 +505,9 @@ void vector_operators_register()
                       report(ReportType::Error, "what is WIDTH or OPACITY; value is 0 or more");
                       return OpStatus::Cancelled;
                     }
+                    /* A reference's widths and opacity follow its original unless its Edit Points is on. */
                     std::vector<Layer *> layers = editable_layers(C);
+                    std::erase_if(layers, [](const Layer *l) { return l->is_reference() && !l->reference.edit_points; });
                     return points_mean_set(layers, what == "WIDTH", value) ? OpStatus::Finished : OpStatus::Cancelled;
                   });
 

@@ -14251,6 +14251,8 @@ static void point_gizmo_place_map(Context &C, ModalTransform &moving, const std:
   const Document &doc = *C.document;
   const bool keep_outward = !C.wm->tool_settings.proportional;
   std::map<std::tuple<uint64_t, int, int, bool>, const ModalTransform::Item *> handles;
+  std::map<uint64_t, std::vector<PointTarget>> targets;
+  std::map<uint64_t, std::vector<HandleTarget>> ends;
   for (const ModalTransform::Item &item : moving.items) {
     if (item.curve >= 0 && !item.direct) {
       handles[{item.layer, item.curve, item.index, item.pre}] = &item;
@@ -14281,7 +14283,28 @@ static void point_gizmo_place_map(Context &C, ModalTransform &moving, const std:
       }
       to = at + out;
     }
-    modal_place(layers, item, item.start + (to - item.start) * w);
+    to = item.start + (to - item.start) * w;
+    modal_place(layers, item, to);
+    /* Bent by more than their skins (a group's deform): settled where they go, as G does. */
+    const Transform2D &to_layer = layers[item.layer].second;
+    if (item.curve < 0 && item.mirror_source < 0) {
+      targets[item.layer].push_back({item.point, to_layer.apply(to), item.unskin,
+                                     length(item.unskin.apply_vector(to_layer.apply_vector(to - item.start))), item.from,
+                                     true});
+    }
+    else if (item.direct && item.shown_scale == 1.0f && item.mirror_source < 0) {
+      const Curve &curve = layers[item.layer].first->drawing.curves[size_t(item.curve)];
+      const CurvePoint &cp = curve.points[size_t(item.index)];
+      ends[item.layer].push_back({item.curve, item.index, item.pre, item.pre ? cp.select_out : cp.select_in,
+                                  to_layer.apply(to), item.unskin,
+                                  length(item.unskin.apply_vector(to_layer.apply_vector(to - item.start)))});
+    }
+  }
+  for (const auto &[id, points] : targets) {
+    layer_points_settle(*C.document, *layers[id].first, points);
+  }
+  for (const auto &[id, list] : ends) {
+    layer_handles_settle(*C.document, *layers[id].first, list);
   }
   modal_mirror(C, moving, layers);
 }
@@ -14306,7 +14329,7 @@ static void point_gizmo_apply(Context &C, float2 pivot, float2 move, float2 scal
 {
   const auto num = [](float v) {
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "%g", v);
+    std::snprintf(buf, sizeof(buf), "%.9g", double(v));
     return std::string(buf);
   };
   operator_call(C, "mesh.transform_selected",
@@ -15603,6 +15626,10 @@ void viewport_operators_register()
     const float2 move(op_arg_float(C, "move_x", 0.0f), op_arg_float(C, "move_y", 0.0f));
     const float2 scale(op_arg_float(C, "scale_x", 1.0f), op_arg_float(C, "scale_y", 1.0f));
     const float angle = op_arg_float(C, "angle", 0.0f) * PI / 180.0f;
+    /* Nothing moved, turned or scaled: nothing to do (the map would only round the points it puts back). */
+    if (move.x == 0.0f && move.y == 0.0f && scale.x == 1.0f && scale.y == 1.0f && angle == 0.0f) {
+      return OpStatus::Cancelled;
+    }
     static Area area;
     ModalTransform moving;
     if (!modal_collect(C, area, 'G', {}, moving, false)) {
