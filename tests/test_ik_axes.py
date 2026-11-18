@@ -186,4 +186,38 @@ for trial in range(20):
     b = bones(rig)
     worst = max(worst, dist(b["B2"]["tail"], b["Goal"]["head"]))
 assert worst < 1e-4, ("a three-bone chain reaches goals in reach", worst)
+# --- a goal moving smoothly bends a long chain smoothly, each joint the way it rests
+for n in (3, 4):
+    rig = new_rig()
+    add(rig, "Base", (-0.5, 0), (0, 0))
+    prev = "Base"
+    for k in range(n):
+        add(rig, "B%d" % k, (k, 0.05 * k * k), (k + 1.0, 0.05 * (k + 1.0) ** 2), prev)
+        prev = "B%d" % k
+    add(rig, "Goal", (n, 0.5), (n + 0.2, 0.5))
+    rig.bone_set("Base", ik_ignore=True)
+    constrain(rig, "B%d" % (n - 1), "IK", target="Goal")
+    doc.auto_key = True
+    for f in range(1, 49):
+        doc.frame_current = f
+        t = f / 48.0
+        rig.bone_set("Goal", position=(n * (0.35 + 0.5 * t), 1.3 * math.sin(t * 2 * math.pi)))
+
+    def ways():
+        b = bones(rig)
+        return [math.atan2(b["B%d" % k]["tail"][1] - b["B%d" % k]["head"][1],
+                           b["B%d" % k]["tail"][0] - b["B%d" % k]["head"][0]) for k in range(n)], b
+
+    last = None
+    for f in range(1, 49):
+        doc.frame_current = f
+        w, b = ways()
+        miss = dist(b["B%d" % (n - 1)]["tail"], b["Goal"]["head"])
+        assert miss < 1e-4, ("a long chain reaches a goal moving smoothly", n, f, miss)
+        for k in range(1, n):
+            assert math.remainder(w[k] - w[k - 1], 2 * math.pi) > 0.0, ("each joint bends the way it rests", n, f, k)
+        if last:
+            jump = max(abs(math.remainder(a - p, 2 * math.pi)) for a, p in zip(w, last))
+            assert jump < 0.5, ("no bone flips between two frames", n, f, jump)
+        last = w
 print("test_ik_axes passed")

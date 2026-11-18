@@ -35,6 +35,9 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    # Long IK chains bend in proportion to how they rest.
+    ('src/data/bones.cc', '      if (n >= 3 && most > 1e-4) {\n', '      if (n >= 3 && most > 1e30) {\n',
+     'a long IK chain bends smoothly, each joint the way it rests', 'tests/test_ik_axes.py'),
 ]
 
 def build(root):

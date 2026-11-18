@@ -4,6 +4,7 @@
 #include <atomic>
 #include <functional>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <numbers>
@@ -927,6 +928,64 @@ static void ik_solve(const std::vector<int> &chain, float2 goal_at, bool arc, co
       };
       place();
       const double gx = goal.x, gy = goal.y;
+      /* Three bones or more, resting bent: every joint's turn from the bone before it scaled alike, bent more or
+       * straightened the least that reaches, then turned at the base to face the goal. One shape for each reach, so a
+       * goal moving smoothly bends the chain smoothly, each joint the way it rests (stepped from the rest each frame,
+       * it could flip to its mirror zig-zag between two frames). A goal nearer than that shape folds reaches is
+       * stepped toward from it below. */
+      std::vector<double> rest(n, 0.0);
+      double most = 0.0;
+      for (size_t k = 0; k + 1 < n; k++) {
+        rest[k] = std::remainder(way[k] - way[k + 1], 2.0 * std::numbers::pi);
+        most = std::max(most, std::abs(rest[k]));
+      }
+      if (n >= 3 && most > 1e-4) {
+        const double want = std::hypot(gx - root.x, gy - root.y);
+        const auto bend = [&](double s) {
+          for (size_t k = n - 1; k-- > 0;) {
+            way[k] = way[k + 1] + s * rest[k];
+          }
+          place();
+          return std::hypot(end_x - root.x, end_y - root.y);
+        };
+        /* Up to half a turn at the joint bent most. */
+        const double top = std::numbers::pi / most;
+        double lo = 0.0, hi = -1.0, nearest = 0.0, nearest_miss = std::numeric_limits<double>::max();
+        if (bend(0.0) > want) {
+          for (int i = 1; i <= 256 && hi < 0.0; i++) {
+            const double s = top * i / 256.0;
+            const double reach = bend(s);
+            if (std::abs(reach - want) < nearest_miss) {
+              nearest_miss = std::abs(reach - want);
+              nearest = s;
+            }
+            if (reach <= want) {
+              hi = s;
+            }
+            else {
+              lo = s;
+            }
+          }
+        }
+        double s = 0.0;
+        if (hi >= 0.0) {
+          for (int i = 0; i < 60; i++) {
+            const double mid = 0.5 * (lo + hi);
+            (bend(mid) > want ? lo : hi) = mid;
+          }
+          s = hi;
+        }
+        else if (bend(0.0) > want) {
+          s = nearest;
+        }
+        bend(s);
+        const double face = std::remainder(std::atan2(gy - root.y, gx - root.x) - std::atan2(end_y - root.y, end_x - root.x),
+                                           2.0 * std::numbers::pi);
+        for (double &w : way) {
+          w += face;
+        }
+        place();
+      }
       /* Until it reaches, or a pass gains nothing (out of reach, it points at the goal after a few). */
       double was = std::hypot(end_x - gx, end_y - gy);
       for (int iteration = 0; iteration < 2000 && was > 1e-7; iteration++) {
