@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -432,13 +433,78 @@ bool pose_posed_copy(const Document &doc, const PoseAsset &pose, Document &r_cop
   return any;
 }
 
+void pose_frame_round(float2 lo, float2 hi, float2 *r_center, float *r_size)
+{
+  *r_center = (lo + hi) * 0.5f;
+  *r_size = std::max(std::max(hi.x - lo.x, hi.y - lo.y) * 1.4f, 0.05f);
+}
+
+void pose_frame_choose(const PoseAsset &pose, float2 lo, float2 hi, float2 *r_center, float *r_size)
+{
+  if (pose.frame_size > 0.0f) {
+    *r_center = pose.frame_center;
+    *r_size = pose.frame_size;
+  }
+  else {
+    pose_frame_round(lo, hi, r_center, r_size);
+  }
+}
+
+bool pose_thumbnail_frame(const Document &doc, const PoseAsset &pose, float2 *r_center, float *r_size)
+{
+  Document posed;
+  float2 lo, hi;
+  std::vector<uint64_t> layers;
+  if (!pose_posed_copy(doc, pose, posed, &lo, &hi, &layers)) {
+    return false;
+  }
+  pose_frame_choose(pose, lo, hi, r_center, r_size);
+  return true;
+}
+
+bool pose_frame_auto(const Document &doc, const PoseAsset &pose, float2 *r_center, float *r_size)
+{
+  Document posed;
+  float2 lo, hi;
+  std::vector<uint64_t> layers;
+  if (!pose_posed_copy(doc, pose, posed, &lo, &hi, &layers)) {
+    return false;
+  }
+  pose_frame_round(lo, hi, r_center, r_size);
+  return true;
+}
+
+bool pose_frame_of_selection(Context &C, float2 *r_center, float *r_size)
+{
+  int bones = 0, points = 0;
+  PoseAsset pose;
+  pose.pose = pose_copy_json(C, &bones, &points).dump();
+  return bones + points > 0 && pose_frame_auto(*C.document, pose, r_center, r_size);
+}
+
+/* A thumbnail's frame given to an operator: frame_x, frame_y (its middle, document space) and frame_size (its side);
+ * false when none is (or it is no square). */
+static bool frame_args(Context &C, float2 *r_center, float *r_size)
+{
+  const float2 center(op_arg_float(C, "frame_x", NAN), op_arg_float(C, "frame_y", NAN));
+  const float size = op_arg_float(C, "frame_size", 0.0f);
+  if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(size) || size <= 0.0f) {
+    return false;
+  }
+  *r_center = center;
+  *r_size = size;
+  return true;
+}
+
 void pose_library_operators_register()
 {
   poselib_operator(
       "poselib.pose_new", "Save Pose",
       "Save the selected bones' and points' pose on this frame in the file, named `name`, under the collection "
       "`collection` (a name; none if empty) or a new one, `new_collection`, which the selection is put in. It shows "
-      "on the Asset Shelf's Poses while anything in its collection is selected",
+      "on the Asset Shelf's Poses while anything in its collection is selected. frame_x, frame_y and frame_size: its "
+      "thumbnail's frame (a square, its middle and side in document space); without them it is framed on what it "
+      "moves",
       has_selection, [](Context &C) {
         Document &doc = *C.document;
         const std::string name = trimmed(op_arg(C, "name"));
@@ -488,6 +554,7 @@ void pose_library_operators_register()
         asset.name = unique_pose_name(doc, collection, name, 0);
         asset.collection = collection;
         asset.pose = pose.dump();
+        frame_args(C, &asset.frame_center, &asset.frame_size);
         doc.poses.push_back(asset);
         report(ReportType::Info, "Saved the pose " + asset.name + " (" + what_text(bones, points) + ")");
         return OpStatus::Finished;
@@ -551,6 +618,28 @@ void pose_library_operators_register()
         report(ReportType::Info, "Replaced " + asset->name + " with the pose of " + what_text(bones, points));
         return OpStatus::Finished;
       });
+
+  poselib_operator("poselib.frame_set", "Edit Frame",
+                   "Frame pose `pose`'s thumbnail on the square frame_x, frame_y (its middle, document space), "
+                   "frame_size (its side); frame_size=0 frames it on what it moves again",
+                   has_document, [](Context &C) {
+                     PoseAsset *asset = pose_arg(C);
+                     if (!asset) {
+                       return OpStatus::Cancelled;
+                     }
+                     float2 center;
+                     float size = 0.0f;
+                     if (!frame_args(C, &center, &size) && op_arg_float(C, "frame_size", -1.0f) != 0.0f) {
+                       report(ReportType::Warning, "frame_x, frame_y and frame_size (more than 0) give the frame");
+                       return OpStatus::Cancelled;
+                     }
+                     if (center == asset->frame_center && size == asset->frame_size) {
+                       return OpStatus::Cancelled;
+                     }
+                     asset->frame_center = center;
+                     asset->frame_size = size;
+                     return OpStatus::Finished;
+                   });
 
   poselib_operator("poselib.rename", "Rename Pose", "Rename pose `pose` to `name`", has_document, [](Context &C) {
     PoseAsset *asset = pose_arg(C);

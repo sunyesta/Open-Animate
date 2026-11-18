@@ -74,6 +74,7 @@
 #include "wm/context.hh"
 #include "editors/num_input.hh"
 #include "editors/overlay_contrast.hh"
+#include "editors/pose_thumbnails.hh"
 #include "wm/event_system.hh"
 #include "wm/pen_input.hh"
 #include "wm/file_drop.hh"
@@ -17619,6 +17620,125 @@ static uint64_t follow_snap_point(const Document &doc, const Layer &owner, const
   return under;
 }
 
+/* --- The pose thumbnail's frame (Save Pose, Edit Frame) -------------------------------------------------------------- */
+
+/* A drag of the frame: 1 moving it, 2 a corner (the one across, `anchor`, stays). */
+static struct {
+  int mode = 0;
+  float2 anchor, start_mouse, start_center;
+} g_pose_frame;
+
+/* A press at `at` (document space) on the frame: a corner within `reach` resizes it, inside moves it. False off it. */
+static bool pose_frame_press(float2 at, float reach)
+{
+  float2 center;
+  float size = 0.0f;
+  if (!pose_frame_shown(&center, &size)) {
+    return false;
+  }
+  const float half = size * 0.5f;
+  for (const float2 corner : {float2(-1, -1), float2(1, -1), float2(-1, 1), float2(1, 1)}) {
+    if (distance(at, center + corner * half) <= reach) {
+      g_pose_frame = {2, center - corner * half, at, center};
+      return true;
+    }
+  }
+  if (std::fabs(at.x - center.x) <= half && std::fabs(at.y - center.y) <= half) {
+    g_pose_frame = {1, {}, at, center};
+    return true;
+  }
+  return false;
+}
+
+/* The frame as the drag has it with the mouse at `at`: moved by as much, or the corner dragged there (still square,
+ * the larger way). */
+static void pose_frame_drag_to(float2 at)
+{
+  if (g_pose_frame.mode == 1) {
+    float2 center;
+    float size = 0.0f;
+    if (pose_frame_shown(&center, &size)) {
+      pose_frame_shown_set(g_pose_frame.start_center + (at - g_pose_frame.start_mouse), size);
+    }
+  }
+  else if (g_pose_frame.mode == 2) {
+    const float2 d = at - g_pose_frame.anchor;
+    const float side = std::max(std::max(std::fabs(d.x), std::fabs(d.y)), 1e-3f);
+    const float2 corner = g_pose_frame.anchor + float2(d.x < 0.0f ? -side : side, d.y < 0.0f ? -side : side);
+    pose_frame_shown_set((g_pose_frame.anchor + corner) * 0.5f, side);
+  }
+}
+
+/* While Save Pose or Edit Frame is open: the frame drawn (outside it dimmed), and presses on it taken to move it or, on
+ * a corner, resize it. True while it has the mouse. */
+static bool pose_frame_input(const ViewMapping &view, bool hovered, ImDrawList *dl)
+{
+  float2 center;
+  float size = 0.0f;
+  if (!pose_frame_shown(&center, &size)) {
+    g_pose_frame.mode = 0;
+    return false;
+  }
+  const ImGuiIO &io = ImGui::GetIO();
+  const float reach = 8.0f / view.zoom;
+  bool taken = false;
+  if (g_pose_frame.mode != 0) {
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      pose_frame_drag_to(view.to_document(io.MousePos));
+    }
+    else {
+      g_pose_frame.mode = 0;
+    }
+    taken = true;
+  }
+  else if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+           pose_frame_press(view.to_document(io.MousePos), reach))
+  {
+    taken = true;
+  }
+  pose_frame_shown(&center, &size);
+  const ImVec2 a = view.to_screen(center - float2(size, size) * 0.5f), b = view.to_screen(center + float2(size, size) * 0.5f);
+  const ImVec2 lo(std::min(a.x, b.x), std::min(a.y, b.y)), hi(std::max(a.x, b.x), std::max(a.y, b.y));
+  const ImVec2 clip_lo = dl->GetClipRectMin(), clip_hi = dl->GetClipRectMax();
+  const ImU32 dim = IM_COL32(0, 0, 0, 90);
+  dl->AddRectFilled(clip_lo, ImVec2(clip_hi.x, lo.y), dim);
+  dl->AddRectFilled(ImVec2(clip_lo.x, hi.y), clip_hi, dim);
+  dl->AddRectFilled(ImVec2(clip_lo.x, lo.y), ImVec2(lo.x, hi.y), dim);
+  dl->AddRectFilled(ImVec2(hi.x, lo.y), ImVec2(clip_hi.x, hi.y), dim);
+  dl->AddRect(lo, hi, IM_COL32(0, 0, 0, 160), 0.0f, 0, 3.0f);
+  dl->AddRect(lo, hi, IM_COL32(255, 255, 255, 230), 0.0f, 0, 1.5f);
+  for (const ImVec2 corner : {lo, hi, ImVec2(lo.x, hi.y), ImVec2(hi.x, lo.y)}) {
+    dl->AddRectFilled(ImVec2(corner.x - 4.0f, corner.y - 4.0f), ImVec2(corner.x + 4.0f, corner.y + 4.0f),
+                      IM_COL32(255, 255, 255, 255));
+    dl->AddRect(ImVec2(corner.x - 4.0f, corner.y - 4.0f), ImVec2(corner.x + 4.0f, corner.y + 4.0f),
+                IM_COL32(0, 0, 0, 200));
+  }
+  if (hovered || taken) {
+    const float2 m = view.to_document(io.MousePos);
+    const float half = size * 0.5f;
+    const float2 d = m - center;
+    const bool corner = std::fabs(std::fabs(d.x) - half) <= reach && std::fabs(std::fabs(d.y) - half) <= reach;
+    if (g_pose_frame.mode == 2 || (g_pose_frame.mode == 0 && corner)) {
+      const float2 from = g_pose_frame.mode == 2 ? m - g_pose_frame.anchor : d;
+      ImGui::SetMouseCursor(from.x * from.y > 0.0f ? ImGuiMouseCursor_ResizeNESW : ImGuiMouseCursor_ResizeNWSE);
+    }
+    else if (g_pose_frame.mode == 1 || (std::fabs(d.x) <= half && std::fabs(d.y) <= half)) {
+      ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+    }
+  }
+  return taken;
+}
+
+bool pose_frame_drag_test(float2 from, float2 to, float reach)
+{
+  if (!pose_frame_press(from, reach)) {
+    return false;
+  }
+  pose_frame_drag_to(to);
+  g_pose_frame.mode = 0;
+  return true;
+}
+
 /* Whether the mouse is on a point, or dragging one. */
 static bool follow_point_input(Context &C, const Area &area, const ViewMapping &view, bool hovered)
 {
@@ -18684,6 +18804,9 @@ static void viewport_draw_contents(Area &area, Context &C)
   }
   else if (g_layer_click.active && g_layer_click.area == area.id) {
     layer_pick_update(C, view, dl);
+  }
+  else if (!g_modal.active && pose_frame_input(view, hovered, dl)) {
+    /* The pose thumbnail's frame (Save Pose, Edit Frame) has the mouse. */
   }
   else if (!g_modal.active && follow_point_input(C, area, view, hovered)) {
     /* The light blue point has the mouse. */

@@ -146,6 +146,20 @@ PENDING = [
     # A point's weight set from Point Weights.
     ('src/ops/rig_ops.cc', '                   w->weight = value;', '                   w->weight = value * 0.0f;',
      'point weight set', 'tests/test_points_panel.py'),
+    # A pose's thumbnail is framed on the frame it was given.
+    ('src/ops/pose_library.cc', '  if (pose.frame_size > 0.0f) {\n    *r_center = pose.frame_center;',
+     '  if (pose.frame_size > 0.0f && false) {\n    *r_center = pose.frame_center;', 'thumbnail uses its frame',
+     'tests/test_pose_frame.py'),
+    # Save Pose keeps the frame given.
+    ('src/ops/pose_library.cc', '        frame_args(C, &asset.frame_center, &asset.frame_size);',
+     '        (void)frame_args;', 'Save Pose keeps its frame', 'tests/test_pose_frame.py'),
+    # The frame is read back from the file.
+    ('src/io/oanim_file.cc', '        p.frame_size = size;', '        p.frame_size = size * 0.0f;', 'pose frame kept in the file',
+     'tests/test_pose_frame.py'),
+    # A corner dragged resizes the frame about the corner across.
+    ('src/editors/viewport.cc', '      g_pose_frame = {2, center - corner * half, at, center};',
+     '      g_pose_frame = {2, center + corner * half, at, center};', 'frame corner resizes about the one across',
+     'tests/test_pose_frame.py'),
 ]
 
 def build(root):

@@ -58,6 +58,7 @@
 #include "ops/file_ops.hh"
 #include "ops/operator.hh"
 #include "ops/pose_library.hh"
+#include "editors/pose_thumbnails.hh"
 #include <nlohmann/json.hpp>
 #include "ops/undo.hh"
 #include "rna/rna.hh"
@@ -1725,6 +1726,25 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return std::string(select_press_takes_test(current_context(), {x, y}, zoom));
   });
   m.def("select_click", [](float x, float y, float zoom) { select_click_test(current_context(), {x, y}, zoom); });
+  m.def("pose_frame_open", [](int64_t pose) { pose_frame_dialog_test(current_context(), pose); });
+  m.def("pose_frame", []() {
+    float2 center;
+    float size = 0.0f;
+    return pose_frame_shown(&center, &size) ? py::object(py::make_tuple(center.x, center.y, size)) : py::object(py::none());
+  });
+  m.def("pose_frame_drag", [](float fx, float fy, float tx, float ty, float reach) {
+    return pose_frame_drag_test({fx, fy}, {tx, ty}, reach);
+  });
+  m.def("pose_thumbnail_frame", [](uint64_t id) {
+    const Document &doc = *current_context().document;
+    const PoseAsset *pose = pose_asset_find(doc, id);
+    float2 center;
+    float size = 0.0f;
+    if (!pose || !pose_thumbnail_frame(doc, *pose, &center, &size)) {
+      return py::object(py::none());
+    }
+    return py::object(py::make_tuple(center.x, center.y, size));
+  });
   m.def("points_panel", []() {
     const PointsPanelValues v = points_panel_values_test(current_context());
     py::dict d;

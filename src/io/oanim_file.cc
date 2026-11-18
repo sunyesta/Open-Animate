@@ -3,6 +3,7 @@
 #include <numeric>
 #include <execution>
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
@@ -1362,6 +1363,9 @@ std::string oanim_document_to_json(const Document &doc)
                                 {"name", p.name},
                                 {"collection", p.collection},
                                 {"pose", pose.is_discarded() ? json::object() : pose}});
+                if (p.frame_size > 0.0f) {
+                  list.back()["frame"] = {p.frame_center.x, p.frame_center.y, p.frame_size};
+                }
               }
               return list;
             }()},
@@ -4276,6 +4280,16 @@ bool oanim_document_from_json(const std::string &text, Document &r_doc, std::str
     p.name = get_string(pj, "name", "Pose");
     p.collection = pj.value("collection", uint64_t(0));
     p.pose = pj["pose"].dump();
+    if (const auto f = pj.find("frame"); f != pj.end() && f->is_array() && f->size() == 3 && (*f)[0].is_number() &&
+                                         (*f)[1].is_number() && (*f)[2].is_number())
+    {
+      const float2 center((*f)[0].get<float>(), (*f)[1].get<float>());
+      const float size = (*f)[2].get<float>();
+      if (std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(size) && size > 0.0f) {
+        p.frame_center = center;
+        p.frame_size = size;
+      }
+    }
     /* An id missing or taken (a file edited by hand): a new one. */
     if (!p.id || std::any_of(doc.poses.begin(), doc.poses.end(), [&](const PoseAsset &o) { return o.id == p.id; })) {
       p.id = 0;

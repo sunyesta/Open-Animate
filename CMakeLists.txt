@@ -723,6 +723,8 @@ add_test(NAME drawing_stretch_add
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_drawing_stretch_add.py)
 add_test(NAME points_panel
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_points_panel.py)
+add_test(NAME pose_frame
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_frame.py)
 add_test(NAME clear_sub_group_bones
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_clear_sub_group_bones.py)
 add_test(NAME knob_distance_copies
