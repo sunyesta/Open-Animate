@@ -92,7 +92,7 @@ KEYMAP = (
     ("Viewport", "mesh.extrude", "E", {}),
     ("Viewport", "mesh.duplicate_move", "D", {"shift": True}),
     # Blender's Separate > Selection: the selected pieces into a layer of their own.
-    ("Viewport", "mesh.separate", "P", {}),
+    ("Viewport", "mesh.move_to_layer_menu", "P", {}),
     ("Viewport", "anim.keyframe_insert", "I", {}),
     # A guide tool's picked guide goes first.
     ("Viewport", "guide.delete_picked", "X", {}),

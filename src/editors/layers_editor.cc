@@ -495,6 +495,12 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
     /* In Front Of... / Behind...: pointing at a row shows the result in the viewport. */
     C.wm->draw_order_pick.hover = layer.id;
   }
+  /* Pick Layer (P): the row pointed at is lit up and named at the mouse. */
+  if (row_hovered && C.wm->move_pick.started) {
+    C.wm->move_pick.hover = layer.id;
+    C.wm->move_pick.hover_frame = ImGui::GetFrameCount();
+    C.wm->move_pick.hover_name = layer.name;
+  }
   if (clip_zone) {
     /* The click was the clip's. */
   }
@@ -999,6 +1005,12 @@ static void draw_order_view(Context &C)
     const bool row_hovered = ImGui::IsItemHovered();
     if (row_hovered && C.wm->draw_order_pick.mode != 0) {
       C.wm->draw_order_pick.hover = layer.id;
+    }
+    /* Pick Layer (P): the row pointed at is lit up and named at the mouse. */
+    if (row_hovered && C.wm->move_pick.started) {
+      C.wm->move_pick.hover = layer.id;
+      C.wm->move_pick.hover_frame = ImGui::GetFrameCount();
+      C.wm->move_pick.hover_name = layer.name;
     }
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
       if (ui_layer_eyedropper_active()) {

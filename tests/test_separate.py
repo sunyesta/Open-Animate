@@ -1,4 +1,4 @@
-"""Separate (P, Blender's Separate > Selection): the selected points, the curve pieces between them and
+"""Separate (P > New Layer, Blender's Separate > Selection): the selected points, the curve pieces between them and
 the shapes they cover go to a new layer above, in the same group, with the layer's settings; the
 original loses those pieces, keeping points other pieces still use. The new layer becomes the active
 one. One undo step.
@@ -31,9 +31,9 @@ layer.opacity = 0.5
 ops.mesh.select_none()
 assert ops.mesh.separate() == {'CANCELLED'}, "nothing selected"
 
-# The second box: P takes it, fill and outline, into "Face 1" just above.
+# The second box: P > New Layer takes it, fill and outline, into "Face 1" just above.
 layer.select_points([4, 5, 6, 7])
-assert wm.event_simulate("P", area="Viewport")
+assert ops.mesh.separate() == {'FINISHED'}
 new = next(l for l in layers.all() if l.name == "Face 1")
 assert names().index("Face 1") == names().index("Face") - 1, names()
 assert new.point_count == 4 and new.curve_count == 1 and new.shape_count == layer.shape_count, \

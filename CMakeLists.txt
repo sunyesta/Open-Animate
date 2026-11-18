@@ -725,6 +725,8 @@ add_test(NAME points_panel
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_points_panel.py)
 add_test(NAME pose_frame
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_pose_frame.py)
+add_test(NAME move_to_layer
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_move_to_layer.py)
 add_test(NAME clear_sub_group_bones
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_clear_sub_group_bones.py)
 add_test(NAME knob_distance_copies

@@ -35,6 +35,26 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    # P > Move to Layer: the moved points' weights mean nothing under other bones.
+    ('src/ops/layer_clipboard.cc', '    if (layer_armature(doc, id) != target_bones) {', '    if (false && layer_armature(doc, id) != target_bones) {',
+     'moved points weighed anew under other bones', 'tests/test_move_to_layer.py'),
+    ('src/ops/layer_clipboard.cc', '    piece_transform(piece, here * layer_world_transform(doc, id));', '    (void)here;',
+     'moved points keep their look', 'tests/test_move_to_layer.py'),
+    ('src/ops/layer_clipboard.cc', '    drawing_delete_edges(source->drawing, drawing_selected_edges(source->drawing));\n    drawing_remove_unused_points(source->drawing);\n',
+     '', 'the source loses what moves', 'tests/test_move_to_layer.py'),
+    ('src/ops/layer_clipboard.cc', '    if (layer->type != LayerType::Vector || layer->is_reference() || layer->id == target->id) {',
+     '    if (layer->type != LayerType::Vector || layer->is_reference()) {', 'nothing moves into its own drawing', 'tests/test_move_to_layer.py'),
+    ('src/ops/layer_clipboard.cc', '  Layer *target = layer_by_name_or_id(doc, op_arg(C, "target"));\n  if (!target || target->type != LayerType::Vector || target->is_reference()) {',
+     '  Layer *target = layer_by_name_or_id(doc, op_arg(C, "target"));\n  if (!target || target->type != LayerType::Vector) {', 'a reference takes no moved shapes', 'tests/test_move_to_layer.py'),
+    ('src/ops/layer_clipboard.cc', '  doc.active_layer = target->id;\n  target->selected = false;', '  target->selected = false;',
+     'the target becomes active', 'tests/test_move_to_layer.py'),
+    # Its menu and Pick Layer.
+    ('src/editors/viewport.cc', '  for (const uint64_t id : C.wm->move_to_layer_recent) {\n    take(layer_find(doc, id));', '  for (const uint64_t id : C.wm->move_to_layer_recent) {\n    (void)id;',
+     'the list puts the drawings moved into last first', 'tests/test_move_to_layer.py'),
+    ('src/editors/viewport.cc', '         !(sources.size() == 1 && sources.front() == l->id);', '         true;',
+     'Pick Layer refuses the drawing the selection is in', 'tests/test_move_to_layer.py'),
+    ('scripts/startup/oanim_keymap_default.py', '    ("Viewport", "mesh.move_to_layer_menu", "P", {}),',
+     '    ("Viewport", "mesh.separate", "P", {}),', 'P opens Move to Layer', 'tests/test_move_to_layer.py'),
 ]
 
 def build(root):

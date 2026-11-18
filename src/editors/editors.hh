@@ -141,6 +141,10 @@ void viewport_operators_register();
 bool points_picked_median(Context &C, float2 &r_median, int &r_count);
 void points_transform_preview(Context &C, float2 pivot, float2 move, float2 scale, float degrees);
 void points_transform_apply(Context &C, float2 pivot, float2 move, float2 scale, float degrees);
+/* P's Move to Layer (viewport.cc), for tests: the menu's list for `search` (ids), and Pick Layer's click on drawing
+ * `layer` (true when the selection went there; refused, the eyedropper is let go). */
+std::vector<uint64_t> move_menu_rows_test(Context &C, const std::string &search);
+bool move_pick_test(Context &C, uint64_t layer);
 /* The ViewportActionPanel checkboxes kept for the next moves until the frame or action changes. */
 struct MoveOptions {
   bool keep_poses = false;

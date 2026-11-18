@@ -678,6 +678,170 @@ static void piece_transform(VectorDrawing &piece, const Transform2D &to)
   }
 }
 
+/* `piece` added to `drawing` on top, selected (its shapes named as they were, numbered only where `drawing` has the name
+ * already; its points in the point groups `drawing` has of the same name). */
+static void piece_append(VectorDrawing &drawing, const VectorDrawing &piece)
+{
+  const size_t first_point = drawing.points.size(), first_shape = drawing.shapes.size();
+  drawing_append_selected(drawing, piece);
+  for (size_t k = first_shape; k < drawing.shapes.size(); k++) {
+    drawing.shapes[k].id = 0;
+    const std::string &name = piece.shapes[k - first_shape].name;
+    std::string free_name = name;
+    for (int n = 2; std::any_of(drawing.shapes.begin(), drawing.shapes.begin() + long(k),
+                                [&](const Shape &s) { return s.name == free_name; });
+         n++)
+    {
+      free_name = name + " " + std::to_string(n);
+    }
+    drawing.shapes[k].name = free_name;
+  }
+  drawing_ensure_ids(drawing);
+  for (const PointGroup &group : piece.groups) {
+    const auto own = std::find_if(drawing.groups.begin(), drawing.groups.end(),
+                                  [&](const PointGroup &g) { return g.name == group.name; });
+    if (own == drawing.groups.end()) {
+      continue;
+    }
+    for (size_t k = 0; k < piece.points.size(); k++) {
+      if (const auto it = group.weights.find(piece.points[k].id); it != group.weights.end()) {
+        own->weights[drawing.points[first_point + k].id] = it->second;
+      }
+    }
+  }
+}
+
+/* Keys of actions none of `owners` has dropped from `piece` (their names put in `r_skipped`); with `to_action`, the action
+ * being edited swapped in. */
+static void piece_actions_fit(VectorDrawing &piece, const std::set<std::string> &actions, const std::string &to_action,
+                              std::set<std::string> &r_skipped)
+{
+  drawing_channels(piece, [&](auto &ch) {
+    std::vector<std::string> gone;
+    for (const auto &[name, keys] : ch.actions) {
+      if (!name.empty() && !actions.count(name)) {
+        gone.push_back(name);
+      }
+    }
+    for (const std::string &name : gone) {
+      ch.actions.erase(name);
+      r_skipped.insert(name);
+    }
+  });
+  if (!to_action.empty()) {
+    drawing_timeline_swap(piece, "", to_action);
+  }
+}
+
+/* The action lines layer `id` has (what its keys can go on), and the action being edited when it is in it. */
+static std::set<std::string> layer_action_lines(Document &doc, uint64_t id, std::string *r_editing)
+{
+  std::set<std::string> actions;
+  for (const Layer *owner : action_owners(doc, id)) {
+    actions.insert(owner->actions.begin(), owner->actions.end());
+    if (!doc.action.empty() && owner->id == doc.action_layer && r_editing) {
+      *r_editing = doc.action;
+    }
+  }
+  return actions;
+}
+
+static std::string skipped_keys_text(const std::set<std::string> &skipped)
+{
+  if (skipped.empty()) {
+    return "";
+  }
+  std::string text = ". Left out the keys of ";
+  for (const std::string &name : skipped) {
+    text += (name == *skipped.begin() ? "" : ", ") + name;
+  }
+  return text + ": this layer isn't in those actions";
+}
+
+/* P > a layer: what Separate would move (the runs of selected points and the shapes they cover) goes into drawing
+ * `target`, on top and selected, from every other drawing being edited, as Grease Pencil's Move to Layer. They keep
+ * their look (carried from their layer's place to the target's), their keys (those of actions the target has no part in
+ * dropped) and their weights while the target follows the same bone layer; under other bones they're weighed as new
+ * points. The target becomes the active layer. */
+static OpStatus move_to_layer(Context &C)
+{
+  Document &doc = *C.document;
+  Layer *target = layer_by_name_or_id(doc, op_arg(C, "target"));
+  if (!target || target->type != LayerType::Vector || target->is_reference()) {
+    report(ReportType::Warning, target && target->is_reference()
+                                    ? "A copy (reference layer) can't get new shapes: pick a drawing layer to move into"
+                                    : "Pick a drawing layer to move the selection into");
+    return OpStatus::Cancelled;
+  }
+  /* What goes, worked out before anything changes. */
+  std::vector<std::pair<uint64_t, VectorDrawing>> pieces;
+  for (Layer *layer : editable_layers(C)) {
+    if (layer->type != LayerType::Vector || layer->is_reference() || layer->id == target->id) {
+      continue;
+    }
+    VectorDrawing piece = layer->drawing;
+    if (drawing_duplicate_selected(piece)) {
+      only_the_copy(piece);
+      pieces.emplace_back(layer->id, std::move(piece));
+    }
+  }
+  if (pieces.empty()) {
+    report(ReportType::Warning, "Select a shape, or at least two connected points of a line, in another drawing to "
+                                "move into " + target->name);
+    return OpStatus::Cancelled;
+  }
+  animation_record(doc);
+  std::string target_action;
+  const std::set<std::string> target_actions = layer_action_lines(doc, target->id, &target_action);
+  const Layer *target_bones = layer_armature(doc, target->id);
+  const Transform2D here = layer_world_transform(doc, target->id).inverted();
+  VectorDrawing &drawing = target->drawing;
+  const size_t had_points = drawing.points.size();
+  std::set<std::string> skipped;
+  int shapes = 0;
+  for (auto &[id, piece] : pieces) {
+    Layer *source = layer_find(doc, id);
+    /* The source loses it, as with Separate (points other shapes still use stay). */
+    drawing_delete_edges(source->drawing, drawing_selected_edges(source->drawing));
+    drawing_remove_unused_points(source->drawing);
+    for (MeshPoint &p : source->drawing.points) {
+      p.selected = false;
+    }
+    layer_touch(*source);
+    std::string source_action;
+    layer_action_lines(doc, id, &source_action);
+    if (!source_action.empty()) {
+      drawing_timeline_swap(piece, source_action, "");
+    }
+    piece_actions_fit(piece, target_actions, target_action, skipped);
+    /* Under other bones its weights mean nothing: weighed as new points are. */
+    if (layer_armature(doc, id) != target_bones) {
+      for (MeshPoint &p : piece.points) {
+        p.weights.clear();
+      }
+    }
+    piece_transform(piece, here * layer_world_transform(doc, id));
+    piece_append(drawing, piece);
+    shapes += int(piece.shapes.size());
+  }
+  for (size_t i = 0; i < drawing.points.size(); i++) {
+    drawing.points[i].selected = i >= had_points;
+  }
+  layer_touch(*target);
+  doc.active_layer = target->id;
+  target->selected = false;
+  animation_evaluate(doc, doc.frame_current);
+  report(ReportType::Info, "Moved " + std::to_string(std::max(shapes, 1)) + (shapes == 1 ? " shape" : " shapes") +
+                               " into " + target->name + skipped_keys_text(skipped));
+  if (C.wm) {
+    std::vector<uint64_t> &recent = C.wm->move_to_layer_recent;
+    std::erase(recent, target->id);
+    recent.insert(recent.begin(), target->id);
+    recent.resize(std::min<size_t>(recent.size(), 8));
+  }
+  return OpStatus::Finished;
+}
+
 /* Pastes copied shapes into the active drawing, on top, and selects them. */
 static OpStatus shapes_paste(Context &C, const json &root)
 {
@@ -705,12 +869,8 @@ static OpStatus shapes_paste(Context &C, const json &root)
       dest_bones[b.name] = b.id;
     }
   }
-  std::set<std::string> dest_actions;
-  bool in_action = false;
-  for (const Layer *owner : action_owners(doc, target->id)) {
-    dest_actions.insert(owner->actions.begin(), owner->actions.end());
-    in_action = in_action || (!doc.action.empty() && owner->id == doc.action_layer);
-  }
+  std::string editing_action;
+  const std::set<std::string> dest_actions = layer_action_lines(doc, target->id, &editing_action);
   const std::map<uint64_t, uint64_t> material_map = clipboard_materials(doc, mini);
   const json wrapped = root.value("wrapped", json::array());
   const json &shown = root["shapes"];
@@ -726,21 +886,7 @@ static OpStatus shapes_paste(Context &C, const json &root)
     VectorDrawing piece = std::move((held ? top.children.front() : top).drawing);
     if (keyframes) {
       /* Keys of actions this layer has no part in have nowhere to go. */
-      drawing_channels(piece, [&](auto &ch) {
-        std::vector<std::string> gone;
-        for (const auto &[name, keys] : ch.actions) {
-          if (!name.empty() && !dest_actions.count(name)) {
-            gone.push_back(name);
-          }
-        }
-        for (const std::string &name : gone) {
-          ch.actions.erase(name);
-          skipped.insert(name);
-        }
-      });
-      if (in_action) {
-        drawing_timeline_swap(piece, "", doc.action);
-      }
+      piece_actions_fit(piece, dest_actions, editing_action, skipped);
     }
     else {
       piece_as_shown(piece, shown[i]);
@@ -778,36 +924,7 @@ static OpStatus shapes_paste(Context &C, const json &root)
       const auto it = material_map.find(s.material);
       s.material = s.material && it != material_map.end() ? it->second : 0;
     }
-    VectorDrawing &drawing = target->drawing;
-    const size_t first_point = drawing.points.size(), first_shape = drawing.shapes.size();
-    drawing_append_selected(drawing, piece);
-    for (size_t k = first_shape; k < drawing.shapes.size(); k++) {
-      drawing.shapes[k].id = 0;
-      /* Its own name, numbered only if this drawing has it already. */
-      const std::string &name = piece.shapes[k - first_shape].name;
-      std::string free_name = name;
-      for (int n = 2; std::any_of(drawing.shapes.begin(), drawing.shapes.begin() + long(k),
-                                  [&](const Shape &s) { return s.name == free_name; });
-           n++)
-      {
-        free_name = name + " " + std::to_string(n);
-      }
-      drawing.shapes[k].name = free_name;
-    }
-    drawing_ensure_ids(drawing);
-    /* Point groups this drawing has too keep what's in them. */
-    for (const PointGroup &group : piece.groups) {
-      const auto own = std::find_if(drawing.groups.begin(), drawing.groups.end(),
-                                    [&](const PointGroup &g) { return g.name == group.name; });
-      if (own == drawing.groups.end()) {
-        continue;
-      }
-      for (size_t k = 0; k < piece.points.size(); k++) {
-        if (const auto it = group.weights.find(piece.points[k].id); it != group.weights.end()) {
-          own->weights[drawing.points[first_point + k].id] = it->second;
-        }
-      }
-    }
+    piece_append(target->drawing, piece);
     shapes += int(piece.shapes.size());
   }
   VectorDrawing &drawing = target->drawing;
@@ -841,22 +958,38 @@ static OpStatus shapes_paste(Context &C, const json &root)
   if (keyframes) {
     animation_evaluate(doc, doc.frame_current);
   }
-  std::string message = "Pasted " + std::to_string(std::max(shapes, 1)) + (shapes == 1 ? " shape" : " shapes") + " into " +
-                        target->name;
-  if (!skipped.empty()) {
-    message += ". Left out the keys of ";
-    for (const std::string &name : skipped) {
-      message += (name == *skipped.begin() ? "" : ", ") + name;
-    }
-    message += ": this layer isn't in those actions";
-  }
-  report(ReportType::Info, message);
+  report(ReportType::Info, "Pasted " + std::to_string(std::max(shapes, 1)) + (shapes == 1 ? " shape" : " shapes") +
+                               " into " + target->name + skipped_keys_text(skipped));
   C.undo_name = "Paste Shapes";
   return OpStatus::Finished;
 }
 
 void layer_clipboard_operators_register()
 {
+  {
+    OperatorType ot;
+    ot.idname = "mesh.move_to_layer";
+    ot.name = "Move to Layer";
+    ot.description = "Move the selected points, the curve pieces between them and the shapes they cover from every "
+                     "drawing being edited into drawing `target` (id or name), on top and selected, keeping their look, "
+                     "their keys and, under the same bones, their weights (P > a layer)";
+    ot.flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+    ot.poll = [](Context &C) {
+      if (!C.document) {
+        return false;
+      }
+      for (const Layer *layer : editable_layers(C)) {
+        for (const MeshPoint &p : layer->drawing.points) {
+          if (p.selected) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    ot.exec = move_to_layer;
+    operators().add(std::move(ot));
+  }
   {
     OperatorType ot;
     ot.idname = "mesh.copy";

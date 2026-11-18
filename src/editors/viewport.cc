@@ -8,6 +8,7 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "imgui_stdlib.h"
 
 #include <SDL3/SDL_opengl.h>
 
@@ -14324,6 +14325,8 @@ static void point_gizmo_place(Context &C, ModalTransform &moving, const Transfor
   point_gizmo_place_map(C, moving, [&](float2 p) { return to_document.apply(map(to_gizmo.apply(p))); });
 }
 
+static std::vector<uint64_t> move_sources(Context &C);
+
 /* The header's fields and buttons: mesh.transform_selected, one map of the selection as one undo step. */
 static void point_gizmo_apply(Context &C, float2 pivot, float2 move, float2 scale, float degrees)
 {
@@ -15642,6 +15645,19 @@ void viewport_operators_register()
   };
   operators().add(std::move(ot));
 
+  OperatorType move_menu;
+  move_menu.idname = "mesh.move_to_layer_menu";
+  move_menu.name = "Move to Layer";
+  move_menu.description = "Choose where the selected points go: a new layer (Separate), a drawing clicked in the "
+                          "viewport or the Layers editor (Pick Layer), or one from the list";
+  move_menu.flag = OPTYPE_REGISTER;
+  move_menu.poll = [](Context &C) { return C.document != nullptr && C.wm != nullptr && !move_sources(C).empty(); };
+  move_menu.exec = [](Context &C) {
+    C.wm->menu_request = "move_to_layer";
+    return OpStatus::Finished;
+  };
+  operators().add(std::move(move_menu));
+
   OperatorType cage_op;
   cage_op.idname = "mesh.cage_transform";
   cage_op.name = "Distort Points";
@@ -16562,6 +16578,205 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
       }
     }
   }
+}
+
+/* The drawings being edited that have points selected: what P moves. */
+static std::vector<uint64_t> move_sources(Context &C)
+{
+  std::vector<uint64_t> ids;
+  for (const Layer *layer : editable_layers(C)) {
+    if (layer->type == LayerType::Vector && !layer->is_reference() &&
+        std::any_of(layer->drawing.points.begin(), layer->drawing.points.end(),
+                    [](const MeshPoint &p) { return p.selected; }))
+    {
+      ids.push_back(layer->id);
+    }
+  }
+  return ids;
+}
+
+/* A drawing the selection can go into: not a reference, nor the only drawing it is in. */
+static bool move_target_ok(const Layer *l, const std::vector<uint64_t> &sources)
+{
+  return l && l->type == LayerType::Vector && !l->is_reference() &&
+         !(sources.size() == 1 && sources.front() == l->id);
+}
+
+/* The drawing the mouse is on lit up, in the viewport and the Layers editor. */
+static void move_target_light(WindowManager &wm, uint64_t id)
+{
+  wm.mask_hover = {id};
+  wm.layers_hover = {id};
+  wm.layers_hover_frame = ImGui::GetFrameCount();
+}
+
+/* The menu's list: the drawings the selection can go into whose names hold `search` (any case), the ones moved into
+ * last first, then in Layers-editor order. */
+static std::vector<const Layer *> move_rows(Context &C, const std::string &search)
+{
+  const auto lower = [](std::string t) {
+    for (char &ch : t) {
+      ch = char(std::tolower((unsigned char)ch));
+    }
+    return t;
+  };
+  const Document &doc = *C.document;
+  const std::string want = lower(search);
+  const std::vector<uint64_t> sources = move_sources(C);
+  std::vector<const Layer *> rows;
+  const auto take = [&](const Layer *l) {
+    if (move_target_ok(l, sources) && std::find(rows.begin(), rows.end(), l) == rows.end() &&
+        (want.empty() || lower(l->name).find(want) != std::string::npos))
+    {
+      rows.push_back(l);
+    }
+  };
+  for (const uint64_t id : C.wm->move_to_layer_recent) {
+    take(layer_find(doc, id));
+  }
+  for (const Layer *l : document_layers_flat(doc)) {
+    take(l);
+  }
+  return rows;
+}
+
+/* P: Move to Layer, as Grease Pencil's. New Layer is Separate (Enter with nothing typed); Pick Layer waits for a click on
+ * a drawing, in the viewport or the Layers editor; below, the drawings it can go into, the ones moved into last first,
+ * then in Layers-editor order, found by typing. */
+static void move_to_layer_menu(Context &C, bool hovered)
+{
+  WindowManager &wm = *C.wm;
+  if (hovered && wm.menu_request == "move_to_layer") {
+    ImGui::OpenPopup("##move_to_layer");
+    wm.menu_request.clear();
+  }
+  if (!ui_menu_begin("##move_to_layer")) {
+    return;
+  }
+  ImGui::TextDisabled("Move to Layer");
+  ImGui::Separator();
+  menu_operator(C, "New Layer", "mesh.separate");
+  if (ui_menu_item("Pick Layer")) {
+    wm.move_pick = {};
+    wm.move_pick.active = true;
+  }
+  ImGui::Separator();
+  static std::string search;
+  if (ImGui::IsWindowAppearing()) {
+    search.clear();
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+  const bool entered =
+      ImGui::InputTextWithHint("##move_search", "Search", &search, ImGuiInputTextFlags_EnterReturnsTrue);
+  const std::vector<const Layer *> rows = move_rows(C, search);
+  const auto move = [&](const Layer *l) {
+    operator_call(C, "mesh.move_to_layer", {{"target", std::to_string(l->id)}});
+  };
+  if (rows.empty()) {
+    ImGui::TextDisabled(search.empty() ? "No other drawing" : "No drawing of that name");
+  }
+  const float row_h = ImGui::GetFrameHeightWithSpacing();
+  const bool scroll = rows.size() > 16;
+  if (scroll) {
+    ImGui::BeginChild("##move_rows", ImVec2(ImGui::GetFontSize() * 14.0f, row_h * 16.0f));
+  }
+  for (const Layer *l : rows) {
+    ImGui::PushID(int(l->id));
+    Layer *parent = layer_parent(*C.document, l->id);
+    if (ui_menu_item(l->name.c_str(), parent ? parent->name.c_str() : nullptr)) {
+      move(l);
+    }
+    if (ImGui::IsItemHovered()) {
+      move_target_light(wm, l->id);
+    }
+    ImGui::PopID();
+  }
+  if (scroll) {
+    ImGui::EndChild();
+  }
+  if (entered) {
+    /* Enter: Separate with nothing typed, else the first drawing found. */
+    if (search.empty()) {
+      operator_call(C, "mesh.separate");
+    }
+    else if (!rows.empty()) {
+      move(rows.front());
+    }
+    ImGui::CloseCurrentPopup();
+  }
+  ui_menu_end();
+}
+
+/* Pick Layer: the eyedropper, once the menu has closed, moving the selection into the drawing clicked. */
+static void move_pick_update(Context &C, uint64_t under_mouse)
+{
+  WindowManager &wm = *C.wm;
+  WindowManager::MovePick &pick = wm.move_pick;
+  if (!pick.active) {
+    return;
+  }
+  if (pick.started) {
+    if (!ui_layer_eyedropper_active()) {
+      pick = {};
+      return;
+    }
+    if (under_mouse) {
+      const Layer *l = layer_find(*C.document, under_mouse);
+      pick.hover = under_mouse;
+      pick.hover_frame = ImGui::GetFrameCount();
+      pick.hover_name = l ? l->name : "";
+    }
+    if (pick.hover && pick.hover_frame >= ImGui::GetFrameCount() - 1) {
+      move_target_light(wm, pick.hover);
+    }
+    return;
+  }
+  pick.started = true;
+  WindowManager *w = &wm;
+  ui_layer_eyedropper_start_with(
+      [w](Context &C, uint64_t id) {
+        const Layer *l = layer_find(*C.document, id);
+        const std::vector<uint64_t> sources = move_sources(C);
+        if (!move_target_ok(l, sources)) {
+          report_banner(ReportType::Warning,
+                        l && l->is_reference() ? "A copy (reference layer) can't get new shapes"
+                        : l && l->type == LayerType::Vector ? "The selection is in that drawing already"
+                                                            : "Pick a drawing layer",
+                        "Click the drawing to move the selection into", "Can't move there");
+          return false;
+        }
+        operator_call(C, "mesh.move_to_layer", {{"target", std::to_string(id)}});
+        w->move_pick.hover = 0;
+        return true;
+      },
+      [w]() {
+        const WindowManager::MovePick &p = w->move_pick;
+        const bool over = p.hover && p.hover_frame >= ImGui::GetFrameCount() - 1 && !p.hover_name.empty();
+        return (over ? "Into " + p.hover_name + " (click)" : std::string("Click the drawing to move the selection into")) +
+               "  |  Esc cancels";
+      });
+}
+
+std::vector<uint64_t> move_menu_rows_test(Context &C, const std::string &search)
+{
+  std::vector<uint64_t> ids;
+  for (const Layer *l : move_rows(C, search)) {
+    ids.push_back(l->id);
+  }
+  return ids;
+}
+
+bool move_pick_test(Context &C, uint64_t layer)
+{
+  C.wm->move_pick = {};
+  C.wm->move_pick.active = true;
+  move_pick_update(C, 0);
+  ui_layer_eyedropper_pick(C, layer);
+  const bool picked = !ui_layer_eyedropper_active();
+  ui_layer_eyedropper_cancel();
+  C.wm->move_pick = {};
+  return picked;
 }
 
 /* Ctrl P and Alt P on bones: Blender's parent menus; Ctrl A its Apply menu. */
@@ -18063,6 +18278,9 @@ static void viewport_draw_contents(Area &area, Context &C)
   /* In Front Of... / Behind...: the layer pointed at is the one it would go in front of or behind. */
   ui_draw_order_pick_update(C);
   ui_mask_pick_update(C);
+  move_pick_update(C, mouse_here && wm.move_pick.started && ui_layer_eyedropper_active()
+                          ? layer_under_mouse(doc, view, io.MousePos, wm.local_view)
+                          : 0);
   if (mouse_here && wm.draw_order_pick.mode != 0) {
     /* The group beside the layers being moved; Ctrl: the drawing itself. */
     const uint64_t hit = layer_under_mouse(doc, view, io.MousePos, wm.local_view);
@@ -19366,6 +19584,7 @@ static void viewport_draw_contents(Area &area, Context &C)
     ui_menu_end();
   }
   bone_parent_menus(C, hovered);
+  move_to_layer_menu(C, hovered);
   ui_bone_collection_menus(C, hovered, false);
   if (!ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
     g_right_click_spent = false;
@@ -19446,6 +19665,7 @@ static void viewport_draw_contents(Area &area, Context &C)
     ImGui::Separator();
     menu_operator(C, "Join Fills", "mesh.join_fills");
     menu_operator(C, "Separate Fills", "mesh.separate_fills");
+    menu_operator(C, "Move to Layer...", "mesh.move_to_layer_menu");
     ImGui::Separator();
     /* Mirror, as Blender's: across the document's axes or the layer's own. */
     if (ui_submenu_begin("Mirror")) {

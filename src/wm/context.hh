@@ -463,6 +463,17 @@ struct WindowManager {
     std::vector<uint64_t> layers;
     bool started = false;
   } mask_pick;
+  /* P > Pick Layer (mesh.move_to_layer): waiting for a click on the drawing to move the selection into. */
+  struct MovePick {
+    bool active = false;
+    bool started = false;
+    /* The drawing under the mouse (viewport or Layers editor) and the UI frame it was, lit up while picking. */
+    uint64_t hover = 0;
+    int hover_frame = -10;
+    std::string hover_name;
+  } move_pick;
+  /* The drawings moved into last (P's list puts them first), the latest first. */
+  std::vector<uint64_t> move_to_layer_recent;
   /* A mask chip under the mouse in the Layers editor: its layers are outlined in the viewport. */
   std::vector<uint64_t> mask_hover;
   /* Layers a mask's field in Properties names, under the mouse: highlighted in the Layers editor.

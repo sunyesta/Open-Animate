@@ -2347,6 +2347,11 @@ bool ui_layer_eyedropper_active()
   return g_layer_eyedropper.active;
 }
 
+void ui_layer_eyedropper_cancel()
+{
+  g_layer_eyedropper.active = false;
+}
+
 void ui_layer_eyedropper_pick(Context &C, uint64_t layer_id)
 {
   if (!g_layer_eyedropper.active) {

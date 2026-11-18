@@ -239,6 +239,8 @@ void ui_switch_link_report_open(uint64_t link);
 void ui_switch_link_report_draw(Context &C);
 /* A click on `layer` while it is on (0: on no layer, which keeps it on). */
 void ui_layer_eyedropper_pick(Context &C, uint64_t layer);
+/* Lets go of any layer, shape, bone or point eyedropper, as Esc does. */
+void ui_layer_eyedropper_cancel();
 /* The shape eyedropper: the same, for a shape clicked in the viewport (the brush eyedropper): `pick`
  * gets its layer and its index in the drawing as shown, and returns true when it's done. Clicks in
  * the Layers editor count only with `pick_row`, which gets the layer clicked there. */
