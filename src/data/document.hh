@@ -101,8 +101,11 @@ struct PoseAsset {
   uint64_t collection = 0;
   /* Copy Pose's JSON, as text. */
   std::string pose;
-  /* Its thumbnail's frame (a square: its middle, from the middle of what the pose moves, so it goes where they go, and
-   * its side), as Save Pose or Edit Frame left it; a side of 0 frames it on what it moves. */
+  /* Its thumbnail's frame (a square), as Save Pose or Edit Frame left it; a side of 0 frames it on what it moves. It
+   * holds the points that were inside it then ([layer id, point id]), so it goes where they go: its middle from the
+   * middle of their box and its side, both in sides of that box (grown to hold them all if they spread). With none
+   * inside, its middle from the middle of what the pose moves and its side, in document units. */
+  std::vector<std::pair<uint64_t, uint64_t>> frame_points;
   float2 frame_offset;
   float frame_size = 0.0f;
   bool operator==(const PoseAsset &) const = default;

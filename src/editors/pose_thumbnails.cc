@@ -45,7 +45,7 @@ uint64_t stamp_of(const Document &doc, const PoseAsset &pose, int size)
                  media_generation()),
              mix(mix(mix(uint64_t(std::hash<std::string>{}(pose.pose)), uint64_t(std::bit_cast<uint32_t>(pose.frame_size))),
                      uint64_t(std::bit_cast<uint32_t>(pose.frame_offset.x))),
-                 uint64_t(std::bit_cast<uint32_t>(pose.frame_offset.y))));
+                 mix(uint64_t(std::bit_cast<uint32_t>(pose.frame_offset.y)), uint64_t(pose.frame_points.size()))));
 }
 
 }  // namespace
@@ -85,7 +85,7 @@ unsigned int pose_thumbnail(Document &doc, const PoseAsset &pose, int size)
   /* Framed as Save Pose or Edit Frame left it, else on what it moves, with room around. */
   float2 center;
   float extent = 0.0f;
-  pose_frame_choose(pose, lo, hi, &center, &extent);
+  pose_frame_choose(posed, pose, lo, hi, &center, &extent);
   const float scale = float(size) / extent;
   const Transform2D to_pixels{scale, 0, 0, scale, float(size) * 0.5f - center.x * scale, float(size) * 0.5f - center.y * scale};
   if (!g_renderer) {

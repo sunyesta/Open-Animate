@@ -1365,6 +1365,13 @@ std::string oanim_document_to_json(const Document &doc)
                                 {"pose", pose.is_discarded() ? json::object() : pose}});
                 if (p.frame_size > 0.0f) {
                   list.back()["frame_offset"] = {p.frame_offset.x, p.frame_offset.y, p.frame_size};
+                  if (!p.frame_points.empty()) {
+                    json held = json::array();
+                    for (const auto &[layer, point] : p.frame_points) {
+                      held.push_back({layer, point});
+                    }
+                    list.back()["frame_points"] = std::move(held);
+                  }
                 }
               }
               return list;
@@ -4288,6 +4295,13 @@ bool oanim_document_from_json(const std::string &text, Document &r_doc, std::str
       if (std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(size) && size > 0.0f) {
         p.frame_offset = center;
         p.frame_size = size;
+        if (const auto h = pj.find("frame_points"); h != pj.end() && h->is_array()) {
+          for (const json &e : *h) {
+            if (e.is_array() && e.size() == 2 && e[0].is_number_unsigned() && e[1].is_number_unsigned()) {
+              p.frame_points.emplace_back(e[0].get<uint64_t>(), e[1].get<uint64_t>());
+            }
+          }
+        }
       }
     }
     /* An id missing or taken (a file edited by hand): a new one. */

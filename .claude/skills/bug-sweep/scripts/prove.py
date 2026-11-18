@@ -8,7 +8,15 @@ EXE = ROOT + "/build/bin/RelWithDebInfo/OpenAnimate.exe"
 spec = importlib.util.spec_from_file_location("m", ROOT + "/tools/mutation_checks.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 def build():
-    return subprocess.run([CMAKE, "--build", "--preset", "release", "-j", "2"], cwd=ROOT, capture_output=True, text=True).returncode == 0
+    # The linker sometimes fails on a locked exe or PDB (LNK1168, LNK1318): tried again, not counted as the change failing.
+    for _ in range(4):
+        r = subprocess.run([CMAKE, "--build", "--preset", "release", "-j", "2"], cwd=ROOT, capture_output=True, text=True)
+        if r.returncode == 0:
+            return True
+        if "LNK1168" not in r.stdout and "LNK1318" not in r.stdout:
+            print(next((l for l in r.stdout.splitlines() if " error " in l), "build failed"), flush=True)
+            return False
+    return False
 for idx in map(int, sys.argv[1:]):
     path, find, put, what, test = m.PENDING[idx]
     test = test if test.startswith("tests/") else "tests/test_%s.py" % test

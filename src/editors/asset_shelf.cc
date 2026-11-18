@@ -256,16 +256,19 @@ struct PoseShelf {
   std::string new_name;
   bool tried = false;
   bool frame_auto = true;
-  /* Not auto: the frame's middle from the middle of what the pose moves (it goes where they go), and its side. */
-  float2 frame_offset;
-  float frame_size = 0.0f;
-  /* Where the middle of what the pose moves shows (pose_frame_anchor) and the side that fits it, worked out again when
-   * the file, the frame shown or the pose changes. */
+  /* Moved, resized or fitted since it opened (Done with none of that changes nothing). */
+  bool frame_edited = false;
+  /* Not auto: the frame as the pose keeps it (its frame_points, frame_offset and frame_size), from the points inside it. */
+  PoseAsset frame;
+  /* Where the middle of what the pose moves shows (pose_frame_anchor), the side that fits it, the layers its thumbnail
+   * shows and where every point shows, worked out again when the file, the frame shown or the pose changes. */
   bool anchor_known = false, anchor_found = false;
   uint64_t anchor_changes = 0, anchor_pose = 0;
   int anchor_frame = 0;
   float2 anchor;
   float anchor_fits = 0.0f;
+  std::vector<uint64_t> anchor_layers;
+  PointsShown anchor_shown;
 };
 PoseShelf g_poses;
 
@@ -282,7 +285,8 @@ void pose_dialog_begin(uint64_t framing)
   g_poses.framing = framing;
   g_poses.tried = false;
   g_poses.frame_auto = true;
-  g_poses.frame_size = 0.0f;
+  g_poses.frame_edited = false;
+  g_poses.frame = PoseAsset();
   g_poses.anchor_known = false;
 }
 
@@ -295,8 +299,11 @@ bool pose_frame_anchor_now(Context &C, float2 *r_anchor, float *r_fits)
       g_poses.anchor_pose != g_poses.framing)
   {
     const PoseAsset *pose = g_poses.framing ? pose_asset_find(doc, g_poses.framing) : nullptr;
-    g_poses.anchor_found = pose ? pose_frame_anchor(doc, *pose, &g_poses.anchor, &g_poses.anchor_fits)
-                                : !g_poses.framing && pose_frame_anchor_of_selection(C, &g_poses.anchor, &g_poses.anchor_fits);
+    g_poses.anchor_found =
+        pose ? pose_frame_anchor(doc, *pose, &g_poses.anchor, &g_poses.anchor_fits, &g_poses.anchor_layers)
+             : !g_poses.framing &&
+                   pose_frame_anchor_of_selection(C, &g_poses.anchor, &g_poses.anchor_fits, &g_poses.anchor_layers);
+    g_poses.anchor_shown = g_poses.anchor_found ? pose_points_shown(doc) : PointsShown();
     g_poses.anchor_known = true;
     g_poses.anchor_changes = changes;
     g_poses.anchor_frame = doc.frame_current;
@@ -311,7 +318,7 @@ bool pose_frame_anchor_now(Context &C, float2 *r_anchor, float *r_fits)
 void pose_frame_fit()
 {
   g_poses.frame_auto = true;
-  g_poses.frame_size = 0.0f;
+  g_poses.frame = PoseAsset();
 }
 
 /* The Save Pose dialog, its collection `collection` (0: the selection's first, else a new one). */
@@ -340,8 +347,7 @@ void pose_frame_edit_open(Context &C, uint64_t id)
   pose_dialog_begin(id);
   if (pose->frame_size > 0.0f) {
     g_poses.frame_auto = false;
-    g_poses.frame_offset = pose->frame_offset;
-    g_poses.frame_size = pose->frame_size;
+    g_poses.frame = *pose;
   }
   else {
     pose_frame_fit();
@@ -458,6 +464,7 @@ void pose_save_dialog(Context &C)
   ImGui::BeginDisabled(g_poses.frame_auto);
   if (ImGui::Button("Fit to Pose", ImVec2(field_w, 0.0f))) {
     pose_frame_fit();
+    g_poses.frame_edited = true;
   }
   ImGui::EndDisabled();
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -492,9 +499,11 @@ void pose_save_dialog(Context &C)
       frame = {{"frame_x", frame_number(center.x)}, {"frame_y", frame_number(center.y)}, {"frame_size", frame_number(size)}};
     }
     if (framing) {
-      OpArgs args = frame.empty() ? OpArgs{{"frame_size", "0"}} : frame;
-      args["pose"] = std::to_string(framing->id);
-      operator_call(C, "poselib.frame_set", args);
+      if (g_poses.frame_edited) {
+        OpArgs args = frame.empty() ? OpArgs{{"frame_size", "0"}} : frame;
+        args["pose"] = std::to_string(framing->id);
+        operator_call(C, "poselib.frame_set", args);
+      }
       close = true;
     }
     else if (selected && !trimmed(g_poses.name).empty() &&
@@ -1212,8 +1221,10 @@ bool pose_frame_shown(Context &C, float2 *r_center, float *r_size)
   if (!g_poses.dialog || !pose_frame_anchor_now(C, &anchor, &fits)) {
     return false;
   }
-  *r_center = g_poses.frame_auto ? anchor : anchor + g_poses.frame_offset;
-  *r_size = g_poses.frame_auto ? fits : g_poses.frame_size;
+  if (g_poses.frame_auto || !pose_frame_place(g_poses.frame, g_poses.anchor_shown, anchor, r_center, r_size)) {
+    *r_center = anchor;
+    *r_size = fits;
+  }
   return *r_size > 0.0f;
 }
 
@@ -1224,9 +1235,9 @@ void pose_frame_shown_set(Context &C, float2 center, float size)
   if (g_poses.dialog && std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(size) && size > 0.0f &&
       pose_frame_anchor_now(C, &anchor, &fits))
   {
-    g_poses.frame_offset = center - anchor;
-    g_poses.frame_size = size;
+    pose_frame_capture(*C.document, g_poses.anchor_shown, g_poses.anchor_layers, anchor, center, size, g_poses.frame);
     g_poses.frame_auto = false;
+    g_poses.frame_edited = true;
   }
 }
 

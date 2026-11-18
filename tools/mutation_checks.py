@@ -147,20 +147,24 @@ PENDING = [
     ('src/ops/rig_ops.cc', '                   w->weight = value;', '                   w->weight = value * 0.0f;',
      'point weight set', 'tests/test_points_panel.py'),
     # A pose's thumbnail is framed on the frame it was given.
-    ('src/ops/pose_library.cc', '  if (pose.frame_size > 0.0f) {\n    *r_center = (lo + hi) * 0.5f + pose.frame_offset;',
-     '  if (pose.frame_size > 0.0f && false) {\n    *r_center = (lo + hi) * 0.5f + pose.frame_offset;', 'thumbnail uses its frame',
-     'tests/test_pose_frame.py'),
-
-    ('src/ops/pose_library.cc', '    *r_center = (lo + hi) * 0.5f + pose.frame_offset;',
-     '    *r_center = pose.frame_offset;', 'pose frame kept from what it moves, so it follows the character',
-     'tests/test_pose_frame.py'),
+    ('src/ops/pose_library.cc', '  if (!pose_frame_place(pose, pose_points_shown(posed), (lo + hi) * 0.5f, r_center, r_size)) {',
+     '  if (true) {', 'thumbnail uses its frame', 'tests/test_pose_frame.py'),
+    # The frame holds the points that were inside it, and scales with them.
+    ('src/ops/pose_library.cc', '      r_pose.frame_points.emplace_back(layer, ids->second[i]);',
+     '      (void)ids;', 'pose frame keeps the points inside it', 'tests/test_pose_frame.py'),
+    ('src/ops/pose_library.cc', '  float size = pose.frame_size * side;', '  float size = pose.frame_size;',
+     'pose frame scales with the points inside', 'tests/test_pose_frame.py'),
+    ('src/ops/pose_library.cc', '  size = std::max(size, reach * 2.0f);', '  size = std::max(size, reach * 0.0f);',
+     'pose frame grows to hold points that spread', 'tests/test_pose_frame.py'),
 
     ('src/ops/pose_library.cc', '  if (any) {\n    *r_anchor = (a + b) * 0.5f;',
      '  if (any && false) {\n    *r_anchor = (a + b) * 0.5f;', 'frame shown follows the points where they show now',
      'tests/test_pose_frame.py'),
     # Save Pose keeps the frame given.
-    ('src/ops/pose_library.cc', '        frame_args_offset(C, asset, &asset.frame_offset, &asset.frame_size);',
-     '        (void)frame_args;', 'Save Pose keeps its frame', 'tests/test_pose_frame.py'),
+    ('src/ops/pose_library.cc', '        frame_args_capture(C, asset);',
+     '        (void)frame_args_capture;', 'Save Pose keeps its frame', 'tests/test_pose_frame.py'),
+    ('src/io/oanim_file.cc', '              p.frame_points.emplace_back(e[0].get<uint64_t>(), e[1].get<uint64_t>());',
+     '              (void)e;', 'pose frame points kept in the file', 'tests/test_pose_frame.py'),
     # The frame is read back from the file.
     ('src/io/oanim_file.cc', '        p.frame_size = size;', '        p.frame_size = size * 0.0f;', 'pose frame kept in the file',
      'tests/test_pose_frame.py'),

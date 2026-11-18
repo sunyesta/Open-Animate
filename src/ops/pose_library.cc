@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <map>
 #include <set>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
@@ -448,13 +449,115 @@ void pose_frame_round(float2 lo, float2 hi, float2 *r_center, float *r_size)
   *r_size = std::max(std::max(hi.x - lo.x, hi.y - lo.y) * 1.4f, 0.05f);
 }
 
-void pose_frame_choose(const PoseAsset &pose, float2 lo, float2 hi, float2 *r_center, float *r_size)
+PointsShown pose_points_shown(const Document &doc)
 {
-  if (pose.frame_size > 0.0f) {
-    *r_center = (lo + hi) * 0.5f + pose.frame_offset;
-    *r_size = pose.frame_size;
+  PointsShown out;
+  out.at = points_shown(doc);
+  for (const auto &[layer, at] : out.at) {
+    const Layer *l = layer_find(doc, layer);
+    std::vector<uint64_t> &ids = out.ids[layer];
+    for (size_t i = 0; i < at.size(); i++) {
+      ids.push_back(l && i < l->drawing.points.size() ? l->drawing.points[i].id : 0);
+    }
   }
-  else {
+  return out;
+}
+
+bool pose_frame_place(const PoseAsset &pose, const PointsShown &shown, float2 anchor, float2 *r_center, float *r_size)
+{
+  if (!(pose.frame_size > 0.0f)) {
+    return false;
+  }
+  if (pose.frame_points.empty()) {
+    *r_center = anchor + pose.frame_offset;
+    *r_size = pose.frame_size;
+    return true;
+  }
+  /* Its points' box where they show. */
+  std::map<uint64_t, std::unordered_map<uint64_t, size_t>> index;
+  bool any = false;
+  float2 lo, hi;
+  for (const auto &[layer, point] : pose.frame_points) {
+    const auto at = shown.at.find(layer);
+    const auto ids = shown.ids.find(layer);
+    if (at == shown.at.end() || ids == shown.ids.end()) {
+      continue;
+    }
+    auto [found, made] = index.try_emplace(layer);
+    if (made) {
+      for (size_t i = 0; i < ids->second.size(); i++) {
+        found->second.emplace(ids->second[i], i);
+      }
+    }
+    const auto i = found->second.find(point);
+    if (i == found->second.end() || i->second >= at->second.size()) {
+      continue;
+    }
+    const float2 q = at->second[i->second];
+    lo = any ? float2(std::min(lo.x, q.x), std::min(lo.y, q.y)) : q;
+    hi = any ? float2(std::max(hi.x, q.x), std::max(hi.y, q.y)) : q;
+    any = true;
+  }
+  if (!any) {
+    return false;
+  }
+  const float side = std::max(std::max(hi.x - lo.x, hi.y - lo.y), 1e-4f);
+  const float2 center = (lo + hi) * 0.5f + pose.frame_offset * side;
+  float size = pose.frame_size * side;
+  /* Still holding every one of them where they have spread (a mouth opened wider). */
+  const float reach = std::max(std::max(center.x - lo.x, hi.x - center.x), std::max(center.y - lo.y, hi.y - center.y));
+  size = std::max(size, reach * 2.0f);
+  if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(size) || size <= 0.0f) {
+    return false;
+  }
+  *r_center = center;
+  *r_size = size;
+  return true;
+}
+
+void pose_frame_capture(const Document &doc, const PointsShown &shown, const std::vector<uint64_t> &layers, float2 anchor,
+                        float2 center, float size, PoseAsset &r_pose)
+{
+  r_pose.frame_points.clear();
+  const float half = size * 0.5f;
+  bool any = false;
+  float2 lo, hi;
+  for (const auto &[layer, at] : shown.at) {
+    /* Part of what its thumbnail shows: a drawing it shows, or one inside a bone layer it shows. */
+    const Layer *owner = layer_armature(doc, layer);
+    if (std::find(layers.begin(), layers.end(), layer) == layers.end() &&
+        !(owner && std::find(layers.begin(), layers.end(), owner->id) != layers.end()))
+    {
+      continue;
+    }
+    const auto ids = shown.ids.find(layer);
+    for (size_t i = 0; i < at.size(); i++) {
+      const float2 q = at[i];
+      if (std::fabs(q.x - center.x) > half || std::fabs(q.y - center.y) > half || ids == shown.ids.end() ||
+          i >= ids->second.size())
+      {
+        continue;
+      }
+      r_pose.frame_points.emplace_back(layer, ids->second[i]);
+      lo = any ? float2(std::min(lo.x, q.x), std::min(lo.y, q.y)) : q;
+      hi = any ? float2(std::max(hi.x, q.x), std::max(hi.y, q.y)) : q;
+      any = true;
+    }
+  }
+  if (!any) {
+    r_pose.frame_offset = center - anchor;
+    r_pose.frame_size = size;
+    return;
+  }
+  const float side = std::max(std::max(hi.x - lo.x, hi.y - lo.y), 1e-4f);
+  r_pose.frame_offset = (center - (lo + hi) * 0.5f) / side;
+  r_pose.frame_size = size / side;
+}
+
+void pose_frame_choose(const Document &posed, const PoseAsset &pose, float2 lo, float2 hi, float2 *r_center,
+                       float *r_size)
+{
+  if (!pose_frame_place(pose, pose_points_shown(posed), (lo + hi) * 0.5f, r_center, r_size)) {
     pose_frame_round(lo, hi, r_center, r_size);
   }
 }
@@ -467,15 +570,17 @@ bool pose_thumbnail_frame(const Document &doc, const PoseAsset &pose, float2 *r_
   if (!pose_posed_copy(doc, pose, posed, &lo, &hi, &layers)) {
     return false;
   }
-  pose_frame_choose(pose, lo, hi, r_center, r_size);
+  pose_frame_choose(posed, pose, lo, hi, r_center, r_size);
   return true;
 }
 
-bool pose_frame_anchor(const Document &doc, const PoseAsset &pose, float2 *r_anchor, float *r_auto_size)
+bool pose_frame_anchor(const Document &doc, const PoseAsset &pose, float2 *r_anchor, float *r_auto_size,
+                       std::vector<uint64_t> *r_layers)
 {
   Document posed;
   float2 lo, hi;
-  std::vector<uint64_t> layers;
+  std::vector<uint64_t> own_layers;
+  std::vector<uint64_t> &layers = r_layers ? *r_layers : own_layers;
   std::vector<std::pair<uint64_t, size_t>> framed;
   if (!pose_posed_copy(doc, pose, posed, &lo, &hi, &layers, &framed)) {
     return false;
@@ -502,12 +607,21 @@ bool pose_frame_anchor(const Document &doc, const PoseAsset &pose, float2 *r_anc
   return true;
 }
 
-bool pose_frame_anchor_of_selection(Context &C, float2 *r_anchor, float *r_auto_size)
+PoseAsset pose_of_selection(Context &C)
 {
   int bones = 0, points = 0;
   PoseAsset pose;
-  pose.pose = pose_copy_json(C, &bones, &points).dump();
-  return bones + points > 0 && pose_frame_anchor(*C.document, pose, r_anchor, r_auto_size);
+  const json j = pose_copy_json(C, &bones, &points);
+  if (bones + points > 0) {
+    pose.pose = j.dump();
+  }
+  return pose;
+}
+
+bool pose_frame_anchor_of_selection(Context &C, float2 *r_anchor, float *r_auto_size, std::vector<uint64_t> *r_layers)
+{
+  const PoseAsset pose = pose_of_selection(C);
+  return !pose.pose.empty() && pose_frame_anchor(*C.document, pose, r_anchor, r_auto_size, r_layers);
 }
 
 /* A thumbnail's frame given to an operator: frame_x, frame_y (its middle, document space) and frame_size (its side);
@@ -524,16 +638,16 @@ static bool frame_args(Context &C, float2 *r_center, float *r_size)
   return true;
 }
 
-/* The same kept from the middle of what `pose` moves, where it shows now (pose_frame_anchor). */
-static bool frame_args_offset(Context &C, const PoseAsset &pose, float2 *r_offset, float *r_size)
+/* The same given to `r_pose`: kept with the points inside it as they show now (pose_frame_capture). */
+static bool frame_args_capture(Context &C, PoseAsset &r_pose)
 {
   float2 center, anchor;
   float size = 0.0f, fits = 0.0f;
-  if (!frame_args(C, &center, &size) || !pose_frame_anchor(*C.document, pose, &anchor, &fits)) {
+  std::vector<uint64_t> layers;
+  if (!frame_args(C, &center, &size) || !pose_frame_anchor(*C.document, r_pose, &anchor, &fits, &layers)) {
     return false;
   }
-  *r_offset = center - anchor;
-  *r_size = size;
+  pose_frame_capture(*C.document, pose_points_shown(*C.document), layers, anchor, center, size, r_pose);
   return true;
 }
 
@@ -595,7 +709,7 @@ void pose_library_operators_register()
         asset.name = unique_pose_name(doc, collection, name, 0);
         asset.collection = collection;
         asset.pose = pose.dump();
-        frame_args_offset(C, asset, &asset.frame_offset, &asset.frame_size);
+        frame_args_capture(C, asset);
         doc.poses.push_back(asset);
         report(ReportType::Info, "Saved the pose " + asset.name + " (" + what_text(bones, points) + ")");
         return OpStatus::Finished;
@@ -668,18 +782,26 @@ void pose_library_operators_register()
                      if (!asset) {
                        return OpStatus::Cancelled;
                      }
-                     float2 offset;
-                     float size = 0.0f;
-                     if (!frame_args_offset(C, *asset, &offset, &size) && op_arg_float(C, "frame_size", -1.0f) != 0.0f) {
-                       report(ReportType::Warning, "frame_x, frame_y and frame_size (more than 0) give the frame");
+                     PoseAsset framed = *asset;
+                     if (!frame_args_capture(C, framed)) {
+                       if (op_arg_float(C, "frame_size", -1.0f) != 0.0f) {
+                         report(ReportType::Warning, "frame_x, frame_y and frame_size (more than 0) give the frame");
+                         return OpStatus::Cancelled;
+                       }
+                       framed.frame_points.clear();
+                       framed.frame_offset = float2();
+                       framed.frame_size = 0.0f;
+                     }
+                     /* Within rounding of where it was: no change. */
+                     if (framed.frame_points == asset->frame_points &&
+                         distance(framed.frame_offset, asset->frame_offset) <= 1e-5f &&
+                         std::fabs(framed.frame_size - asset->frame_size) <= 1e-5f * std::max(1.0f, asset->frame_size))
+                     {
                        return OpStatus::Cancelled;
                      }
-                     /* Within rounding of where it was (the dialog's Done with the frame left alone): no change. */
-                     if (distance(offset, asset->frame_offset) <= 1e-6f * std::max(1.0f, size) && size == asset->frame_size) {
-                       return OpStatus::Cancelled;
-                     }
-                     asset->frame_offset = offset;
-                     asset->frame_size = size;
+                     asset->frame_points = std::move(framed.frame_points);
+                     asset->frame_offset = framed.frame_offset;
+                     asset->frame_size = framed.frame_size;
                      return OpStatus::Finished;
                    });
 

@@ -1,13 +1,15 @@
 """A pose's thumbnail frame: Save Pose shows a square in the viewport, at first round what the pose moves; dragging inside
 moves it, a corner resizes it (square, the corner across staying); saved with the pose (poselib.pose_new's frame_x,
 frame_y, frame_size) its thumbnail is framed on it, kept in the file; Fit to Pose leaves it round what it moves; Edit
-Frame (poselib.frame_set) frames a saved pose again, frame_size=0 back round what it moves. The frame is kept from the
-middle of what the pose moves, so with the character moved (or on another frame) it goes with it, in the thumbnail and
-in the viewport (it was kept in document space and stayed put, the thumbnail showing only the skin beside the mouth).
+Frame (poselib.frame_set) frames a saved pose again, frame_size=0 back round what it moves. The frame holds the points
+that were inside it: with the character moved, scaled or on another frame it goes and scales with them, in the
+thumbnail and in the viewport, grown to hold them if they spread (it was kept in document space and stayed put, the
+thumbnail showing only the skin beside the mouth).
 
 Run with:  OpenAnimate --background --python tests/test_pose_frame.py
 """
 
+import math
 import os
 import tempfile
 
@@ -161,40 +163,90 @@ assert close(wm.pose_thumbnail_frame(framed), auto), "frame_size=0: round what i
 assert ops.poselib.frame_set(pose=str(framed), frame_size="0") == {'CANCELLED'}, "nothing to change"
 assert ops.poselib.frame_set(pose=str(framed), frame_x="1", frame_y="1", frame_size="-2") == {'CANCELLED'}
 
-# --- The frame goes where what the pose moves goes ------------------------------------------------------------------------
-def middle():
-    """The middle of the box round the hand's points as they show (all of them Arm_L moves)."""
-    pts = art().shown()[0]
+# --- The frame holds what was inside it: it goes and scales with those points, grown to hold them if they spread ------
+def inside(frame, pts, eps=1e-4):
+    x, y, s = frame
+    return all(abs(p[0] - x) <= s / 2 + eps and abs(p[1] - y) <= s / 2 + eps for p in pts)
+
+
+def middle(pts):
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
 
 
 scene()
 select_bones("Arm_L")
-wm.pose_frame_open()
-x, y, s = wm.pose_frame()
-assert close((x, y), middle()), ("it starts round the hand", (x, y), middle())
-assert wm.pose_frame_drag((x, y), (x + 0.3, y + 0.2))
-x, y, s = wm.pose_frame()
-assert ops.poselib.pose_new(name="Kept", new_collection="Arms", frame_x=str(x), frame_y=str(y),
-                            frame_size=str(s)) == {'FINISHED'}
-wm.pose_frame_open(-1)
+assert ops.poselib.pose_new(name="Whole", new_collection="Arms") == {'FINISHED'}
+whole = pose("Whole")["id"]
+p0, p1, p2 = art().shown()[0]
+mx, my = middle([p0, p1])
+s = max(abs(p0[0] - p1[0]), abs(p0[1] - p1[1])) * 1.5
+assert inside((mx, my, s), [p0, p1]) and not inside((mx, my, s), [p2]), "the square holds two of the hand's three points"
+assert ops.poselib.pose_new(name="Kept", collection="Arms", frame_x=repr(mx), frame_y=repr(my),
+                            frame_size=repr(s)) == {'FINISHED'}
 kept = pose("Kept")["id"]
-assert close(wm.pose_thumbnail_frame(kept), (x, y, s)), wm.pose_thumbnail_frame(kept)
+assert close(wm.pose_thumbnail_frame(kept), (mx, my, s)), wm.pose_thumbnail_frame(kept)
+assert ops.poselib.frame_set(pose=str(kept), frame_x=repr(mx), frame_y=repr(my), frame_size=repr(s)) == {'CANCELLED'}, \
+    "the same square again: nothing to change"
+
 # The whole character moved: the thumbnail's frame and the one shown go with it.
 rig().location_x = rig().location_x + 2.0
-assert close(wm.pose_thumbnail_frame(kept), (x + 2.0, y, s)), ("the thumbnail's frame went too", wm.pose_thumbnail_frame(kept))
+assert close(wm.pose_thumbnail_frame(kept), (mx + 2.0, my, s)), ("the thumbnail's frame went too", wm.pose_thumbnail_frame(kept))
 wm.pose_frame_open(kept)
-assert close(wm.pose_frame(), (x + 2.0, y, s)), ("so did the frame shown", wm.pose_frame())
-# Another frame with Edit Frame open: the frame shown stays over the hand where it shows there (its arm lowered).
-was = middle()
-at(20)
-now = middle()
-assert not close(was, now, 0.05), (was, now)
-assert close(wm.pose_frame(), (x + 2.0 + now[0] - was[0], y + now[1] - was[1], s)), (wm.pose_frame(), now, was)
-# Done with it left alone changes nothing.
-fx, fy, fs = wm.pose_frame()
-assert ops.poselib.frame_set(pose=str(kept), frame_x=repr(fx), frame_y=repr(fy), frame_size=repr(fs)) == {'CANCELLED'}
+assert close(wm.pose_frame(), (mx + 2.0, my, s)), ("so did the frame shown", wm.pose_frame())
 wm.pose_frame_open(-1)
+
+# Twice as big: so is the frame, still round the same two points.
+rig().scale_x = 2.0
+rig().scale_y = 2.0
+held = art().shown()[0][:2]
+f = wm.pose_thumbnail_frame(kept)
+assert close(f, middle(held) + (2.0 * s,)), ("scaled with them", f, middle(held), 2.0 * s)
+
+# Another frame with Edit Frame open: it holds them where they show there (the arm lowered).
+at(20)
+held = art().shown()[0][:2]
+wm.pose_frame_open(kept)
+assert inside(wm.pose_frame(), held), (wm.pose_frame(), held)
+wm.pose_frame_open(-1)
+# A pose framed on what it moves: the frame shown is round the hand where it shows there, not where the pose puts it.
+wm.pose_frame_open(whole)
+assert close(wm.pose_frame()[:2], middle(art().shown()[0])), (wm.pose_frame(), middle(art().shown()[0]))
+wm.pose_frame_open(-1)
+
+# --- Points spreading the other way (a mouth opened wide) past a frame off their middle: it grows to hold them -------
+scene()
+select_bones("Arm_L")
+p0, p1, p2 = art().shown()[0]
+lo = (min(p0[0], p1[0]), min(p0[1], p1[1]))
+hi = (max(p0[0], p1[0]), max(p0[1], p1[1]))
+w, h = hi[0] - lo[0], hi[1] - lo[1]
+side = max(w, h)
+short = 1 if h < w else 0
+# The frame shifted along the box's short way, just big enough for both.
+c = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2]
+c[short] += 0.3 * side
+half = max(abs(q[k] - c[k]) for q in (p0, p1) for k in (0, 1)) * 1.01
+assert not inside((c[0], c[1], 2 * half), [p2]), "the square holds two of the hand's three points"
+assert ops.poselib.pose_new(name="Spread", new_collection="Arms", frame_x=repr(c[0]), frame_y=repr(c[1]),
+                            frame_size=repr(2 * half)) == {'FINISHED'}
+spread = pose("Spread")["id"]
+off = ((c[0] - (lo[0] + hi[0]) / 2) / side, (c[1] - (lo[1] + hi[1]) / 2) / side)
+ratio = 2 * half / side
+# Point 1 pulled the other way along the short side, in the drawing's own space (Arm_L turns it by 0.7 here).
+d = [0.0, 0.0]
+d[short] = -2.0 * side if p1[short] < p0[short] else 2.0 * side
+a = -0.7
+local = art().points[1]
+art().set_point(1, (local[0] + d[0] * math.cos(a) - d[1] * math.sin(a), local[1] + d[0] * math.sin(a) + d[1] * math.cos(a)))
+held = art().shown()[0][:2]
+lo2 = (min(q[0] for q in held), min(q[1] for q in held))
+hi2 = (max(q[0] for q in held), max(q[1] for q in held))
+side2 = max(hi2[0] - lo2[0], hi2[1] - lo2[1])
+kept_only = ((lo2[0] + hi2[0]) / 2 + off[0] * side2, (lo2[1] + hi2[1]) / 2 + off[1] * side2, ratio * side2)
+assert not inside(kept_only, held), ("the same frame scaled wouldn't hold them", kept_only, held)
+f = wm.pose_thumbnail_frame(spread)
+assert inside(f, held), ("grown to hold them", f, held)
+assert f[2] > kept_only[2], (f, kept_only)
 
 print("test_pose_frame: OK")
