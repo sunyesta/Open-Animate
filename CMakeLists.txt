@@ -379,6 +379,8 @@ add_test(NAME action_bone_actions
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_action_bone_actions.py)
 add_test(NAME bone_constraints
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_constraints.py)
+add_test(NAME ik_bend
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_ik_bend.py)
 add_test(NAME dynamics_squash
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_dynamics_squash.py)
 add_test(NAME apply_rest_pose

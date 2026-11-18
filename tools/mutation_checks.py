@@ -90,6 +90,15 @@ PENDING = [
      'the bone group list puts the ones moved into last first', 'tests/test_move_to_group.py'),
     ('src/editors/viewport.cc', '                          {{"target", std::to_string(group->id)}, {"parent", std::to_string(p.hover_bone)}});\n', '                          {{"target", std::to_string(group->id)}});\n',
      'Pick Bone hangs them from the bone clicked', 'tests/test_move_to_group.py'),
+    # IK: two-bone chains solved outright, Arc IK bending as the chain rests.
+    ('src/data/bones.cc', '  if (!arc && chain.size() == 2) {\n', '  if (false && !arc && chain.size() == 2) {\n',
+     'a two-bone IK chain is solved outright, reaching on a deep bend', 'tests/test_ik_bend.py'),
+    ('src/data/bones.cc', '(rest_bend > 0.0f ? at_base : -at_base)', 'at_base',
+     'a two-bone IK chain bends the way it rests, mirrored legs too', 'tests/test_ik_bend.py'),
+    ('src/data/bones.cc', '    if (less_keeps != more_keeps) {\n', '    if (false && less_keeps != more_keeps) {\n',
+     'Arc IK picks the even bend curving as the chain rests', 'tests/test_ik_bend.py'),
+    ('src/data/bones.cc', '  const auto [less, less_miss] = search(-3.1f, 0.0f);\n  const auto [more, more_miss] = search(0.0f, 3.1f);\n', '  const auto [less, less_miss] = search(-1.5f, 0.0f);\n  const auto [more, more_miss] = search(0.0f, 1.5f);\n',
+     'Arc IK bends a deep knee past a quarter turn either way', 'tests/test_ik_bend.py'),
 ]
 
 def build(root):

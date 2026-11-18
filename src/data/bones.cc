@@ -835,6 +835,39 @@ static void ik_solve(const std::vector<int> &chain, float2 goal, bool arc, const
   if (chain.empty()) {
     return;
   }
+  /* How the chain bends now, from its base to its tip: the turns from each bone to the next, added up (positive to
+   * the left). A solve keeps this side, as a knee keeps bending the way it rests. */
+  const auto bent_now = [&] {
+    float sum = 0.0f;
+    for (size_t k = chain.size(); k-- > 0;) {
+      const float2 from = head(chain[k]);
+      const float2 to = k > 0 ? head(chain[k - 1]) : tip();
+      const float2 next = k > 1 ? head(chain[k - 2]) : tip();
+      if (k > 0 && distance(to, from) > 1e-7f && distance(next, to) > 1e-7f) {
+        sum += wrap_pi(direction_angle(next - to) - direction_angle(to - from));
+      }
+    }
+    return sum;
+  };
+  const float rest_bend = bent_now();
+  if (!arc && chain.size() == 2) {
+    /* Two bones: the triangle their lengths and the goal make, solved outright, the joint on the side it bends
+     * to now (stepping toward the goal one bone at a time ran out of steps on a deep bend, or swung the joint
+     * through to the other side). Straight, it has no side: the steps below find one. */
+    const int base = chain[1], end = chain[0];
+    const float2 h = head(base), j = head(end);
+    const float l1 = distance(j, h), l2 = distance(tip(), j);
+    const float d = std::clamp(distance(goal, h), std::abs(l1 - l2), l1 + l2);
+    if (l1 > 1e-7f && l2 > 1e-7f && d > 1e-7f && std::abs(rest_bend) > 1e-6f) {
+      const float at_base = std::acos(std::clamp((l1 * l1 + d * d - l2 * l2) / (2.0f * l1 * d), -1.0f, 1.0f));
+      const float want = direction_angle(goal - h) - (rest_bend > 0.0f ? at_base : -at_base);
+      turn(base, wrap_pi(want - direction_angle(j - h)));
+      pose();
+      const float2 j2 = head(end);
+      turn(end, wrap_pi(direction_angle(goal - j2) - direction_angle(tip() - j2)));
+      pose();
+    }
+  }
   if (!arc || chain.size() < 2) {
     for (int iteration = 0; iteration < 24 && distance(tip(), goal) > 1e-5f; iteration++) {
       for (const int j : chain) {
@@ -866,20 +899,41 @@ static void ik_solve(const std::vector<int> &chain, float2 goal, bool arc, const
     const float2 h = head(base);
     return std::abs(distance(tip(), h) - distance(goal, h));
   };
-  float best = 0.0f, best_miss = miss(0.0f);
-  for (float k = -1.5f; k <= 1.5f; k += 0.02f) {
-    if (const float m = miss(k); m < best_miss) {
-      best_miss = m;
-      best = k;
+  /* The best bend each way (bending less than now, and more, up to half a turn: a deep knee bends further than a
+   * quarter), each found coarsely and then finely. */
+  const auto search = [&](float lo, float hi) {
+    float best = 0.0f, best_miss = miss(0.0f);
+    for (float k = lo; k <= hi + 1e-6f; k += 0.02f) {
+      if (const float m = miss(k); m < best_miss) {
+        best_miss = m;
+        best = k;
+      }
     }
-  }
-  for (float k = best - 0.02f; k <= best + 0.02f; k += 0.0005f) {
-    if (const float m = miss(k); m < best_miss) {
-      best_miss = m;
-      best = k;
+    for (float k = best - 0.02f; k <= best + 0.02f; k += 0.0005f) {
+      if (const float m = miss(k); m < best_miss) {
+        best_miss = m;
+        best = k;
+      }
     }
-  }
+    return std::pair(best, best_miss);
+  };
+  const auto [less, less_miss] = search(-3.1f, 0.0f);
+  const auto [more, more_miss] = search(0.0f, 3.1f);
+  float best = less_miss <= more_miss ? less : more;
   /* Of the two even bends that reach as far, the one curving the same way as the rest. */
+  float length = 0.0f;
+  for (size_t k = 0; k < chain.size(); k++) {
+    length += distance(k > 0 ? head(chain[k - 1]) : tip(), head(chain[k]));
+  }
+  if (std::abs(rest_bend) > 1e-6f && std::abs(less_miss - more_miss) <= 1e-3f * std::max(length, 1e-6f)) {
+    bend(less);
+    const bool less_keeps = (bent_now() > 0.0f) == (rest_bend > 0.0f);
+    bend(more);
+    const bool more_keeps = (bent_now() > 0.0f) == (rest_bend > 0.0f);
+    if (less_keeps != more_keeps) {
+      best = less_keeps ? less : more;
+    }
+  }
   bend(best);
   const float2 h = head(base);
   turn(base, wrap_pi(direction_angle(goal - h) - direction_angle(tip() - h)));
