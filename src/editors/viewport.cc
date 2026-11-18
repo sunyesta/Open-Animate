@@ -17629,11 +17629,11 @@ static struct {
 } g_pose_frame;
 
 /* A press at `at` (document space) on the frame: a corner within `reach` resizes it, inside moves it. False off it. */
-static bool pose_frame_press(float2 at, float reach)
+static bool pose_frame_press(Context &C, float2 at, float reach)
 {
   float2 center;
   float size = 0.0f;
-  if (!pose_frame_shown(&center, &size)) {
+  if (!pose_frame_shown(C, &center, &size)) {
     return false;
   }
   const float half = size * 0.5f;
@@ -17652,30 +17652,30 @@ static bool pose_frame_press(float2 at, float reach)
 
 /* The frame as the drag has it with the mouse at `at`: moved by as much, or the corner dragged there (still square,
  * the larger way). */
-static void pose_frame_drag_to(float2 at)
+static void pose_frame_drag_to(Context &C, float2 at)
 {
   if (g_pose_frame.mode == 1) {
     float2 center;
     float size = 0.0f;
-    if (pose_frame_shown(&center, &size)) {
-      pose_frame_shown_set(g_pose_frame.start_center + (at - g_pose_frame.start_mouse), size);
+    if (pose_frame_shown(C, &center, &size)) {
+      pose_frame_shown_set(C, g_pose_frame.start_center + (at - g_pose_frame.start_mouse), size);
     }
   }
   else if (g_pose_frame.mode == 2) {
     const float2 d = at - g_pose_frame.anchor;
     const float side = std::max(std::max(std::fabs(d.x), std::fabs(d.y)), 1e-3f);
     const float2 corner = g_pose_frame.anchor + float2(d.x < 0.0f ? -side : side, d.y < 0.0f ? -side : side);
-    pose_frame_shown_set((g_pose_frame.anchor + corner) * 0.5f, side);
+    pose_frame_shown_set(C, (g_pose_frame.anchor + corner) * 0.5f, side);
   }
 }
 
 /* While Save Pose or Edit Frame is open: the frame drawn (outside it dimmed), and presses on it taken to move it or, on
  * a corner, resize it. True while it has the mouse. */
-static bool pose_frame_input(const ViewMapping &view, bool hovered, ImDrawList *dl)
+static bool pose_frame_input(Context &C, const ViewMapping &view, bool hovered, ImDrawList *dl)
 {
   float2 center;
   float size = 0.0f;
-  if (!pose_frame_shown(&center, &size)) {
+  if (!pose_frame_shown(C, &center, &size)) {
     g_pose_frame.mode = 0;
     return false;
   }
@@ -17684,7 +17684,7 @@ static bool pose_frame_input(const ViewMapping &view, bool hovered, ImDrawList *
   bool taken = false;
   if (g_pose_frame.mode != 0) {
     if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-      pose_frame_drag_to(view.to_document(io.MousePos));
+      pose_frame_drag_to(C, view.to_document(io.MousePos));
     }
     else {
       g_pose_frame.mode = 0;
@@ -17692,11 +17692,11 @@ static bool pose_frame_input(const ViewMapping &view, bool hovered, ImDrawList *
     taken = true;
   }
   else if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-           pose_frame_press(view.to_document(io.MousePos), reach))
+           pose_frame_press(C, view.to_document(io.MousePos), reach))
   {
     taken = true;
   }
-  pose_frame_shown(&center, &size);
+  pose_frame_shown(C, &center, &size);
   const ImVec2 a = view.to_screen(center - float2(size, size) * 0.5f), b = view.to_screen(center + float2(size, size) * 0.5f);
   const ImVec2 lo(std::min(a.x, b.x), std::min(a.y, b.y)), hi(std::max(a.x, b.x), std::max(a.y, b.y));
   const ImVec2 clip_lo = dl->GetClipRectMin(), clip_hi = dl->GetClipRectMax();
@@ -17729,12 +17729,12 @@ static bool pose_frame_input(const ViewMapping &view, bool hovered, ImDrawList *
   return taken;
 }
 
-bool pose_frame_drag_test(float2 from, float2 to, float reach)
+bool pose_frame_drag_test(Context &C, float2 from, float2 to, float reach)
 {
-  if (!pose_frame_press(from, reach)) {
+  if (!pose_frame_press(C, from, reach)) {
     return false;
   }
-  pose_frame_drag_to(to);
+  pose_frame_drag_to(C, to);
   g_pose_frame.mode = 0;
   return true;
 }
@@ -18805,7 +18805,7 @@ static void viewport_draw_contents(Area &area, Context &C)
   else if (g_layer_click.active && g_layer_click.area == area.id) {
     layer_pick_update(C, view, dl);
   }
-  else if (!g_modal.active && pose_frame_input(view, hovered, dl)) {
+  else if (!g_modal.active && pose_frame_input(C, view, hovered, dl)) {
     /* The pose thumbnail's frame (Save Pose, Edit Frame) has the mouse. */
   }
   else if (!g_modal.active && follow_point_input(C, area, view, hovered)) {

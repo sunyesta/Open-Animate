@@ -44,8 +44,8 @@ uint64_t stamp_of(const Document &doc, const PoseAsset &pose, int size)
   return mix(mix(mix(mix(controller_document_generation(), uint64_t(doc.frame_current)), uint64_t(size)),
                  media_generation()),
              mix(mix(mix(uint64_t(std::hash<std::string>{}(pose.pose)), uint64_t(std::bit_cast<uint32_t>(pose.frame_size))),
-                     uint64_t(std::bit_cast<uint32_t>(pose.frame_center.x))),
-                 uint64_t(std::bit_cast<uint32_t>(pose.frame_center.y))));
+                     uint64_t(std::bit_cast<uint32_t>(pose.frame_offset.x))),
+                 uint64_t(std::bit_cast<uint32_t>(pose.frame_offset.y))));
 }
 
 }  // namespace

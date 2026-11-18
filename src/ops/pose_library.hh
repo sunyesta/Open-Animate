@@ -42,17 +42,20 @@ std::vector<PoseShelfRow> pose_shelf_rows(Context &C, const std::string &search,
  * and the layers to show (the bone layer and the drawings outside it). False when none of its bones and points is in
  * the file. */
 bool pose_posed_copy(const Document &doc, const PoseAsset &pose, Document &r_copy, float2 *r_lo, float2 *r_hi,
-                     std::vector<uint64_t> *r_layers);
+                     std::vector<uint64_t> *r_layers, std::vector<std::pair<uint64_t, size_t>> *r_framed = nullptr);
 
 /* A thumbnail's frame (a square: its middle and side) round the box `lo`..`hi`, with room around. */
 void pose_frame_round(float2 lo, float2 hi, float2 *r_center, float *r_size);
-/* The frame pose's thumbnail is drawn in, `lo`..`hi` the box of what it moves: the one it was given, else round that. */
+/* The frame pose's thumbnail is drawn in, `lo`..`hi` the box of what it moves: the one it was given (kept from the box's
+ * middle), else round that. */
 void pose_frame_choose(const PoseAsset &pose, float2 lo, float2 hi, float2 *r_center, float *r_size);
 /* The same worked out from a posed copy (pose_posed_copy); false when none of its bones and points is in the file. */
 bool pose_thumbnail_frame(const Document &doc, const PoseAsset &pose, float2 *r_center, float *r_size);
-/* The frame a pose's thumbnail gets on its own (round what it moves, pose_posed_copy), whatever frame it was given. */
-bool pose_frame_auto(const Document &doc, const PoseAsset &pose, float2 *r_center, float *r_size);
-/* The same for the selected bones' and points' pose now: what Save Pose's frame starts as. */
-bool pose_frame_of_selection(Context &C, float2 *r_center, float *r_size);
+/* Where the middle of what pose moves (pose_posed_copy's box) shows in `doc` now, which its frame is kept from (it
+ * follows them to another frame, or the character moved), and the side of the frame round them. False when none of
+ * its bones and points is in the file. */
+bool pose_frame_anchor(const Document &doc, const PoseAsset &pose, float2 *r_anchor, float *r_auto_size);
+/* The same for the selected bones' and points' pose now: what Save Pose's frame is kept from. */
+bool pose_frame_anchor_of_selection(Context &C, float2 *r_anchor, float *r_auto_size);
 
 }  // namespace oanim

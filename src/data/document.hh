@@ -101,9 +101,9 @@ struct PoseAsset {
   uint64_t collection = 0;
   /* Copy Pose's JSON, as text. */
   std::string pose;
-  /* Its thumbnail's frame (document space, a square: its middle and side), as Save Pose or Edit Frame left it; a side
-   * of 0 frames it on what it moves. */
-  float2 frame_center;
+  /* Its thumbnail's frame (a square: its middle, from the middle of what the pose moves, so it goes where they go, and
+   * its side), as Save Pose or Edit Frame left it; a side of 0 frames it on what it moves. */
+  float2 frame_offset;
   float frame_size = 0.0f;
   bool operator==(const PoseAsset &) const = default;
 };

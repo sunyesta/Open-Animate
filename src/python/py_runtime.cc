@@ -1730,10 +1730,10 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   m.def("pose_frame", []() {
     float2 center;
     float size = 0.0f;
-    return pose_frame_shown(&center, &size) ? py::object(py::make_tuple(center.x, center.y, size)) : py::object(py::none());
+    return pose_frame_shown(current_context(), &center, &size) ? py::object(py::make_tuple(center.x, center.y, size)) : py::object(py::none());
   });
   m.def("pose_frame_drag", [](float fx, float fy, float tx, float ty, float reach) {
-    return pose_frame_drag_test({fx, fy}, {tx, ty}, reach);
+    return pose_frame_drag_test(current_context(), {fx, fy}, {tx, ty}, reach);
   });
   m.def("pose_thumbnail_frame", [](uint64_t id) {
     const Document &doc = *current_context().document;

@@ -1,7 +1,9 @@
 """A pose's thumbnail frame: Save Pose shows a square in the viewport, at first round what the pose moves; dragging inside
 moves it, a corner resizes it (square, the corner across staying); saved with the pose (poselib.pose_new's frame_x,
 frame_y, frame_size) its thumbnail is framed on it, kept in the file; Fit to Pose leaves it round what it moves; Edit
-Frame (poselib.frame_set) frames a saved pose again, frame_size=0 back round what it moves.
+Frame (poselib.frame_set) frames a saved pose again, frame_size=0 back round what it moves. The frame is kept from the
+middle of what the pose moves, so with the character moved (or on another frame) it goes with it, in the thumbnail and
+in the viewport (it was kept in document space and stayed put, the thumbnail showing only the skin beside the mouth).
 
 Run with:  OpenAnimate --background --python tests/test_pose_frame.py
 """
@@ -158,5 +160,41 @@ assert ops.poselib.frame_set(pose=str(framed), frame_size="0") == {'FINISHED'}
 assert close(wm.pose_thumbnail_frame(framed), auto), "frame_size=0: round what it moves again"
 assert ops.poselib.frame_set(pose=str(framed), frame_size="0") == {'CANCELLED'}, "nothing to change"
 assert ops.poselib.frame_set(pose=str(framed), frame_x="1", frame_y="1", frame_size="-2") == {'CANCELLED'}
+
+# --- The frame goes where what the pose moves goes ------------------------------------------------------------------------
+def middle():
+    """The middle of the box round the hand's points as they show (all of them Arm_L moves)."""
+    pts = art().shown()[0]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+
+
+scene()
+select_bones("Arm_L")
+wm.pose_frame_open()
+x, y, s = wm.pose_frame()
+assert close((x, y), middle()), ("it starts round the hand", (x, y), middle())
+assert wm.pose_frame_drag((x, y), (x + 0.3, y + 0.2))
+x, y, s = wm.pose_frame()
+assert ops.poselib.pose_new(name="Kept", new_collection="Arms", frame_x=str(x), frame_y=str(y),
+                            frame_size=str(s)) == {'FINISHED'}
+wm.pose_frame_open(-1)
+kept = pose("Kept")["id"]
+assert close(wm.pose_thumbnail_frame(kept), (x, y, s)), wm.pose_thumbnail_frame(kept)
+# The whole character moved: the thumbnail's frame and the one shown go with it.
+rig().location_x = rig().location_x + 2.0
+assert close(wm.pose_thumbnail_frame(kept), (x + 2.0, y, s)), ("the thumbnail's frame went too", wm.pose_thumbnail_frame(kept))
+wm.pose_frame_open(kept)
+assert close(wm.pose_frame(), (x + 2.0, y, s)), ("so did the frame shown", wm.pose_frame())
+# Another frame with Edit Frame open: the frame shown stays over the hand where it shows there (its arm lowered).
+was = middle()
+at(20)
+now = middle()
+assert not close(was, now, 0.05), (was, now)
+assert close(wm.pose_frame(), (x + 2.0 + now[0] - was[0], y + now[1] - was[1], s)), (wm.pose_frame(), now, was)
+# Done with it left alone changes nothing.
+fx, fy, fs = wm.pose_frame()
+assert ops.poselib.frame_set(pose=str(kept), frame_x=repr(fx), frame_y=repr(fy), frame_size=repr(fs)) == {'CANCELLED'}
+wm.pose_frame_open(-1)
 
 print("test_pose_frame: OK")

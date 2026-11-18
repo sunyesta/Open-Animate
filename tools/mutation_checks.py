@@ -147,11 +147,19 @@ PENDING = [
     ('src/ops/rig_ops.cc', '                   w->weight = value;', '                   w->weight = value * 0.0f;',
      'point weight set', 'tests/test_points_panel.py'),
     # A pose's thumbnail is framed on the frame it was given.
-    ('src/ops/pose_library.cc', '  if (pose.frame_size > 0.0f) {\n    *r_center = pose.frame_center;',
-     '  if (pose.frame_size > 0.0f && false) {\n    *r_center = pose.frame_center;', 'thumbnail uses its frame',
+    ('src/ops/pose_library.cc', '  if (pose.frame_size > 0.0f) {\n    *r_center = (lo + hi) * 0.5f + pose.frame_offset;',
+     '  if (pose.frame_size > 0.0f && false) {\n    *r_center = (lo + hi) * 0.5f + pose.frame_offset;', 'thumbnail uses its frame',
+     'tests/test_pose_frame.py'),
+
+    ('src/ops/pose_library.cc', '    *r_center = (lo + hi) * 0.5f + pose.frame_offset;',
+     '    *r_center = pose.frame_offset;', 'pose frame kept from what it moves, so it follows the character',
+     'tests/test_pose_frame.py'),
+
+    ('src/ops/pose_library.cc', '  if (any) {\n    *r_anchor = (a + b) * 0.5f;',
+     '  if (any && false) {\n    *r_anchor = (a + b) * 0.5f;', 'frame shown follows the points where they show now',
      'tests/test_pose_frame.py'),
     # Save Pose keeps the frame given.
-    ('src/ops/pose_library.cc', '        frame_args(C, &asset.frame_center, &asset.frame_size);',
+    ('src/ops/pose_library.cc', '        frame_args_offset(C, asset, &asset.frame_offset, &asset.frame_size);',
      '        (void)frame_args;', 'Save Pose keeps its frame', 'tests/test_pose_frame.py'),
     # The frame is read back from the file.
     ('src/io/oanim_file.cc', '        p.frame_size = size;', '        p.frame_size = size * 0.0f;', 'pose frame kept in the file',

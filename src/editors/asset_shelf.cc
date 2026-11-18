@@ -256,8 +256,16 @@ struct PoseShelf {
   std::string new_name;
   bool tried = false;
   bool frame_auto = true;
-  float2 frame_center;
+  /* Not auto: the frame's middle from the middle of what the pose moves (it goes where they go), and its side. */
+  float2 frame_offset;
   float frame_size = 0.0f;
+  /* Where the middle of what the pose moves shows (pose_frame_anchor) and the side that fits it, worked out again when
+   * the file, the frame shown or the pose changes. */
+  bool anchor_known = false, anchor_found = false;
+  uint64_t anchor_changes = 0, anchor_pose = 0;
+  int anchor_frame = 0;
+  float2 anchor;
+  float anchor_fits = 0.0f;
 };
 PoseShelf g_poses;
 
@@ -275,19 +283,35 @@ void pose_dialog_begin(uint64_t framing)
   g_poses.tried = false;
   g_poses.frame_auto = true;
   g_poses.frame_size = 0.0f;
+  g_poses.anchor_known = false;
+}
+
+/* Where the frame is kept from now (and the side that fits): false when the pose moves nothing in the file. */
+bool pose_frame_anchor_now(Context &C, float2 *r_anchor, float *r_fits)
+{
+  const Document &doc = *C.document;
+  const uint64_t changes = C.undo ? C.undo->change_count() : 0;
+  if (!C.undo || !g_poses.anchor_known || g_poses.anchor_changes != changes || g_poses.anchor_frame != doc.frame_current ||
+      g_poses.anchor_pose != g_poses.framing)
+  {
+    const PoseAsset *pose = g_poses.framing ? pose_asset_find(doc, g_poses.framing) : nullptr;
+    g_poses.anchor_found = pose ? pose_frame_anchor(doc, *pose, &g_poses.anchor, &g_poses.anchor_fits)
+                                : !g_poses.framing && pose_frame_anchor_of_selection(C, &g_poses.anchor, &g_poses.anchor_fits);
+    g_poses.anchor_known = true;
+    g_poses.anchor_changes = changes;
+    g_poses.anchor_frame = doc.frame_current;
+    g_poses.anchor_pose = g_poses.framing;
+  }
+  *r_anchor = g_poses.anchor;
+  *r_fits = g_poses.anchor_fits;
+  return g_poses.anchor_found;
 }
 
 /* The frame as it fits the pose (or the selection's, saving one). */
-void pose_frame_fit(Context &C)
+void pose_frame_fit()
 {
   g_poses.frame_auto = true;
   g_poses.frame_size = 0.0f;
-  const PoseAsset *pose = g_poses.framing ? pose_asset_find(*C.document, g_poses.framing) : nullptr;
-  if (pose ? !pose_frame_auto(*C.document, *pose, &g_poses.frame_center, &g_poses.frame_size)
-           : !pose_frame_of_selection(C, &g_poses.frame_center, &g_poses.frame_size))
-  {
-    g_poses.frame_size = 0.0f;
-  }
 }
 
 /* The Save Pose dialog, its collection `collection` (0: the selection's first, else a new one). */
@@ -303,7 +327,7 @@ void pose_save_open(Context &C, uint64_t collection)
   }
   g_poses.collection = collection;
   g_poses.new_collection = collection == 0;
-  pose_frame_fit(C);
+  pose_frame_fit();
 }
 
 /* Edit Frame: pose `id`'s thumbnail frame shown in the viewport to move and resize, as it was given or fits it. */
@@ -316,11 +340,11 @@ void pose_frame_edit_open(Context &C, uint64_t id)
   pose_dialog_begin(id);
   if (pose->frame_size > 0.0f) {
     g_poses.frame_auto = false;
-    g_poses.frame_center = pose->frame_center;
+    g_poses.frame_offset = pose->frame_offset;
     g_poses.frame_size = pose->frame_size;
   }
   else {
-    pose_frame_fit(C);
+    pose_frame_fit();
   }
 }
 
@@ -433,7 +457,7 @@ void pose_save_dialog(Context &C)
   ImGui::SameLine(left + label_w);
   ImGui::BeginDisabled(g_poses.frame_auto);
   if (ImGui::Button("Fit to Pose", ImVec2(field_w, 0.0f))) {
-    pose_frame_fit(C);
+    pose_frame_fit();
   }
   ImGui::EndDisabled();
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -462,10 +486,10 @@ void pose_save_dialog(Context &C)
   if (save && !close) {
     g_poses.tried = true;
     OpArgs frame;
-    if (!g_poses.frame_auto && g_poses.frame_size > 0.0f) {
-      frame = {{"frame_x", frame_number(g_poses.frame_center.x)},
-               {"frame_y", frame_number(g_poses.frame_center.y)},
-               {"frame_size", frame_number(g_poses.frame_size)}};
+    float2 center;
+    float size = 0.0f;
+    if (!g_poses.frame_auto && pose_frame_shown(C, &center, &size)) {
+      frame = {{"frame_x", frame_number(center.x)}, {"frame_y", frame_number(center.y)}, {"frame_size", frame_number(size)}};
     }
     if (framing) {
       OpArgs args = frame.empty() ? OpArgs{{"frame_size", "0"}} : frame;
@@ -1177,24 +1201,30 @@ void asset_shelf_draw(Area &area, Context &C)
   }
 }
 
-bool pose_frame_shown(float2 *r_center, float *r_size)
+bool pose_frame_shown(Context &C, float2 *r_center, float *r_size)
 {
   /* The Poses tab put away (or its editor closed): the dialog goes with it. */
   if (g_poses.dialog && ImGui::GetCurrentContext() && ImGui::GetFrameCount() - g_poses.drawn > 2) {
     g_poses.dialog = false;
   }
-  if (!g_poses.dialog || g_poses.frame_size <= 0.0f) {
+  float2 anchor;
+  float fits = 0.0f;
+  if (!g_poses.dialog || !pose_frame_anchor_now(C, &anchor, &fits)) {
     return false;
   }
-  *r_center = g_poses.frame_center;
-  *r_size = g_poses.frame_size;
-  return true;
+  *r_center = g_poses.frame_auto ? anchor : anchor + g_poses.frame_offset;
+  *r_size = g_poses.frame_auto ? fits : g_poses.frame_size;
+  return *r_size > 0.0f;
 }
 
-void pose_frame_shown_set(float2 center, float size)
+void pose_frame_shown_set(Context &C, float2 center, float size)
 {
-  if (g_poses.dialog && std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(size) && size > 0.0f) {
-    g_poses.frame_center = center;
+  float2 anchor;
+  float fits = 0.0f;
+  if (g_poses.dialog && std::isfinite(center.x) && std::isfinite(center.y) && std::isfinite(size) && size > 0.0f &&
+      pose_frame_anchor_now(C, &anchor, &fits))
+  {
+    g_poses.frame_offset = center - anchor;
     g_poses.frame_size = size;
     g_poses.frame_auto = false;
   }
