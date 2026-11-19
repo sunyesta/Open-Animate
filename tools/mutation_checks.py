@@ -35,35 +35,7 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
-    ('src/anim/vector_deform.cc', '      if (l->is_reference()) {\n        todo.push_back(l->reference_source);',
-     '      if (false && l->is_reference()) {\n        todo.push_back(l->reference_source);',
-     'a drawing bent by a reference of itself is a loop', 'tests/test_reference_deform_loop.py'),
-    ('src/anim/vector_deform.cc', '  for (const Layer *at = &layer; at->is_reference() && self.size() < 64;) {',
-     '  for (const Layer *at = &layer; false && at->is_reference() && self.size() < 64;) {',
-     'a reference bent by another of its original is a loop', 'tests/test_reference_deform_loop.py'),
-    ('src/anim/reference.cc', '  if (frames.size() > 1) {\n    std::set<int> keyed = frames;',
-     '  if (false && frames.size() > 1) {\n    std::set<int> keyed = frames;',
-     'a handle\'s keyed offset put into keys holds between them', 'tests/test_reference_keeps_shown.py'),
-    ('src/data/document_layers.cc', '    if (layer.is_reference() && std::find(gone.begin(), gone.end(), layer.reference_source) != gone.end()) {',
-     '    if (false && layer.is_reference() && std::find(gone.begin(), gone.end(), layer.reference_source) != gone.end()) {',
-     'deleting an original breaks its references as Break Reference does', 'tests/test_reference_keeps_shown.py'),
-    ('src/anim/deform.cc', '  return layer_has_group_deforms(doc, layer, false) || layer_bone_curve_bent(doc, layer) ||',
-     '  return layer_has_group_deforms(doc, layer, false) || (false && layer_bone_curve_bent(doc, layer)) ||',
-     'a point on a drawing bent along a bone curve lands where it is moved', 'tests/test_bone_curve_point_drag.py'),
-    ('src/anim/deform.cc', '    if (const std::vector<size_t> chain = layer_curve_chain(*d.armature, layer_bone_binder(doc, layer)); !chain.empty()) {',
-     '    if (const std::vector<size_t> chain = layer_curve_chain(*d.armature, layer_bone_binder(doc, layer)); false && !chain.empty()) {',
-     "Apply Pose as Rest bends a Curve-bound drawing by the bones' move between rests", 'tests/test_apply_rest_curve.py'),
-    ('src/ops/rig_ops.cc', '            p.head = p.setup_head;\n            p.tail = p.setup_tail;\n            p.setup_head = was.setup_head;\n            p.setup_tail = was.setup_tail;',
-     '',
-     "Apply Pose as Rest's change poses run from the old rest to the new", 'tests/test_apply_rest_curve.py'),
-    ('src/ops/mask_ops.cc', '        edits.emplace_back(live, *live);\n        LayerMask *card = &edits.back().second;', '        LayerMask *card = live;', 'Change Mask refusing a setting changes none', 'tests/test_cancel_changes_nothing.py'),
-    ('src/ops/mask_ops.cc', '          targets.front()->masks = was;', '          (void)was;', 'Convert Masking Areas refusing a row puts back the rows before it', 'tests/test_cancel_changes_nothing.py'),
-    ('src/ops/mask_ops.cc', '      if (status != OpStatus::Finished) {', '      if (false && status != OpStatus::Finished) {', 'Clip to Below changing nothing puts Exclude Strokes back', 'tests/test_cancel_changes_nothing.py'),
-    ('src/ops/driver_ops.cc', '                            Driver edited = *d;', '                            Driver &edited = *d;', 'Change Driver refusing a setting changes none', 'tests/test_cancel_changes_nothing.py'),
-    ('src/ops/rig_ops.cc', '                 if (!name.empty()) {\n                   for (Layer *layer : keyed_layers(C)) {', '                 if (false && !name.empty()) {\n                   for (Layer *layer : keyed_layers(C)) {', 'Parent Bone refuses a missing bone before Keep Animation looks through the actions', 'tests/test_cancel_changes_nothing.py'),
-    ('src/data/layer.hh', '           line_reach_keys.keys == o.line_reach_keys.keys && line_reach_keys.actions == o.line_reach_keys.actions &&', '           true &&', "a mask's Reach keys count as a change", 'tests/test_reach_paste_clip.py'),
-    ('src/anim/animation.cc', '        if (setup_paste) {\n          placed.value', '        if (false && setup_paste) {\n          placed.value', 'Paste Keys on frame 0 twice changes nothing the second time', 'tests/test_reach_paste_clip.py'),
-    ('src/ops/media_ops.cc', 'nullptr); std::isfinite(in)) {', 'nullptr); true) {', "a clip's In point given nan or inf stays as it was", 'tests/test_reach_paste_clip.py'),
+    ('src/anim/dynamics.cc', '  const int upto = std::min(frame, std::max(start, doc.frame_end));', '  const int upto = frame;', 'Dynamics stop at the end frame', 'tests/test_dynamics_end_frame.py'),
 ]
 
 def build(root):
