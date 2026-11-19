@@ -35,6 +35,18 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    ('src/anim/vector_deform.cc', '      if (l->is_reference()) {\n        todo.push_back(l->reference_source);',
+     '      if (false && l->is_reference()) {\n        todo.push_back(l->reference_source);',
+     'a drawing bent by a reference of itself is a loop', 'tests/test_reference_deform_loop.py'),
+    ('src/anim/vector_deform.cc', '  for (const Layer *at = &layer; at->is_reference() && self.size() < 64;) {',
+     '  for (const Layer *at = &layer; false && at->is_reference() && self.size() < 64;) {',
+     'a reference bent by another of its original is a loop', 'tests/test_reference_deform_loop.py'),
+    ('src/anim/reference.cc', '  if (frames.size() > 1) {\n    std::set<int> keyed = frames;',
+     '  if (false && frames.size() > 1) {\n    std::set<int> keyed = frames;',
+     'a handle\'s keyed offset put into keys holds between them', 'tests/test_reference_keeps_shown.py'),
+    ('src/data/document_layers.cc', '    if (layer.is_reference() && std::find(gone.begin(), gone.end(), layer.reference_source) != gone.end()) {',
+     '    if (false && layer.is_reference() && std::find(gone.begin(), gone.end(), layer.reference_source) != gone.end()) {',
+     'deleting an original breaks its references as Break Reference does', 'tests/test_reference_keeps_shown.py'),
 ]
 
 def build(root):

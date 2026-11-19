@@ -6,6 +6,7 @@
 #include <map>
 #include <unordered_map>
 
+#include "anim/reference.hh"
 #include "anim/switch.hh"
 #include "data/document.hh"
 
@@ -851,6 +852,30 @@ static void unlink_references_to(Document &doc, std::vector<Layer> &list, const 
   }
 }
 
+/* What `removed` and everything inside it are: their ids. */
+static void removed_ids(const Layer &removed, std::vector<uint64_t> &r_ids)
+{
+  r_ids.push_back(removed.id);
+  for (const Layer &child : removed.children) {
+    removed_ids(child, r_ids);
+  }
+}
+
+/* References outside `gone` to a layer in it, broken as Break Reference breaks them while their originals are still
+ * there: each keeps what it showed, its original's modifiers and its own offsets' keys included. */
+static void break_references_to(Document &doc, std::vector<Layer> &list, const std::vector<uint64_t> &gone)
+{
+  for (Layer &layer : list) {
+    if (std::find(gone.begin(), gone.end(), layer.id) != gone.end()) {
+      continue;
+    }
+    if (layer.is_reference() && std::find(gone.begin(), gone.end(), layer.reference_source) != gone.end()) {
+      reference_break(doc, layer);
+    }
+    break_references_to(doc, layer.children, gone);
+  }
+}
+
 static void unlink_references_tree(Document &doc, const Layer &removed)
 {
   unlink_references_to(doc, doc.layers, removed);
@@ -868,6 +893,11 @@ bool document_remove_layer(Document &doc, uint64_t id)
   }
   /* A linked switches' lead inside it hands the group's keys on first. */
   switch_links_before_remove(doc, id);
+  container = layer_container(doc, id, &index);
+  /* References to it keep showing what they showed, as ordinary layers (as Break Reference leaves them). */
+  std::vector<uint64_t> gone;
+  removed_ids((*container)[index], gone);
+  break_references_to(doc, doc.layers, gone);
   container = layer_container(doc, id, &index);
   const Layer removed = (*container)[index];
   Layer *parent = layer_parent(doc, id);

@@ -725,17 +725,42 @@ static void add_handle_offset(CurvePoint &cp, bool in, const ReferencePoint &o)
     return all;
   }()
                                              : offset_frames(ch, o);
+  const Channel<float2> was = ch;
+  const float2 was_setup = setup, was_change = change;
+  const auto shown_at = [&](int f) {
+    return handle_from_change(was_setup, was.animated() ? was.evaluate(f) : was_change, in) +
+           (o.offset_keys.animated() ? o.offset_keys.evaluate(f) : o.offset);
+  };
   std::vector<std::pair<int, float2>> values;
   float turn = 0.0f;
   for (const int f : frames) {
-    const float2 shown = handle_from_change(setup, ch.animated() ? ch.evaluate(f) : change, in) +
-                         (o.offset_keys.animated() ? o.offset_keys.evaluate(f) : o.offset);
-    const float2 c = handle_change(new_setup, shown, turn, in);
+    const float2 c = handle_change(new_setup, shown_at(f), turn, in);
     turn = c.x;
     values.push_back({f, c});
   }
   for (const auto &[f, v] : values) {
     ch.set_key(f, v);
+  }
+  /* The offset adds as a straight move between its keys, but the keys made turn and stretch the handle: where the two
+   * part, a key more, the one furthest off first, until every frame between shows as it did. */
+  if (frames.size() > 1) {
+    std::set<int> keyed = frames;
+    for (int round = 0; round < 256; round++) {
+      int worst_frame = -1;
+      float worst = 1e-5f;
+      for (int f = *frames.begin(); f <= *frames.rbegin(); f++) {
+        const float off = length(handle_from_change(new_setup, ch.evaluate(f), in) - shown_at(f));
+        if (off > worst && !keyed.count(f)) {
+          worst = off;
+          worst_frame = f;
+        }
+      }
+      if (worst_frame < 0) {
+        break;
+      }
+      ch.set_key(worst_frame, handle_change(new_setup, shown_at(worst_frame), ch.evaluate(worst_frame).x, in));
+      keyed.insert(worst_frame);
+    }
   }
   setup = new_setup;
   handle += o.offset;

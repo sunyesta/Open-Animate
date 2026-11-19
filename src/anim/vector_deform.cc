@@ -5903,13 +5903,24 @@ bool vector_deform_falloff_view(const Document &doc, const Layer &layer, const M
 
 bool vector_deform_loops(const Document &doc, const Layer &layer, const Modifier &m)
 {
-  /* Follow the shapes' layers' own deform modifiers back; reaching `layer` is a loop. */
+  /* Follow the shapes' layers' own deform modifiers back, and a reference to what it shows; reaching `layer`, or what
+   * it is a reference of, is a loop (a drawing bent by a reference of itself was bent by its own change of shape a
+   * second time). */
+  std::vector<uint64_t> self = {layer.id};
+  for (const Layer *at = &layer; at->is_reference() && self.size() < 64;) {
+    const Layer *source = layer_find(doc, at->reference_source);
+    if (!source || std::find(self.begin(), self.end(), source->id) != self.end()) {
+      break;
+    }
+    self.push_back(source->id);
+    at = source;
+  }
   std::vector<uint64_t> seen;
   std::vector<uint64_t> todo = {m.deform_layer};
   while (!todo.empty()) {
     const uint64_t id = todo.back();
     todo.pop_back();
-    if (id == layer.id) {
+    if (std::find(self.begin(), self.end(), id) != self.end()) {
       return true;
     }
     if (std::find(seen.begin(), seen.end(), id) != seen.end()) {
@@ -5917,6 +5928,9 @@ bool vector_deform_loops(const Document &doc, const Layer &layer, const Modifier
     }
     seen.push_back(id);
     if (const Layer *l = layer_find(doc, id)) {
+      if (l->is_reference()) {
+        todo.push_back(l->reference_source);
+      }
       for (const Modifier &other : l->modifiers) {
         if (modifier_is_deform(other.type) && other.deform_layer != 0) {
           todo.push_back(other.deform_layer);
