@@ -1026,7 +1026,8 @@ static VectorDrawing stack_evaluated(const Document &doc, const Layer &layer, bo
 VectorDrawing layer_setup_drawing(const Document &doc, const Layer &layer, bool render)
 {
   if (layer.is_reference()) {
-    /* As built on the setup frame; matched, with the original's Mirror and where it is. */
+    /* As built on the setup frame; matched, with the original's Mirror, Bevel and Resample and where it is: what the
+     * stack shows on it, point for point (a cage bending by it reads its rest against that sample for sample). */
     VectorDrawing drawing = reference_build(doc, layer, true);
     if (const Layer *original = matched_original(doc, layer)) {
       const Layer *bones = layer_armature(doc, original->id);
@@ -1037,6 +1038,9 @@ VectorDrawing layer_setup_drawing(const Document &doc, const Layer &layer, bool 
         }
         else if (modifier_on(m, render) && m.type == ModifierType::Bevel) {
           drawing = drawing_bevel(drawing, m);
+        }
+        else if (modifier_on(m, render) && m.type == ModifierType::Resample) {
+          drawing = drawing_subdivide_kept(layer.id, m.name + "\tsetup", std::move(drawing), m, render);
         }
       }
       transform_drawing(drawing, reference_match_transform(doc, layer));
@@ -1051,6 +1055,9 @@ VectorDrawing layer_setup_drawing(const Document &doc, const Layer &layer, bool 
       }
       else if (modifier_on(m, render) && m.type == ModifierType::Bevel) {
         drawing = drawing_bevel(drawing, m);
+      }
+      else if (modifier_on(m, render) && m.type == ModifierType::Resample) {
+        drawing = drawing_subdivide_kept(layer.id, m.name + "\tsetup", std::move(drawing), m, render);
       }
     }
     drawing_detail_final_handles(drawing);

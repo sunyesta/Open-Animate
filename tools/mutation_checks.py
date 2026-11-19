@@ -245,6 +245,12 @@ PENDING = [
     ('src/anim/deform.cc', '        for (size_t k = 0; ringed && k < size_t(ring_count); k++) {\n',
      '        for (size_t k = 0; false && ringed && k < size_t(ring_count); k++) {\n',
      'a point dragged past a corner the cage folds goes as near the mouse as it can', 'tests/test_deform_handle_drag_corner.py'),
+    ('src/anim/deform.cc', '        else if (modifier_on(m, render) && m.type == ModifierType::Resample) {\n',
+     '        else if (false && modifier_on(m, render) && m.type == ModifierType::Resample) {\n',
+     'a Match Original reference\'s rest shows its original\'s Resample', 'tests/test_cage_reference_resample.py'),
+    ('src/anim/deform.cc', '\n      else if (modifier_on(m, render) && m.type == ModifierType::Resample) {\n',
+     '\n      else if (false && modifier_on(m, render) && m.type == ModifierType::Resample) {\n',
+     'a reference\'s rest shows its own Resample', 'tests/test_cage_reference_resample.py'),
 ]
 
 def build(root):
