@@ -47,6 +47,15 @@ PENDING = [
     ('src/data/document_layers.cc', '    if (layer.is_reference() && std::find(gone.begin(), gone.end(), layer.reference_source) != gone.end()) {',
      '    if (false && layer.is_reference() && std::find(gone.begin(), gone.end(), layer.reference_source) != gone.end()) {',
      'deleting an original breaks its references as Break Reference does', 'tests/test_reference_keeps_shown.py'),
+    ('src/anim/deform.cc', '  return layer_has_group_deforms(doc, layer, false) || layer_bone_curve_bent(doc, layer) ||',
+     '  return layer_has_group_deforms(doc, layer, false) || (false && layer_bone_curve_bent(doc, layer)) ||',
+     'a point on a drawing bent along a bone curve lands where it is moved', 'tests/test_bone_curve_point_drag.py'),
+    ('src/anim/deform.cc', '    if (const std::vector<size_t> chain = layer_curve_chain(*d.armature, layer_bone_binder(doc, layer)); !chain.empty()) {',
+     '    if (const std::vector<size_t> chain = layer_curve_chain(*d.armature, layer_bone_binder(doc, layer)); false && !chain.empty()) {',
+     "Apply Pose as Rest bends a Curve-bound drawing by the bones' move between rests", 'tests/test_apply_rest_curve.py'),
+    ('src/ops/rig_ops.cc', '            p.head = p.setup_head;\n            p.tail = p.setup_tail;\n            p.setup_head = was.setup_head;\n            p.setup_tail = was.setup_tail;',
+     '',
+     "Apply Pose as Rest's change poses run from the old rest to the new", 'tests/test_apply_rest_curve.py'),
 ]
 
 def build(root):

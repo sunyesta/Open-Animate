@@ -1082,9 +1082,24 @@ VectorDrawing layer_setup_drawing(const Document &doc, const Layer &layer, bool 
   return drawing;
 }
 
+/* Bent along a bone's or a chain's curve (Parent Bone Deform: Curve, its own or a group's above): a point's skin there
+ * is a guess round where it was, as under a deform modifier. */
+static bool layer_bone_curve_bent(const Document &doc, const Layer &layer)
+{
+  const bool armature_on = std::any_of(layer.modifiers.begin(), layer.modifiers.end(), [](const Modifier &m) {
+    return m.type == ModifierType::Armature && m.show_viewport;
+  });
+  const Layer *armature = armature_on ? layer_armature(doc, layer.id) : nullptr;
+  if (!armature || armature->bones.empty()) {
+    return false;
+  }
+  const Layer &by = layer_bone_binder(doc, layer);
+  return by.followed_bone() == 0 && !layer_curve_chain(*armature, by).empty();
+}
+
 bool layer_is_deformed(const Document &doc, const Layer &layer)
 {
-  return layer_has_group_deforms(doc, layer, false) ||
+  return layer_has_group_deforms(doc, layer, false) || layer_bone_curve_bent(doc, layer) ||
          std::any_of(layer.modifiers.begin(), layer.modifiers.end(), [](const Modifier &m) {
            return m.show_viewport && modifier_is_deform(m.type) && m.deform_layer != 0;
          });
@@ -1570,6 +1585,11 @@ std::vector<Transform2D> layer_point_skins_posed(const Document &doc, const Laye
   Deformer d;
   if (!layer.is_reference() && deformer_init(doc, layer, d)) {
     d.poses = poses;
+    /* A curve bend by these poses, not the frame's: both lines with the curves' rest shapes. */
+    if (const std::vector<size_t> chain = layer_curve_chain(*d.armature, layer_bone_binder(doc, layer)); !chain.empty()) {
+      d.curve_rest = bone_curve_line(*d.armature, d.poses, chain, true, true);
+      d.curve_now = bone_curve_line(*d.armature, d.poses, chain, false, true);
+    }
     for (size_t i = 0; i < drawing.points.size(); i++) {
       skins[i] = point_skin(d, drawing.points[i]);
     }

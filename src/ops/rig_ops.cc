@@ -5129,9 +5129,15 @@ void rig_operators_register()
           /* Each bone's move from its old rest to its new one, to bend the setup drawings with. */
           std::vector<BonePose> change = armature_pose(*armature, false);
           for (BonePose &p : change) {
+            const BonePose &was = *bone_pose_find(old_poses, p.id);
             p.pose = p.setup;
-            p.setup = bone_pose_find(old_poses, p.id)->setup;
+            p.setup = was.setup;
             p.skin = p.pose * p.setup.inverted();
+            /* Where it runs too, for drawings bent along bone curves: from the old rest to the new. */
+            p.head = p.setup_head;
+            p.tail = p.setup_tail;
+            p.setup_head = was.setup_head;
+            p.setup_tail = was.setup_tail;
           }
           const Transform2D armature_world = layer_world_transform(doc, armature_id);
           for (const uint64_t id : drawings) {

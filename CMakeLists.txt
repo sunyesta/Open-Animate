@@ -616,6 +616,10 @@ add_test(NAME reference_deform_loop
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_reference_deform_loop.py)
 add_test(NAME reference_keeps_shown
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_reference_keeps_shown.py)
+add_test(NAME bone_curve_point_drag
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_curve_point_drag.py)
+add_test(NAME apply_rest_curve
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_apply_rest_curve.py)
 add_test(NAME bone_tab_drawing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_tab_drawing.py)
 add_test(NAME controller_step_end
