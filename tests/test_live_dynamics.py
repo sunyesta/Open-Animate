@@ -70,10 +70,13 @@ swung = direction(bones()["tail"])
 assert swung < -0.05, ("gravity bends it", swung)
 rig.select_bone("tail", part="TAIL")
 assert rig.move_bone_ends((-0.3, 0.5))
-# The keyed tip went where it was moved: from where the keys had it, not from the swung tip below it.
-tip = {b["name"]: b for b in rig.bones_keyed}["tail"]["tail"]
+# The keyed tip turned toward where it was moved, from where the keys had it (2, 0) to (1.7, 0.5), not from the
+# swung tip below it: the bone turns about its head (1, 0), its length kept.
+keyed = {b["name"]: b for b in rig.bones_keyed}["tail"]
+tip, head = keyed["tail"], keyed["head"]
 doc.gravity = 0.0
-assert abs(tip[0] - 1.7) < 2e-3 and abs(tip[1] - 0.5) < 2e-3, tip
+aim = math.atan2(0.5 - head[1], 1.7 - head[0])
+assert abs(math.atan2(tip[1] - head[1], tip[0] - head[0]) - aim) < 2e-3, (tip, head)
 
 # --- Wind is drag on how fast the air goes past: moving with it, a bone feels less; into it, more -----
 def slide(speed):
