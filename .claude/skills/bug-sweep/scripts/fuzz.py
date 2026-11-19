@@ -654,6 +654,11 @@ def _(rng):
     layer's poses a and b leaves what a and b show exactly as they were."""
     if not (doc.auto_key and doc.auto_freeze_keys) or doc.auto_key_mode == "REPLACE" or doc.action:
         return None
+    # (Dynamics: a later frame follows from the ones before it, so an edit between poses moves them by design.)
+    # OA_FUZZ_FREEZE_DYN=1 checks anyway (a move 1e-3 or so on a later pose is then the dynamics).
+    if os.environ.get("OA_FUZZ_FREEZE_DYN") != "1" and any(c.get("type") == "DYNAMICS" for r in L.all() if r.type == "BONE" for b in bone_names(r)
+           for c in r.bone_constraints(b)):
+        return None
     kind = rng.choice(["bone", "bone", "layer", "point"])
     f = rng.randint(1, FRAMES)
     if kind == "bone":
@@ -1442,6 +1447,175 @@ def apply_extra(op):
     if o == "ref_check":
         return apply_ref_check(op)
     return None
+
+
+
+# --- Extra ops (sweep t1): modifier stacks (cage/curve deforms), masks, switches -----------------------------------------
+XW = float(os.environ.get("OA_FUZZ_XX_W", "1"))
+
+
+def mod_layers():
+    return [l for l in L.all() if l.type in ("VECTOR", "GROUP") and editable(l)]
+
+
+@op("mod_op", 4 * XW)
+def _(rng):
+    ls = mod_layers()
+    if not ls:
+        return None
+    l = rng.choice(ls)
+    n = len(l.modifiers)
+    what = rng.choice(["add", "add", "move", "move_to", "dup", "remove", "apply"]) if n else "add"
+    return {"layer": l.id, "what": what, "type": rng.choice(["CAGE_DEFORM", "CURVE_DEFORM", "ENVELOPE_DEFORM",
+                                                               "MESH_DEFORM", "MIRROR", "RESAMPLE", "BEVEL"]),
+            "i": rng.randrange(max(n, 1)), "to": rng.randrange(max(n, 1)), "dir": rng.choice([-1, 1])}
+
+
+def apply_mod(op):
+    l = find_layer(op["layer"])
+    if l is None:
+        return "skip"
+    L.active = l
+    n = len(l.modifiers)
+    w = op["what"]
+    if w == "add":
+        return ops.object.modifier_add(type=op["type"])
+    if op["i"] >= n:
+        return "skip"
+    if w == "move":
+        return ops.object.modifier_move(index=str(op["i"]), direction=str(op["dir"]))
+    if w == "move_to":
+        return ops.object.modifier_move_to(index=str(op["i"]), to=str(min(op["to"], n - 1)))
+    if w == "dup":
+        return ops.object.modifier_duplicate(index=str(op["i"]))
+    if w == "apply":
+        return ops.object.modifier_apply(index=str(op["i"]))
+    return ops.object.modifier_remove(index=str(op["i"]))
+
+
+@op("mod_set", 4 * XW, "py")
+def _(rng):
+    ls = [l for l in mod_layers() if any(m["type"] in ("CAGE_DEFORM", "CURVE_DEFORM", "MESH_DEFORM") for m in l.modifiers)]
+    if not ls:
+        return None
+    l = rng.choice(ls)
+    idx = [k for k, m in enumerate(l.modifiers) if m["type"] in ("CAGE_DEFORM", "CURVE_DEFORM", "MESH_DEFORM")]
+    k = rng.choice(idx)
+    others = [o for o in L.all() if o.type == "VECTOR" and o.id != l.id and o.shapes]
+    x = rng.random()
+    if x < 0.45 and others:
+        o = rng.choice(others)
+        return {"layer": l.id, "i": k, "set": {"layer": o.name, "shape": rng.choice(o.shapes)[0]}}
+    if x < 0.65:
+        return {"layer": l.id, "i": k, "set": {"strength": rng.choice([0.0, 0.5, 1.0, 1.5])}}
+    if x < 0.8:
+        return {"layer": l.id, "i": k, "set": {"cage_method": rng.choice(["MEAN_VALUE", "RIGID", "OUTLINE", "ENVELOPE"])}}
+    if x < 0.9:
+        return {"layer": l.id, "i": k, "set": {"envelope_method": rng.choice(["STANDARD", "BLENDED", "SEAMLESS"])}}
+    return {"layer": l.id, "i": k, "set": {"weights": rng.choice(["CUSTOM", "AUTOMATIC"])}}
+
+
+def apply_mod_set(op):
+    l = find_layer(op["layer"])
+    if l is None or op["i"] >= len(l.modifiers):
+        return "skip"
+    try:
+        l.modifier_set(op["i"], **op["set"])
+    except (ValueError, RuntimeError, KeyError, TypeError) as e:
+        return "skip"
+    return None
+
+
+@op("mask_op", 3 * XW)
+def _(rng):
+    ls = [l for l in L.all() if l.type in ("VECTOR", "GROUP", "IMAGE", "SWITCH")]
+    srcs = [l for l in L.all() if l.type == "VECTOR"]
+    if not ls or not srcs:
+        return None
+    l = rng.choice(ls)
+    nm = len(l.masks)
+    what = rng.choice(["add", "add_step", "set", "set", "remove", "remove_step", "move", "dup"] + (["bad_set"] if os.environ.get("OA_FUZZ_BADSET") == "1" else [])) if nm else "add"
+    return {"layer": l.id, "what": what, "card": rng.randrange(max(nm, 1)), "to": rng.randrange(max(nm, 1)),
+            "src": rng.choice(srcs).id, "mode": rng.choice(["ADD", "SUBTRACT"]), "invert": rng.random() < 0.3,
+            "grow": rng.choice([0, 0, 3, -3, 100]), "shape": rng.choice(["AS_DRAWN", "FILLS_ONLY", "STROKES_ONLY"]),
+            "cuts": rng.choice(["ALL", "FILLS", "LINES"]), "end_lines": rng.random() < 0.3}
+
+
+def apply_mask(op):
+    l = find_layer(op["layer"])
+    src = find_layer(op["src"])
+    if l is None:
+        return "skip"
+    for o in L.all():
+        o.selected = False
+    L.active = l
+    w, nm = op["what"], len(l.masks)
+    lid = str(l.id)
+    if w == "add":
+        if src is None:
+            return "skip"
+        return ops.mask.add(layer=lid, sources=str(src.id), mode=op["mode"], invert="1" if op["invert"] else "0")
+    if op["card"] >= nm:
+        return "skip"
+    c = str(op["card"])
+    if w == "add_step":
+        if src is None:
+            return "skip"
+        return ops.mask.add(layer=lid, card=c, sources=str(src.id), mode=op["mode"])
+    if w == "set":
+        return ops.mask.set(layer=lid, index=c, grow=str(op["grow"]), shape=op["shape"], cuts=op["cuts"],
+                            end_lines="1" if op["end_lines"] else "0", invert="1" if op["invert"] else "0")
+    if w == "bad_set":   # an argument it refuses after ones it takes: CANCELLED must change nothing
+        return ops.mask.set(layer=lid, index=c, invert="0" if l.masks[op["card"]]["steps"] and
+                            l.masks[op["card"]]["steps"][0].get("invert") else "1", grow="7", mode="BOGUS")
+    if w == "remove":
+        return ops.mask.remove(layer=lid, index=c)
+    if w == "remove_step":
+        return ops.mask.remove(layer=lid, index=c, step="0")
+    if w == "move":
+        return ops.mask.move(layer=lid, index=c, to=str(min(op["to"], nm - 1)))
+    return ops.mask.duplicate(layer=lid, index=c)
+
+
+@op("switch_op", 3 * XW)
+def _(rng):
+    sws = [l for l in L.all() if l.type == "SWITCH" and l.children]
+    if not sws:
+        return None
+    s = rng.choice(sws)
+    kids = [c.name for c in s.children]
+    return {"layer": s.id, "child": rng.choice(kids + ["", "RIG"]), "hold": rng.random() < 0.3,
+            "default": rng.random() < 0.15, "what": rng.choice(["set", "set", "set", "next", "prev"])}
+
+
+def apply_switch(op):
+    s = find_layer(op["layer"])
+    if s is None:
+        return "skip"
+    if op["child"] and op["child"] not in [c.name for c in s.children] + ["RIG"]:
+        return "skip"
+    if op["what"] == "set":
+        return ops.layer.switch_set(layer=str(s.id), child=op["child"], hold="1" if op["hold"] else "0",
+                                    default="1" if op["default"] else "0")
+    L.active = s.children[0]
+    return ops.layer.switch_next() if op["what"] == "next" else ops.layer.switch_previous()
+
+
+_apply_extra_base = apply_extra
+
+
+def apply_extra(op):
+    o = op["op"]
+    if o == "mod_op":
+        return apply_mod(op)
+    if o == "mod_set":
+        return apply_mod_set(op) or "py-done"
+    if o == "mask_op":
+        return apply_mask(op)
+    if o == "switch_op":
+        return apply_switch(op)
+    return _apply_extra_base(op)
+
 
 
 ONLY = [n for n in os.environ.get("OA_FUZZ_ONLY", "").split(",") if n]   # e.g. sculpt,simplify,frame,undo,redo
