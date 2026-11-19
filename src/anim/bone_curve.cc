@@ -369,6 +369,44 @@ bool bone_curve_chain_reaches(const Layer &armature, uint64_t start, uint64_t en
   return false;
 }
 
+bool layer_curve_chain_extend(const Layer &armature, const Layer &layer, uint64_t to, uint64_t &top, uint64_t &end,
+                              bool *inside, std::string *why)
+{
+  top = layer.parent_bone;
+  end = layer.parent_bone_curve && layer.parent_bone_chain_end != 0 ? layer.parent_bone_chain_end : top;
+  if (inside) {
+    *inside = false;
+  }
+  const Bone *bone = bone_find(armature, to);
+  if (!bone || !bone_find(armature, top)) {
+    if (why) {
+      *why = bone ? layer.name + " has no Parent Bone" : "No such bone";
+    }
+    return false;
+  }
+  if (bone_curve_chain_reaches(armature, top, to) && bone_curve_chain_reaches(armature, to, end)) {
+    if (inside) {
+      *inside = true;
+    }
+    if (why) {
+      *why = bone->name + " is already in the chain";
+    }
+    return false;
+  }
+  if (bone_curve_chain_reaches(armature, to, top)) {
+    top = to;
+    return true;
+  }
+  if (bone_curve_chain_reaches(armature, end, to)) {
+    end = to;
+    return true;
+  }
+  if (why) {
+    *why = bone->name + " isn't connected to the chain";
+  }
+  return false;
+}
+
 std::vector<size_t> layer_curve_chain(const Layer &armature, const Layer &layer)
 {
   if (!layer.points_follow_bone() || !layer.parent_bone_curve) {

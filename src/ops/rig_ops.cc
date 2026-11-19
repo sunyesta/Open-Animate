@@ -2932,7 +2932,8 @@ void rig_operators_register()
                "squash and stretch squashes its lines too), POINTS its points (lines keep their width), CURVE bends "
                "its points along the bone's curve (bendy bones); `chain_end`=a bone connected on from the Parent Bone "
                "bends them along the whole chain to it (\"\": the Parent Bone alone), making Deform Curve. "
-               "Either alone, or both. keep_animation=1: the layer shows where it did on every keyed frame "
+               "Either alone, or both. `extend_to`=a bone in line with the active layer's chain (through connected "
+               "bones): above its Parent Bone the chain starts there, below its end it ends there (Deform Curve). keep_animation=1: the layer shows where it did on every keyed frame "
                "(its transform keyed again there), as Keep Poses does for setup moves. Setup frame only",
                [](Context &C) {
                  const Layer *l = C.document ? document_active_layer(*C.document) : nullptr;
@@ -2942,15 +2943,33 @@ void rig_operators_register()
                  if (!on_setup_frame(C)) {
                    return OpStatus::Cancelled;
                  }
-                 const bool set_bone = op_has_arg(C, "bone");
-                 const std::string name = op_arg(C, "bone");
+                 bool set_bone = op_has_arg(C, "bone");
+                 std::string name = op_arg(C, "bone");
                  const std::string deform = op_arg(C, "deform");
                  if (!deform.empty() && deform != "LAYER" && deform != "POINTS" && deform != "CURVE") {
                    report(ReportType::Error, "deform is LAYER, POINTS or CURVE");
                    return OpStatus::Cancelled;
                  }
-                 const bool set_chain = op_has_arg(C, "chain_end");
-                 const std::string chain_end = op_arg(C, "chain_end");
+                 bool set_chain = op_has_arg(C, "chain_end");
+                 std::string chain_end = op_arg(C, "chain_end");
+                 /* Extend To: the active layer's chain carried on, as a drawing's right-click on a bone does. */
+                 if (op_has_arg(C, "extend_to")) {
+                   const Layer *active = document_active_layer(*C.document);
+                   const Layer *rig = layer_armature(*C.document, active->id);
+                   const Bone *to = bone_find_by_name(*rig, op_arg(C, "extend_to"));
+                   uint64_t top = 0, end = 0;
+                   std::string why;
+                   if (!to || !layer_curve_chain_extend(*rig, *active, to->id, top, end, nullptr, &why)) {
+                     report(ReportType::Warning, to ? why : "No bone named " + op_arg(C, "extend_to"));
+                     return OpStatus::Cancelled;
+                   }
+                   if (top != active->parent_bone) {
+                     set_bone = true;
+                     name = bone_find(*rig, top)->name;
+                   }
+                   set_chain = true;
+                   chain_end = bone_find(*rig, end)->name;
+                 }
                  int changed = 0, same_as_original = 0, locked = 0;
                  /* Keep Animation: where each layer showed on the frames that matter, before its bone
                   * changes (worked out frame by frame, then the frame put back). */

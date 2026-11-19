@@ -16648,6 +16648,12 @@ static std::vector<IKPoint> ik_points(const Layer &armature)
   return out;
 }
 
+/* A drawing's right-click on a bone of its rig: which drawing, which bone. */
+static struct {
+  uint64_t layer = 0;
+  std::string bone;
+} g_drawing_menu;
+
 /* Limit Angle as an arc at the bone's head, green between its Min and Max, with a line where the bone turns now (red at
  * an end). Its ends are dragged on the setup frame. */
 static constexpr ImU32 COL_LIMIT = IM_COL32(0x6f, 0xbf, 0x73, 255), COL_LIMIT_FILL = IM_COL32(0x6f, 0xbf, 0x73, 41);
@@ -20869,11 +20875,30 @@ static void viewport_draw_contents(Area &area, Context &C)
     draw_cursor(dl, view.to_screen(ts.cursor));
   }
 
+  /* Right-click on a bone of the rig the active drawing is in: its menu, to parent the drawing to that bone or carry
+   * its chain on to it. */
+  bool drawing_bone_menu = false;
+  if (hovered && ts.tool == Tool::Select && !io.KeyShift && !g_modal.active &&
+      ImGui::IsMouseReleased(ImGuiMouseButton_Right) && !ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Right) &&
+      !g_right_click_spent && ov.show)
+  {
+    g_drawing_menu = {};
+    const Layer *active = document_active_layer(doc);
+    const Layer *rig = active && !active->is_bone_layer() ? layer_armature(doc, active->id) : nullptr;
+    const bool rig_shown = rig && (ov.armature == ArmatureDisplay::On ||
+                                   (ov.armature == ArmatureDisplay::Selected && rig->selected));
+    if (const Bone *on = rig_shown ? bone_find(*rig, pick_bone(doc, *rig, view, io.MousePos)) : nullptr) {
+      g_drawing_menu = {active->id, on->name};
+      ImGui::OpenPopup("##drawing_bone_menu");
+      drawing_bone_menu = true;
+    }
+  }
   /* Right-click with points or handles selected: their context menu, as in Blender. */
   /* The Motion Path tool too, while no path keys or dots are picked (then the path's menu is the one). */
   const bool path_tool_points = ts.tool == Tool::MotionPath && !g_path_drag.active && path_edit_selection(C).empty() &&
                                 wm.path_handle_picks.empty();
   if (hovered && (ts.tool == Tool::Select || path_tool_points) && !io.KeyShift && !g_modal.active && drawing &&
+      !drawing_bone_menu &&
       ImGui::IsMouseReleased(ImGuiMouseButton_Right) && !ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Right) &&
       !g_right_click_spent)
   {
@@ -20989,6 +21014,38 @@ static void viewport_draw_contents(Area &area, Context &C)
     menu_operator(C, "Edges", "mesh.delete_edges");
     ImGui::Separator();
     menu_operator(C, "Dissolve Points", "mesh.dissolve_points");
+    ui_menu_end();
+  }
+  if (ui_menu_begin("##drawing_bone_menu")) {
+    const Layer *drawn = layer_find(doc, g_drawing_menu.layer);
+    const Layer *rig = drawn ? layer_armature(doc, drawn->id) : nullptr;
+    if (const Bone *b = rig ? bone_find_by_name(*rig, g_drawing_menu.bone) : nullptr) {
+      ImGui::TextDisabled("%s", drawn->name.c_str());
+      ImGui::Separator();
+      const bool setup = doc.frame_current == 0;
+      const char *setup_why = "Parent Bone is set on frame 0";
+      uint64_t top = 0, end = 0;
+      bool inside = false;
+      std::string why;
+      const bool extends = layer_curve_chain_extend(*rig, *drawn, b->id, top, end, &inside, &why);
+      const bool only = drawn->parent_bone == b->id && (!drawn->parent_bone_curve || drawn->parent_bone_chain_end == 0);
+      const std::string parent_label = "Parent " + drawn->name + " to " + b->name;
+      if (ui_menu_item(parent_label.c_str(), nullptr, only, setup)) {
+        operator_call(C, "layer.parent_bone_set", {{"bone", b->name}});
+      }
+      if (!setup && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("%s", setup_why);
+      }
+      if (!inside && drawn->parent_bone != 0) {
+        const std::string extend_label = "Extend " + drawn->name + "\xE2\x80\x99s chain to " + b->name;
+        if (ui_menu_item(extend_label.c_str(), nullptr, false, setup && extends)) {
+          operator_call(C, "layer.parent_bone_set", {{"extend_to", b->name}});
+        }
+        if ((!setup || !extends) && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+          ImGui::SetTooltip("%s", !setup ? setup_why : why.c_str());
+        }
+      }
+    }
     ui_menu_end();
   }
   if (ui_menu_begin("##point_menu")) {

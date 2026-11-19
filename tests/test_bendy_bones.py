@@ -277,4 +277,45 @@ back = curves(first)
 for k in kept:
     assert all(abs(kept[k][c] - back[k][c]) < 1e-6 for c in kept[k]), (k, kept[k], back[k])
 
+# --- A drawing's right-click menu on a bone: Extend its chain to a bone in line with it (connected), above its Parent
+# Bone (the chain starts there) or below its end (it ends there); refused for a bone already in it, one not in line, or
+# off frame 0. (Parent to the bone is layer.parent_bone_set bone=, as before.)
+ops.wm.read_homefile(confirmed="1")
+doc, layers = oanim.data.document, oanim.data.layers
+doc.auto_freeze_keys = False
+doc.frame_current = 0
+assert ops.layer.new_bone() == {'FINISHED'}
+rig = layers.active
+add("Root", (0.0, 0.0), (1.0, 0.0))
+add("A", (1.0, 0.0), (2.0, 0.0), "Root")
+add("B", (2.0, 0.0), (3.0, 0.0), "A")
+add("C", (3.0, 0.0), (4.0, 0.0), "B")
+add("Side", (2.0, 0.0), (2.0, 1.0), "A")
+add("Loose", (0.0, 2.0), (1.0, 2.0))
+assert ops.layer.new() == {'FINISHED'}
+art = layers.active
+assert ops.layer.move_to_group(group=str(rig.id)) == {'FINISHED'}
+art = next(l for l in layers.all() if l.id == art.id)
+art.add_curve([(1.0, 0.1), (3.5, 0.1), (3.5, -0.1), (1.0, -0.1)])
+assert ops.layer.parent_bone_set(bone="B") == {'FINISHED'}
+assert art.parent_bone_deform != "CURVE"
+assert ops.layer.parent_bone_set(extend_to="C") == {'FINISHED'}
+assert art.parent_bone_deform == "CURVE" and list(_oanim.layer_parent_bone_chain(art.id)) == ["B", "C"]
+assert ops.layer.parent_bone_set(extend_to="A") == {'FINISHED'}
+assert list(_oanim.layer_parent_bone_chain(art.id)) == ["A", "B", "C"], "above: it starts there, its end kept"
+assert ops.layer.parent_bone_set(extend_to="B") == {'CANCELLED'}, "already in the chain"
+assert ops.layer.parent_bone_set(extend_to="Side") == {'CANCELLED'}, "connected, but not in line"
+assert ops.layer.parent_bone_set(extend_to="Loose") == {'CANCELLED'}
+assert ops.layer.parent_bone_set(extend_to="Nobody") == {'CANCELLED'}
+assert ops.ed.undo() == {'FINISHED'}
+assert list(_oanim.layer_parent_bone_chain(art.id)) == ["B", "C"], "one undo step"
+doc.frame_current = 10
+assert ops.layer.parent_bone_set(extend_to="Root") == {'CANCELLED'}, "frame 0 only"
+doc.frame_current = 0
+assert ops.layer.parent_bone_set(extend_to="Root") == {'FINISHED'}
+assert list(_oanim.layer_parent_bone_chain(art.id)) == ["Root", "A", "B", "C"]
+# Parent to one bone: the chain starts again from it.
+assert ops.layer.parent_bone_set(bone="A") == {'FINISHED'}
+assert list(_oanim.layer_parent_bone_chain(art.id)) == ["A"]
+
 print("test_bendy_bones: OK")

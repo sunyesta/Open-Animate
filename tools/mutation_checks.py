@@ -135,6 +135,13 @@ PENDING = [
      'a Limit Angle end turns the nearest way round from where it is', 'tests/test_ik_end.py'),
     ('src/data/bones.cc', '  return bone_parent_axes_angle(bone, parent, setup_frame) + bone.setup_angle;\n', '  (void)parent;\n  return bone.setup_angle;\n',
      "a Limit Angle's arc is measured from its parent's axes", 'tests/test_ik_end.py'),
+    # IK Ends and IK Bases, stage 6: a drawing's right-click on a bone extends its chain.
+    ('src/anim/bone_curve.cc', '    top = to;\n', '    (void)0;\n',
+     "a drawing's chain extended above its Parent Bone starts there", 'tests/test_bendy_bones.py'),
+    ('src/anim/bone_curve.cc', '    end = to;\n', '    (void)0;\n',
+     "a drawing's chain extended below its end ends there", 'tests/test_bendy_bones.py'),
+    ('src/ops/rig_ops.cc', '                   set_chain = true;\n', '                   (void)0;\n',
+     "Extend To sets the drawing's chain", 'tests/test_bendy_bones.py'),
 ]
 
 def build(root):

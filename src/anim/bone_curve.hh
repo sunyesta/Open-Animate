@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -88,6 +89,11 @@ Transform2D bone_curve_line_skin(const BoneCurveLine &rest, const BoneCurveLine 
 std::vector<size_t> layer_curve_chain(const Layer &armature, const Layer &layer);
 /* Whether `end` can end a chain from `start`: it is `start` or hangs from it through connected bones. */
 bool bone_curve_chain_reaches(const Layer &armature, uint64_t start, uint64_t end);
+/* A drawing's chain carried on to bone `to` (a drawing's right-click on a bone): `to` above its Parent Bone through
+ * connected bones starts it there, below its end (the Parent Bone without one) ends it there; `top` and `end` are the
+ * chain then. False: `to` is already in it (`inside` set), or not in line with it (`why` says so). */
+bool layer_curve_chain_extend(const Layer &armature, const Layer &layer, uint64_t to, uint64_t &top, uint64_t &end,
+                              bool *inside = nullptr, std::string *why = nullptr);
 
 /* --- Editing (the channels as now: on frame 0, the rest) ------------------------------------------------------- */
 
