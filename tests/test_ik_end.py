@@ -581,4 +581,37 @@ rig.bone_set("Up", angle=math.pi)
 assert end_set("MAX", -2, 0) == {'FINISHED'}
 assert abs(limits()[1] - math.pi / 2) < 1e-4, ("from the turned parent's axes", limits())
 
+# --- A file from before with the old IK constraint (a target and a chain) opens with it left out, the rest as it was.
+ops.wm.read_homefile(confirmed="1")
+doc, layers = oanim.data.document, oanim.data.layers
+doc.frame_current = 0
+ops.layer.new_bone()
+rig = layers.active
+add("Arm", (0, 0), (1, 0))
+add("Hand", (1, 0), (2, 0), "Arm")
+add("Goal", (2, 1), (2.2, 1))
+assert ops.armature.constraint_add(type="TRACK_TO", bone="Hand") == {'FINISHED'}
+rig.bone_constraint_set("Hand", 0, target="Goal")
+assert ops.armature.constraint_add(type="LIMIT_ANGLE", bone="Hand") == {'FINISHED'}
+with tempfile.TemporaryDirectory() as tmp:
+    import json, re, zipfile
+    path = pathlib.Path(tmp) / "new.oanim"
+    assert ops.wm.save_as_mainfile(filepath=str(path)) == {'FINISHED'}
+    old = pathlib.Path(tmp) / "old_ik.oanim"
+    swapped = 0
+    with zipfile.ZipFile(path) as z, zipfile.ZipFile(old, "w") as out:
+        for item in z.infolist():
+            data = z.read(item.filename)
+            if item.filename.endswith(".json"):
+                text, n = re.subn(r'"type":\s*"TRACK_TO"', '"type":"IK","chain":2,"max_stretch":1.5', data.decode("utf-8"))
+                text = re.sub(r'"name":\s*"Arm",', '"name":"Arm","ik_ignore":true,"arc_ik":true,', text)
+                swapped += n
+                data = text.encode("utf-8")
+            out.writestr(item, data)
+    assert swapped == 1, swapped
+    assert ops.wm.open_mainfile(filepath=str(old)) == {'FINISHED'}
+    rig = oanim.data.layers.active
+    assert [c["type"] for c in rig.bone_constraints("Hand")] == ["LIMIT_ANGLE"], rig.bone_constraints("Hand")
+    assert "ik_ignore" not in next(b for b in rig.bones if b["name"] == "Arm")
+
 print("test_ik_end: OK")

@@ -1,6 +1,6 @@
 """Bone constraints: Blender's stack with Moho's kinds (Limit Angle, Independent Angle, Squash &
-Stretch, Copy Angle / Position / Scale with factor and delay, Track To, Stretch To, IK), never on
-the setup frame; interactive IK while posing; Dynamics simulated (and baked); all saved.
+Stretch, Copy Angle / Position / Scale with factor and delay, Track To, Stretch To), never on
+the setup frame; Dynamics simulated (and baked); all saved.
 
 Run with:  OpenAnimate --background --python tests/test_bone_constraints.py
 """
@@ -59,9 +59,6 @@ add("perp", (4.5, 0.5), (4.5, 1.0), parent="squash")
 add("eye", (0, -4), (0.5, -4))
 add("tgt", (3, -1), (3.5, -1))
 add("reacher", (0, -6), (0.5, -6))
-add("base", (5, 3), (6, 3))
-add("hand", (6, 3), (7, 3), parent="base")
-add("goal", (5.5, 4.5), (5.7, 4.5))
 
 # --- Limit Angle, and the setup frame stays raw -------------------------------------------------
 constrain("arm", "LIMIT_ANGLE", min_angle=-0.5, max_angle=0.5)
@@ -141,40 +138,6 @@ constrain("eye", "TRACK_TO", target="tgt")
 assert abs(direction(bones()["eye"]) - math.pi / 4) < 1e-3, "points at the target's base"
 constrain("reacher", "STRETCH_TO", target="tgt")
 assert close(bones()["reacher"]["tail"], (3, -1)), "stretches to reach it"
-
-# --- IK target -------------------------------------------------------------------------------------
-constrain("hand", "IK", target="goal")
-b = bones()
-assert close(b["hand"]["tail"], (5.5, 4.5), 2e-3), ("the tip reaches the goal", b["hand"]["tail"])
-assert abs(direction(b["base"])) > 0.1, "the base turned too"
-# Ignored by IK: the chain stops below it.
-rig.bone_set("goal", position=(6, 4))
-rig.bone_set("base", ik_ignore=True)
-b = bones()
-assert abs(direction(b["base"])) < 1e-3 and close(b["hand"]["tail"], (6, 4), 2e-3), b["hand"]
-rig.bone_set("base", ik_ignore=False)
-# Out of reach: it stretches, up to max stretch.
-rig.bone_set("goal", position=(8.5, 3.0))
-assert not close(bones()["hand"]["tail"], (8.5, 3)), "out of reach without stretching"
-rig.bone_constraint_set("hand", 0, max_stretch=2.0)
-assert close(bones()["hand"]["tail"], (8.5, 3), 2e-3), ("stretched to reach", bones()["hand"]["tail"])
-rig.bone_constraint_set("hand", 0, max_stretch=1.0)
-rig.bone_set("goal", position=(5.5, 4.5))
-# The arc solver also reaches.
-rig.bone_set("hand", arc_ik=True)
-assert close(bones()["hand"]["tail"], (5.5, 4.5), 0.02), bones()["hand"]["tail"]
-rig.bone_set("hand", arc_ik=False)
-rig.bone_constraint_set("hand", 0, enabled=False)
-
-# --- Interactive IK: posing by the tip turns the parents -------------------------------------------
-doc.frame_current = 20
-rig.select_bone("hand", part="TAIL")
-before = bones()
-assert rig.move_bone_ends((-0.5, 1.0))
-b = bones()
-assert close(b["hand"]["tail"], (before["hand"]["tail"][0] - 0.5, before["hand"]["tail"][1] + 1.0), 2e-3), b["hand"]
-assert abs(direction(b["base"]) - direction(before["base"])) > 0.05, "the parent turned"
-assert close(b["base"]["head"], before["base"]["head"]), "the chain's base stays put"
 
 # --- Dynamics: a tail swings behind its body, and settles ------------------------------------------
 doc.frame_current = 0
@@ -609,7 +572,7 @@ assert [c["type"] for c in rig.bone_constraints("tail")] == ["DYNAMICS"]
 # --- Saved ---------------------------------------------------------------------------------------------
 doc.frame_current = 0
 constrain("perp", "LIMIT_ANGLE", min_angle=-0.2, max_angle=0.3)  # perp rests turned: old files convert
-saved = {name: rig.bone_constraints(name) for name in ("arm", "follower", "hand", "tail", "hair")}
+saved = {name: rig.bone_constraints(name) for name in ("arm", "follower", "tail", "hair")}
 path = str(pathlib.Path(tempfile.mkdtemp(prefix="oanim_constraints_")) / "constraints.oanim")
 doc.wind_gusts, doc.wind_gust_speed, doc.wind_turbulence = 0.3, 1.5, 0.2
 doc.frame_current = 10

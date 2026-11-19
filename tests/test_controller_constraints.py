@@ -73,7 +73,7 @@ size = bone("eye")["controller_frame_size"]
 assert "Bone Constraints" in oanim.wm.properties_tabs(), oanim.wm.properties_tabs()
 
 # --- What can be added ----------------------------------------------------------------------------------------------
-for kind in ("STRETCH_TO", "MAINTAIN_VOLUME", "IK", "LIMIT_ANGLE", "COPY_SCALE"):
+for kind in ("STRETCH_TO", "MAINTAIN_VOLUME", "LIMIT_ANGLE", "COPY_SCALE"):
     assert ops.armature.constraint_add(type=kind, bone="eye") == {'CANCELLED'}, kind
 assert rig.bone_constraints("eye") == []
 

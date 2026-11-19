@@ -120,18 +120,18 @@ go(10)
 assert look()["shape_error"] == "" and rig.bone_constraints("eye")[1]["shape_error"] == ""
 assert bone("eye")["head"][0] > 0.31, bone("eye")["head"]
 
-# --- An IK on the eye that turns the head, which carries the white: a loop too --------------------------------------------
+# --- An IK End on the eye that turns the head, which carries the white: a loop too ----------------------------------------
 go(0)
 layers.active = rig
 rig.select_bone("eye")
 assert ops.armature.bone_add(name="aim", head_x="1", head_y="2", tail_x="1", tail_y="2.1", parent="") == {'FINISHED'}
-assert ops.armature.constraint_add(type="IK", bone="eye") == {'FINISHED'}
-ik = len(rig.bone_constraints("eye")) - 1
-rig.bone_constraint_set("eye", ik, target="aim", chain=0)
+assert ops.armature.ik_end_add(bone="eye") == {'FINISHED'}
+assert ops.armature.ik_pin_set(bone="eye", to="aim") == {'FINISHED'}
 go(10)
-assert look()["shape_error"].startswith("Loop"), ("the IK turns the head that carries the white", look())
-rig.bone_constraint_set("eye", ik, chain=1)
+assert look()["shape_error"].startswith("Loop"), ("the IK End's chain turns the head that carries the white", look())
+go(0)
+assert ops.armature.ik_base_add(bone="head") == {'FINISHED'}
 go(10)
-assert look()["shape_error"] == "", ("an IK that turns only the eye leaves the white alone", look())
+assert look()["shape_error"] == "", ("an IK End that turns only the eye leaves the white alone", look())
 
 print("test_shape_loop: all passed")

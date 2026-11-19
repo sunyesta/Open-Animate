@@ -179,20 +179,21 @@ rig.select_bone(grown["name"])
 assert ops.armature.bone_delete() == {'FINISHED'}
 
 # An IK chain stops at the knob: it doesn't turn it.
-add("goal", (-3.0, 4.0), (-2.8, 4.0))  # out of the hand's reach: a longer chain would turn more
-doc.frame_current = 30
+doc.frame_current = 0
 ops.armature.select_none()
-rig.select_bone("hand")
+assert ops.armature.ik_end_add(bone="hand") == {'FINISHED'}
+doc.frame_current = 30
 root_tail = bone("root")["tail"]
 turn = bone("stick")["knob_angle"]
-assert ops.armature.constraint_add(type="IK", bone="hand") == {'FINISHED'}
-rig.bone_constraint_set("hand", 0, target="goal", chain=0)  # as long a chain as there is
+assert ops.armature.ik_drag(bone="hand", x="-3.0", y="4.0") == {'FINISHED'}  # out of reach: a longer chain turns more
 doc.frame_current = 31
 doc.frame_current = 30
 assert close(bone("stick")["knob_angle"], turn), "IK leaves the knob alone"
 assert close(bone("root")["tail"], root_tail), ("and what it hangs from: the chain stops at it", bone("root"))
-rig.bone_constraint_set("hand", 0, enabled=False)
+assert ops.ed.undo() == {'FINISHED'}
 doc.frame_current = 0
+assert ops.ed.undo() == {'FINISHED'}
+assert rig.bone_constraints("hand") == []
 
 # --- Saved; children in files from before ride the box ---------------------------------------------------------------
 folder = pathlib.Path(tempfile.mkdtemp(prefix="oanim_knob_"))

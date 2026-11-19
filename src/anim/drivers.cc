@@ -259,8 +259,6 @@ Setting constraint_setting(BoneConstraint &c, const std::string &rest)
   if (rest == "amount") return float_setting(named("Amount"), &c.amount, 0.0f, 4.0f);
   if (rest == "factor") return float_setting(named("Factor"), &c.factor);
   if (rest == "delay") return int_setting(named("Delay"), &c.delay, 0, 1000);
-  if (rest == "chain") return int_setting(named("Chain"), &c.chain, 0, 64);
-  if (rest == "max_stretch") return float_setting(named("Max Stretch"), &c.max_stretch, 1.0f, 10.0f);
   if (rest == "overlap") return float_setting(named("Overlap"), &c.overlap, 0.0f, 1.0f);
   if (rest == "softness") return float_setting(named("Softness"), &c.softness, 0.0f, 1000.0f);
   if (rest == "own_gravity") return bool_setting(named("Own Gravity"), &c.own_gravity);
@@ -406,8 +404,6 @@ Setting setting_find(Document &doc, uint64_t layer_id, const std::string &path)
     rest = path.substr(end + 3);
     if (rest == "strength") return float_setting(bone->name + ": Strength", &bone->strength, 0.0f, 100.0f);
     if (rest == "pin_size") return float_setting(bone->name + ": Pin Size", &bone->pin_size, 0.1f, 20.0f);
-    if (rest == "ik_ignore") return bool_setting(bone->name + ": Ignored by IK", &bone->ik_ignore);
-    if (rest == "arc_ik") return bool_setting(bone->name + ": Arc Solver", &bone->arc_ik);
     if (parse_index(rest, "constraints[", &i, &rest) && i < bone->constraints.size()) {
       Setting s = constraint_setting(bone->constraints[i], rest);
       s.name = bone->name + " › " + s.name;

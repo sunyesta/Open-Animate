@@ -1,9 +1,10 @@
 """IK worked out in the axes the chain's base turns in. Under a parent flipped one way (scale -1 across), a turn of a
-bone goes the other way in the layer, so stepping toward the goal stepped away from it: a leg's tip reaches its goal
-under a flipped hip, by its IK and by Auto IK dragging the tip, and a leg in a bone group flipped (a mirrored copy)
-hung from an outer bone. Under a parent stretched one way the chain is a rigid one stretched, reaching every goal the
-stretch takes in reach. Arc IK dragged with Limit Angle on the joints counts each joint's bend as the limit leaves it,
-reaching a goal inside the limits. A chain of three bones reaches goals in reach (24 steps on the bones fell short).
+bone goes the other way in the layer, so stepping toward the goal stepped away from it: a leg's IK End dragged under a
+flipped hip reaches where it is dragged, and so does a leg in a bone group flipped (a mirrored copy) hung from an outer
+bone. Under a parent stretched one way the chain is a rigid one stretched, reaching every goal the stretch takes in
+reach. A chain dragged with Limit Angle on the joints counts each joint's bend as the limit leaves it, reaching a goal
+inside the limits. A chain of three bones reaches goals in reach (24 steps on the bones fell short), and a goal moving
+smoothly bends a long chain smoothly.
 
 Run with:  OpenAnimate --background --python tests/test_ik_axes.py
 """
@@ -53,36 +54,37 @@ def dist(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def ik_end(rig, bone, base=""):
+    """An IK End on `bone` (not Soft, so a goal at full reach is reached), its chain stopped by an IK Base on `base`."""
+    if base:
+        assert ops.armature.ik_base_add(bone=base) == {'FINISHED'}
+    assert ops.armature.ik_end_add(bone=bone) == {'FINISHED'}
+    n = next(i for i, c in enumerate(rig.bone_constraints(bone)) if c["type"] == "IK_END")
+    rig.bone_constraint_set(bone, n, soft=False)
+
+
+def drag(bone, goal):
+    assert ops.armature.ik_drag(bone=bone, x=repr(goal[0]), y=repr(goal[1])) == {'FINISHED'}
+
+
 def leg(rig, parent="Hip"):
-    """A thigh and a calf, the knee bent a little, the calf's IK aimed at Goal."""
+    """A thigh and a calf, the knee bent a little, the calf an IK End."""
     add(rig, "Thigh", (0, 0), (0.1, -1.0), parent)
     add(rig, "Calf", (0.1, -1.0), (0.0, -2.0), "Thigh")
-    add(rig, "Goal", (0.0, -2.0), (0.2, -2.0))
-    constrain(rig, "Calf", "IK", target="Goal")
+    ik_end(rig, "Calf", parent)
 
 
-# --- a flipped hip: the IK and Auto IK
+# --- a flipped hip
 rig = new_rig()
 add(rig, "Hip", (0, 0), (0.5, 0))
 leg(rig)
-rig.bone_set("Hip", ik_ignore=True)
 doc.auto_key = True
 doc.frame_current = 1
 rig.bone_set("Hip", scale=(-1.0, 1.0))
-for goal in ((0.6, -1.4), (-0.7, -1.2), (0.3, -1.8), (-0.2, -0.9)):
-    rig.bone_set("Goal", position=goal)
-    b = bones(rig)
-    miss = dist(b["Calf"]["tail"], b["Goal"]["head"])
-    assert miss < 1e-4, ("under a flipped hip the calf reaches its goal", goal, miss)
-# Auto IK: the calf's tip dragged, its IK off.
-rig.bone_constraint_set("Calf", 0, enabled=False)
-for goal in ((0.6, -1.4), (-0.5, -1.5)):
-    t = bones(rig)["Calf"]["tail"]
-    rig.select_bone("Calf", part="TAIL")
-    assert rig.move_bone_ends((goal[0] - t[0], goal[1] - t[1]))
-    ops.armature.select_none()
+for goal in ((0.6, -1.4), (-0.7, -1.2), (0.3, -1.8), (-0.2, -0.9), (-0.5, -1.5)):
+    drag("Calf", goal)
     miss = dist(bones(rig)["Calf"]["tail"], goal)
-    assert miss < 1e-4, ("Auto IK under a flipped hip reaches", goal, miss)
+    assert miss < 1e-4, ("under a flipped hip the calf reaches where it is dragged", goal, miss)
 
 # --- a flipped bone group hung from an outer bone
 outer = new_rig()
@@ -103,16 +105,14 @@ doc.auto_key = True
 doc.frame_current = 1
 inner = find(inner)
 for goal in ((0.6, -1.4), (-0.6, -1.4), (0.2, -1.1)):
-    inner.bone_set("Goal", position=goal)
-    b = bones(inner)
-    miss = dist(b["Calf"]["tail"], b["Goal"]["head"])
-    assert miss < 1e-4, ("in a flipped bone group the calf reaches its goal", goal, miss)
+    drag("Calf", goal)
+    miss = dist(bones(inner)["Calf"]["tail"], goal)
+    assert miss < 1e-4, ("in a flipped bone group the calf reaches where it is dragged", goal, miss)
 
 # --- a hip stretched one way
 rig = new_rig()
 add(rig, "Hip", (0, 0), (0.5, 0))
 leg(rig)
-rig.bone_set("Hip", ik_ignore=True)
 doc.auto_key = True
 doc.frame_current = 1
 rig.bone_set("Hip", scale=(2.0, 1.0))  # 2 across the hip: the layer's y doubled below it
@@ -125,25 +125,28 @@ for i in range(40):
     a = -math.pi / 2 + 1.0 * math.sin(i * 0.37)
     r = (l1 + l2) * (0.4 + 0.5 * ((i * 0.618) % 1.0))
     goal = (r * math.cos(a), 2 * r * math.sin(a))
-    rig.bone_set("Goal", position=goal)
-    b = bones(rig)
-    worst = max(worst, dist(b["Calf"]["tail"], b["Goal"]["head"]))
+    drag("Calf", goal)
+    worst = max(worst, dist(bones(rig)["Calf"]["tail"], goal))
 assert worst < 1e-3, ("under a stretched hip the calf reaches goals in reach", worst)
 
-# --- Arc IK dragged with Limit Angle on the joints
-for n in (2, 3):
-    rig = new_rig()
+
+def chain(rig, n):
     add(rig, "Base", (-0.5, 0), (0, 0))
     prev = "Base"
     for k in range(n):
         add(rig, "B%d" % k, (k, 0.05 * k * k), (k + 1.0, 0.05 * (k + 1.0) ** 2), prev)
         prev = "B%d" % k
-    rig.bone_set("Base", ik_ignore=True)
-    rig.bone_set("B%d" % (n - 1), arc_ik=True)
+    ik_end(rig, "B%d" % (n - 1), "Base")
+
+
+# --- dragged with Limit Angle on the joints
+for n in (2, 3):
+    rig = new_rig()
+    chain(rig, n)
     for k in range(1, n):
         constrain(rig, "B%d" % k, "LIMIT_ANGLE", min_angle=-0.2, max_angle=0.8)
     rest = bones(rig)
-    # Every joint turned 0.4 (inside the limits), the base -0.5.
+    # Every joint turned 0.4 (inside the limits), the first -0.5.
     x = y = 0.0
     for k in range(n):
         h, t = rest["B%d" % k]["head"], rest["B%d" % k]["tail"]
@@ -152,23 +155,13 @@ for n in (2, 3):
     doc.auto_key = True
     doc.frame_current = 1
     end = "B%d" % (n - 1)
-    t = bones(rig)[end]["tail"]
-    rig.select_bone(end, part="TAIL")
-    assert rig.move_bone_ends((x - t[0], y - t[1]))
-    ops.armature.select_none()
+    drag(end, (x, y))
     miss = dist(bones(rig)[end]["tail"], (x, y))
-    assert miss < 3e-3, ("Arc IK with limits reaches a goal inside them", n, miss)
+    assert miss < 3e-3, ("a chain with limits reaches a goal inside them", n, miss)
 
 # --- a chain of three bones reaches goals in reach
 rig = new_rig()
-add(rig, "Base", (-0.5, 0), (0, 0))
-prev = "Base"
-for k in range(3):
-    add(rig, "B%d" % k, (k, 0.05 * k * k), (k + 1.0, 0.05 * (k + 1.0) ** 2), prev)
-    prev = "B%d" % k
-add(rig, "Goal", (3, 0.5), (3.2, 0.5))
-rig.bone_set("Base", ik_ignore=True)
-constrain(rig, "B2", "IK", target="Goal")
+chain(rig, 3)
 doc.auto_key = True
 doc.frame_current = 1
 pts = [(k, 0.05 * k * k) for k in range(4)]
@@ -182,26 +175,21 @@ for trial in range(20):
         acc += turns[k - 1] if k else 0.0
         x += seg[k][1] * math.cos(seg[k][0] + acc)
         y += seg[k][1] * math.sin(seg[k][0] + acc)
-    rig.bone_set("Goal", position=(x, y))
-    b = bones(rig)
-    worst = max(worst, dist(b["B2"]["tail"], b["Goal"]["head"]))
+    drag("B2", (x, y))
+    worst = max(worst, dist(bones(rig)["B2"]["tail"], (x, y)))
 assert worst < 1e-4, ("a three-bone chain reaches goals in reach", worst)
+
 # --- a goal moving smoothly bends a long chain smoothly, each joint the way it rests
 for n in (3, 4):
     rig = new_rig()
-    add(rig, "Base", (-0.5, 0), (0, 0))
-    prev = "Base"
-    for k in range(n):
-        add(rig, "B%d" % k, (k, 0.05 * k * k), (k + 1.0, 0.05 * (k + 1.0) ** 2), prev)
-        prev = "B%d" % k
-    add(rig, "Goal", (n, 0.5), (n + 0.2, 0.5))
-    rig.bone_set("Base", ik_ignore=True)
-    constrain(rig, "B%d" % (n - 1), "IK", target="Goal")
+    chain(rig, n)
     doc.auto_key = True
+    goals = {}
     for f in range(1, 49):
         doc.frame_current = f
         t = f / 48.0
-        rig.bone_set("Goal", position=(n * (0.35 + 0.5 * t), 1.3 * math.sin(t * 2 * math.pi)))
+        goals[f] = (n * (0.35 + 0.5 * t), 1.3 * math.sin(t * 2 * math.pi))
+        drag("B%d" % (n - 1), goals[f])
 
     def ways():
         b = bones(rig)
@@ -212,7 +200,7 @@ for n in (3, 4):
     for f in range(1, 49):
         doc.frame_current = f
         w, b = ways()
-        miss = dist(b["B%d" % (n - 1)]["tail"], b["Goal"]["head"])
+        miss = dist(b["B%d" % (n - 1)]["tail"], goals[f])
         assert miss < 1e-4, ("a long chain reaches a goal moving smoothly", n, f, miss)
         for k in range(1, n):
             assert math.remainder(w[k] - w[k - 1], 2 * math.pi) > 0.0, ("each joint bends the way it rests", n, f, k)

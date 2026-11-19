@@ -946,12 +946,6 @@ static json layer_to_json(const Layer &layer)
           put_keys(bj, (std::string(name) + "_keys").c_str(), keys);
         }
       });
-      if (b.ik_ignore) {
-        bj["ik_ignore"] = true;
-      }
-      if (b.arc_ik) {
-        bj["arc_ik"] = true;
-      }
       bj["end_distance"] = b.keep_end_distance;
       if (b.shape != BoneShape::None) {
         bj["shape"] = "CUSTOM";
@@ -1036,8 +1030,6 @@ static json layer_to_json(const Layer &layer)
                      {"factor", num(c.factor)},
                      {"delay", c.delay},
                      {"follow_move", c.follow_move},
-                     {"chain", c.chain},
-                     {"max_stretch", num(c.max_stretch)},
                      {"ik_head", c.ik_head},
                      {"keep_angle", c.keep_angle},
                      {"soft", c.soft},
@@ -3172,8 +3164,6 @@ static Layer layer_from_json(const json &j, int depth)
       value = get_float(bj, std::string(name).c_str(), bone_curve_channel_default(name));
       get_keys(bj, (std::string(name) + "_keys").c_str(), keys);
     });
-    b.ik_ignore = get_bool(bj, "ik_ignore", false);
-    b.arc_ik = get_bool(bj, "arc_ik", false);
     b.keep_end_distance = get_bool(bj, "end_distance", false);
     const std::string shape = bj.value("shape", std::string());
     b.shape = shape == "CUSTOM" ? BoneShape::Custom : BoneShape::None;
@@ -3302,8 +3292,6 @@ static Layer layer_from_json(const json &j, int depth)
       /* Saved before Copy Position could go to its target: it copied the target's move. */
       c.follow_move = get_bool(cj, "follow_move", true);
       c.delay = std::max(0, get_int(cj, "delay", 0));
-      c.chain = std::max(0, get_int(cj, "chain", 0));
-      c.max_stretch = std::max(1.0f, get_float(cj, "max_stretch", 1.0f));
       c.ik_head = get_bool(cj, "ik_head", false);
       c.keep_angle = get_bool(cj, "keep_angle", true);
       c.soft = get_bool(cj, "soft", true);

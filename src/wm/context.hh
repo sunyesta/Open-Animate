@@ -88,8 +88,6 @@ struct ToolSettings {
   int tool_layer_kind = -1;
   /* Ctrl Tab: the tool to go back to from Sculpt (as Blender toggles sculpt mode). */
   Tool tool_before_sculpt = Tool::Select;
-  /* Posing a bone by its tip turns its parents too (Moho's IK). */
-  bool auto_ik = true;
   Tool tool_return = Tool::Select;
   SelectMode select_mode = SelectMode::Point;
   /* Snap points to the grid while drawing and transforming. */

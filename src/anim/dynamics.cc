@@ -193,8 +193,6 @@ uint64_t signature(const Document &doc, const Layer &armature)
       h.value(c.target);
       h.value(c.factor);
       h.value(c.delay);
-      h.value(c.chain);
-      h.value(c.max_stretch);
       h.value(c.own_gravity);
       h.value(c.own_wind);
       h.value(c.weight);

@@ -102,16 +102,15 @@ assert sorted(p["label"] for p in wm.motion_paths()) == ["hand head", "hand tip"
 doc.motion_paths = False
 
 # --- An IK chain stops at a pin ----------------------------------------------------------------------------------------
-add("goal", (1.5, 1.0), (1.7, 1.0))
+assert ops.armature.ik_end_add(bone="hand") == {'FINISHED'}
 doc.frame_current = 1
-rig.select_bone("hand")
-assert ops.armature.constraint_add(type="IK", bone="hand") == {'FINISHED'}
-rig.bone_constraint_set("hand", 0, target="goal")
+assert ops.armature.ik_drag(bone="hand", x="1.5", y="1.0") == {'FINISHED'}
 assert close(bone("hand")["head"], (1, 0)), ("the pin isn't turned by the chain: the hand stays", bone("hand"))
 hand = bone("hand")
 assert abs(math.atan2(hand["tail"][1] - hand["head"][1], hand["tail"][0] - hand["head"][0])) > 0.1, "the hand turns"
-rig.bone_constraint_set("hand", 0, enabled=False)
+assert ops.ed.undo() == {'FINISHED'} and ops.ed.undo() == {'FINISHED'}
 doc.frame_current = 0
+assert rig.bone_constraints("hand") == []
 
 # --- Back to Regular: the bone it was ----------------------------------------------------------------------------------
 assert convert("arm", "REGULAR") == {'FINISHED'}

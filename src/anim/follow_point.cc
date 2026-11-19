@@ -67,7 +67,8 @@ static void gather_bones(const Document &doc, const Layer &layer, bool points, s
   }
 }
 
-/* With what those bones hang on: their parents, what their constraints aim at, and the IK that turns them. */
+/* With what those bones hang on: their parents, what their constraints aim at, and the IK Ends that turn them
+ * (with what those are pinned to). */
 static void close_bones(const Document &doc, BoneSets &sets)
 {
   for (auto &[rig_id, bones] : sets) {
@@ -82,27 +83,30 @@ static void close_bones(const Document &doc, BoneSets &sets)
     const auto add = [&](uint64_t id) { return by_id.count(id) && bones.insert(id).second; };
     for (bool grew = true; grew;) {
       grew = false;
-      for (const Bone &b : rig->bones) {
+      for (size_t i = 0; i < rig->bones.size(); i++) {
+        const Bone &b = rig->bones[i];
         if (bones.count(b.id)) {
           grew |= add(b.parent);
           for (const BoneConstraint &c : b.constraints) {
             grew |= add(c.target);
           }
         }
-        for (const BoneConstraint &c : b.constraints) {
-          if (c.type != BoneConstraintType::IK || !c.enabled) {
-            continue;
-          }
-          const Bone *up = &b;
-          bool turned = false;
-          for (int n = 0; up && n < 256 && (c.chain == 0 || n < c.chain); n++) {
-            turned = turned || bones.count(up->id) != 0;
-            const auto it = by_id.find(up->parent);
-            up = it == by_id.end() ? nullptr : it->second;
-          }
-          if (turned) {
-            grew |= add(b.id);
-            grew |= add(c.target);
+        /* An IK End turns its chain toward what it is pinned to, on any of its keys. */
+        const BoneConstraint *end = bone_ik_end(b);
+        if (!end) {
+          continue;
+        }
+        const std::vector<size_t> chain = armature_ik_chain(*rig, i, BoneConstraintType::IKEnd);
+        if (std::none_of(chain.begin(), chain.end(), [&](size_t j) { return bones.count(rig->bones[j].id) != 0; })) {
+          continue;
+        }
+        grew |= add(b.id);
+        if (end->pin > 0.0f) {
+          grew |= add(uint64_t(end->pin));
+        }
+        for (const Key<float> &k : end->pin_keys.keys) {
+          if (k.value > 0.0f) {
+            grew |= add(uint64_t(k.value));
           }
         }
       }

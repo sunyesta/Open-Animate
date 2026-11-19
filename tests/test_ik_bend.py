@@ -1,9 +1,8 @@
-"""IK legs as a cut-out rig has them: each a thigh and a calf hanging nearly straight from a hip that IK ignores, the
-knee bent a little outward at rest, the calf's IK aimed at a foot bone hanging from the root. Lowering the hip deep into
-a crouch, each calf's tip reaches its foot exactly (a two-bone chain is solved, not stepped toward) and each knee bends
-the way it rests, outward, the mirrored leg too; with Arc IK, the even bend chosen of the two that reach is the one
-curving as the chain rests. Then the deep bend from frame 1 is the same when reached from other frames, and a
-straight two-bone chain (no way it rests bent) still reaches.
+"""IK legs as a cut-out rig has them: each a thigh and a calf hanging nearly straight from a hip (an IK Base), the knee
+bent a little outward at rest, the calf an IK End pinned to a foot bone hanging from the root. Lowering the hip deep
+into a crouch, each calf's tip reaches its foot exactly (a two-bone chain is solved, not stepped toward) and each knee
+bends the way it rests, outward, the mirrored leg too, from shallow to deep. Then the deep bend from frame 1 is the
+same when reached from other frames, and a straight two-bone chain (no way it rests bent) still reaches.
 
 Run with:  OpenAnimate --background --python tests/test_ik_bend.py
 """
@@ -49,12 +48,11 @@ for tag, s in (("_R", -1), ("_L", 1)):
     add("Thigh" + tag, (0.1 * s, 0), (0.17 * s, -1.0), "Hip")
     add("Calf" + tag, (0.17 * s, -1.0), (0.2 * s, -2.0), "Thigh" + tag)
     add("Foot" + tag, (0.2 * s, -2.0), (0.4 * s, -2.05), "Root")
-rig.bone_set("Hip", ik_ignore=True)
+assert ops.armature.ik_base_add(bone="Hip") == {'FINISHED'}
 for tag in ("_R", "_L"):
-    rig.select_bone("Calf" + tag)
-    assert ops.armature.constraint_add(type="IK", bone="Calf" + tag) == {'FINISHED'}
-    rig.bone_constraint_set("Calf" + tag, 0, target="Foot" + tag)
-    ops.armature.select_none()
+    assert ops.armature.ik_end_add(bone="Calf" + tag) == {'FINISHED'}
+    rig.bone_constraint_set("Calf" + tag, 0, soft=False)
+    assert ops.armature.ik_pin_set(bone="Calf" + tag, to="Foot" + tag) == {'FINISHED'}
 rest = bones()
 rest_side = {t: side(rest, t) for t in ("_R", "_L")}
 assert rest_side["_R"] == -rest_side["_L"], rest_side
@@ -90,28 +88,19 @@ for f in (5, 0, 3, 1):
 b = bones()
 assert all(dist(a[n], b[n]["tail"]) < 1e-5 for n in a), "frame 1 from other frames"
 
-# Arc IK: of the two even bends reaching as far, the one curving as the chain rests.
-for tag in ("_R", "_L"):
-    rig.bone_set("Calf" + tag, arc_ik=True)
-# Crouching from shallow to deep: either even bend can come out a hair closer, so each depth must pick by the rest.
+# Crouching from shallow to deep, each depth bending the way the leg rests.
 for drop in (0.15, 0.25, 0.35, 0.45, 0.55, 0.7, 0.85):
     rig.bone_set("Hip", position=(hip["position"][0] - drop, hip["position"][1]))
-    check("arc, down %g" % drop, 2e-3, 0.3)  # the even bend is searched in steps
-for tag in ("_R", "_L"):
-    rig.bone_set("Calf" + tag, arc_ik=False)
+    check("down %g" % drop, 1e-4, 0.3)
 
 # A straight two-bone chain has no bend to keep: it still reaches.
 doc.frame_current = 0
 add("Arm", (3, 0), (4, 0))
 add("ForeArm", (4, 0), (5, 0), "Arm")
-add("Goal", (5, 0), (5.2, 0))
-rig.select_bone("ForeArm")
-assert ops.armature.constraint_add(type="IK", bone="ForeArm") == {'FINISHED'}
-rig.bone_constraint_set("ForeArm", 0, target="Goal")
-ops.armature.select_none()
+assert ops.armature.ik_end_add(bone="ForeArm") == {'FINISHED'}
+rig.bone_constraint_set("ForeArm", 0, soft=False)
 doc.frame_current = 1
-g = bones()["Goal"]
-rig.bone_set("Goal", position=(g["position"][0] - 0.8, g["position"][1] + 0.3))
+assert ops.armature.ik_drag(bone="ForeArm", x="4.2", y="0.3") == {'FINISHED'}
 b = bones()
-assert dist(b["ForeArm"]["tail"], b["Goal"]["head"]) < 1e-4, ("a straight chain reaches", b["ForeArm"]["tail"])
+assert dist(b["ForeArm"]["tail"], (4.2, 0.3)) < 1e-4, ("a straight chain reaches", b["ForeArm"]["tail"])
 print("test_ik_bend passed")

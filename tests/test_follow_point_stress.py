@@ -479,12 +479,7 @@ team_deform = add_deform(team_art, team_cage)
 team = new_rig("Team")
 add_bone(team, "follower", (0.5, 0.0))
 follow(team, "follower", team_art, team_deform)
-# IK reaching for it, Track To aiming at it, Copy Position going to it.
-add_bone(team, "upper", (-1.0, 0.0), (-0.5, 0.0))
-add_bone(team, "lower", (-0.5, 0.0), (0.0, 0.0), parent="upper")
-layers.active = team
-assert ops.armature.constraint_add(bone="lower", type="IK") == {'FINISHED'}
-team.bone_constraint_set("lower", 0, target="follower", chain=2)
+# Track To aiming at it, Copy Position going to it.
 add_bone(team, "aimer", (0.0, -0.5))
 layers.active = team
 assert ops.armature.constraint_add(bone="aimer", type="TRACK_TO") == {'FINISHED'}
@@ -495,9 +490,6 @@ assert ops.armature.constraint_add(bone="copier", type="COPY_POSITION") == {'FIN
 team.bone_constraint_set("copier", 0, target="follower", follow_move=False)
 place(team_cage, lambda p: (p[0] + 0.3, p[1] + 0.3))
 assert close(head(team, "follower"), (0.8, 0.3)), head(team, "follower")
-# Out of its reach, the chain straightens toward where the follower is.
-tip = team.bone_pose("lower")[2:4]
-assert abs(math.atan2(tip[1], tip[0] + 1.0) - math.atan2(0.3, 1.8)) < 1e-2, ("IK reaches for it", tip)
 assert close(head(team, "copier"), (0.8, 0.3)), head(team, "copier")
 aim = team.bone_pose("aimer")
 assert abs(math.atan2(aim[3] - aim[1], aim[2] - aim[0]) - math.atan2(0.8, 0.8)) < 1e-2, aim
@@ -530,11 +522,11 @@ frames = [0, 1, 2, 3, 5, 8, 10, 13, 17, 21, 30]
 first = {}
 for frame in frames:
     at(frame)
-    first[frame] = (rig.bone_pose("eye"), team.bone_pose("follower"), team.bone_pose("lower"))
+    first[frame] = (rig.bone_pose("eye"), team.bone_pose("follower"), team.bone_pose("aimer"))
 for _ in range(30):
     frame = rng.choice(frames)
     doc.frame_current = frame
-    assert first[frame] == (rig.bone_pose("eye"), team.bone_pose("follower"), team.bone_pose("lower")), (frame,)
+    assert first[frame] == (rig.bone_pose("eye"), team.bone_pose("follower"), team.bone_pose("aimer")), (frame,)
 
 # --- Random webs of rigs ------------------------------------------------------------------------------------------
 loops = chains = 0

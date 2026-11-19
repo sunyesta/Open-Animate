@@ -79,9 +79,9 @@ def kinds(name):
     return [c["type"] for c in rig.bone_constraints(name)]
 
 
-# b gets them all; c's own constraints (an IK, driven) are replaced by them.
+# b gets them all; c's own constraints (a Track To, driven) are replaced by them.
 rig.select_bone("c")
-assert ops.armature.constraint_add(type="IK") == {'FINISHED'}
+assert ops.armature.constraint_add(type="TRACK_TO") == {'FINISHED'}
 assert ops.anim.driver_add(layer=str(rig.id), path='bones["c"].constraints[0].influence', expression="0.5") == {'FINISHED'}
 own_drivers = len(oanim.data.drivers)
 rig.select_bone("b")
@@ -95,7 +95,7 @@ assert len(oanim.data.drivers) == own_drivers - 1, "the drivers on c's old const
 assert kinds("a") == ["LIMIT_ANGLE", "COPY_ANGLE", "DYNAMICS"], "the active one as it was"
 assert kinds("target") == [], "not selected"
 ops.ed.undo()
-assert kinds("b") == [] and kinds("c") == ["IK"] and len(oanim.data.drivers) == own_drivers
+assert kinds("b") == [] and kinds("c") == ["TRACK_TO"] and len(oanim.data.drivers) == own_drivers
 
 # Nothing else selected, or nothing to copy: nothing happens.
 rig.select_bone("a")

@@ -1,5 +1,5 @@
 """Bone Symmetrize makes the other side the same bone in every setting, mirrored, as Blender's does: new or already
-there, the other side takes the first side's relations, knob settings, IK settings, look, collections and constraints;
+there, the other side takes the first side's relations, knob settings, look, collections and constraints;
 the bones and layers they name switch to the other side's (the same one where there is none), and what has a way
 flips left to right (the box's slant, Limit Angle's limits, a bone's own wind). Mirror Bones off leaves an other side
 that is there as it is.
@@ -56,7 +56,7 @@ def constraint(name, kind):
 
 def left_side():
     """Head and two look targets with no partner made yet; Arm_L, Eye_L (a controller) and Hand_L (made after Arm_L, so
-    Arm_L's IK target's partner is made later in the same Symmetrize) with every setting off its default."""
+    Arm_L's Track To target's partner is made later in the same Symmetrize) with every setting off its default."""
     layers.active = rig()
     add("Head", 0, 0, 0, 1)
     add("Target_L", 1.5, 2, 1.5, 2.5)
@@ -72,10 +72,10 @@ def left_side():
     assert ops.armature.bone_relations_set(bone="Eye_L", knob_independent="1", knob_parent="Target_L") == {'FINISHED'}
     assert ops.armature.bone_relations_set(bone="Arm_L", inherit_rotation="0", local_location="0") == {'FINISHED'}
     rig().bone_set("Eye_L", contain_knob=False, controller_box_show="SELECTED")
-    rig().bone_set("Arm_L", strength=2.0, ik_ignore=True, arc_ik=True, color_set="THEME03", shape_layer="Hand_L")
+    rig().bone_set("Arm_L", strength=2.0, color_set="THEME03", shape_layer="Hand_L")
     rig().select_bone("Arm_L")
-    assert ops.armature.constraint_add(bone="Arm_L", type="IK") == {'FINISHED'}
-    rig().bone_constraint_set("Arm_L", 0, target="Hand_L", chain=1)
+    assert ops.armature.constraint_add(bone="Arm_L", type="TRACK_TO") == {'FINISHED'}
+    rig().bone_constraint_set("Arm_L", 0, target="Hand_L")
     assert ops.armature.constraint_add(bone="Arm_L", type="LIMIT_ANGLE") == {'FINISHED'}
     rig().bone_constraint_set("Arm_L", 1, min_angle=-0.3, max_angle=1.0)
     assert ops.armature.constraint_add(bone="Arm_L", type="DYNAMICS") == {'FINISHED'}
@@ -98,11 +98,10 @@ def check_mirrored(why):
     assert close(arm["strength"], 2.0) and arm["color_set"] == "THEME03" and arm["shape_layer"] == "Hand_R", (why, arm)
     assert sorted(arm["collections"]) == ["Arm_R", "Body"], (why, arm["collections"])
     cs = rig().bone_constraints("Arm_R")
-    assert [c["type"] for c in cs] == ["IK", "LIMIT_ANGLE", "DYNAMICS"], (why, cs)
-    assert cs[0]["target"] == "Hand_R" and cs[0]["chain"] == 1, (why, "IK reaches for the other hand", cs[0])
+    assert [c["type"] for c in cs] == ["TRACK_TO", "LIMIT_ANGLE", "DYNAMICS"], (why, cs)
+    assert cs[0]["target"] == "Hand_R", (why, "it aims at the other hand", cs[0])
     assert close(cs[1]["min_angle"], -1.0) and close(cs[1]["max_angle"], 0.3), (why, "limits turn the other way", cs[1])
     assert close(cs[2]["wind_direction"], math.pi - 0.25), (why, "its wind blows the other way", cs[2])
-    assert arm["ik_ignore"] is True and arm["arc_ik"] is True, (why, arm)
 
 
 # --- The other side not there yet: made with every setting, names switched --------------------------------------------

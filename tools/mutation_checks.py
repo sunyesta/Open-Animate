@@ -92,7 +92,7 @@ PENDING = [
      'Alt stretches a chain out of reach', 'tests/test_ik_end.py'),
     ('src/data/bones.cc', '  for (; more > 0; more--) {\n', '  for (; more > 0 && false; more--) {\n',
      'a drag can bend one bone more than up to the base', 'tests/test_ik_end.py'),
-    ('src/data/bones.cc', '    /* Pinned ends and bases the move left alone stay where they were. */\n    armature_ik_hold(armature, original, armature.bones.size(), BoneConstraintType::IKEnd);\n', '',
+    ('src/data/bones.cc', '    /* Pinned ends and bases the move left alone stay where they were. */\n    armature_ik_hold(armature, original, armature.bones.size(), BoneConstraintType::IKEnd, stretch);\n', '',
      'moving bones keeps pinned ends outside the moved chain put', 'tests/test_ik_end.py'),
     ('src/data/bones.cc', '      goal = ik_fk_pose(armature)[size_t(h.on)].pose.apply(h.local);\n', '      goal = h.place + h.local * 0.0f;\n',
      'a held end pinned to a bone rides that bone', 'tests/test_ik_end.py'),
@@ -142,6 +142,9 @@ PENDING = [
      "a drawing's chain extended below its end ends there", 'tests/test_bendy_bones.py'),
     ('src/ops/rig_ops.cc', '                   set_chain = true;\n', '                   (void)0;\n',
      "Extend To sets the drawing's chain", 'tests/test_bendy_bones.py'),
+    # The old IK constraint removed: loops through an IK End's chain.
+    ('src/anim/follow_point.cc', '        grew |= add(b.id);\n', '        (void)0;\n',
+     "a shape moved by an IK End's chain is a loop for that end's bone", 'tests/test_shape_loop.py'),
 ]
 
 def build(root):

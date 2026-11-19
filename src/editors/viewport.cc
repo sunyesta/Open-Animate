@@ -6420,17 +6420,6 @@ static void tool_settings_draw(Area &area, Context &C, ImVec2 origin, float widt
   /* A group with no items would measure out to the last item before it, the header's. */
   ImGui::Dummy(ImVec2(0.0f, 0.0f));
   ImGui::SameLine(0.0f, 0.0f);
-  /* On a bone layer: Auto IK, for posing by a bone's tip. */
-  if (const Layer *bones = document_active_layer(doc); bones && bones->is_bone_layer() &&
-                                                       (ts.tool == Tool::Select || ts.tool == Tool::TransformBones))
-  {
-    if (header_toggle("Auto IK", ts.auto_ik,
-                      "Posing a bone by its tip turns its parents too, so the tip reaches the mouse (Moho's IK). "
-                      "The chain stops at a bone Ignored by IK")) {
-      ts.auto_ik = !ts.auto_ik;
-    }
-    ImGui::SameLine();
-  }
   switch (ts.tool) {
     case Tool::TransformLayer:
       ImGui::Checkbox("Show Grid Lines", &ts.layer_grid);
@@ -12394,10 +12383,9 @@ static std::string bone_modal_update(Context &C, const ViewMapping &view)
     /* Alt: bones stretch (a tip goes to the mouse, a connected bone moves whole), pinned chains too. */
     bm.stretch = io.KeyAlt && !bm.setup_frame;
     armature_grab_selected(*armature, g_bone_modal.bones, g_bone_modal.to_armature.apply_vector(delta),
-                           g_bone_modal.setup_frame, C.wm->tool_settings.auto_ik, bm.stretch);
+                           g_bone_modal.setup_frame, bm.stretch);
     for_also([&](Layer &l, BoneModal::Also &also) {
-      armature_grab_selected(l, also.bones, also.to_armature.apply_vector(delta), bm.setup_frame,
-                             C.wm->tool_settings.auto_ik, bm.stretch);
+      armature_grab_selected(l, also.bones, also.to_armature.apply_vector(delta), bm.setup_frame, bm.stretch);
     });
     bm.knob_snap = snap && !bm.setup_frame;
     if (bm.knob_snap) {
@@ -14540,8 +14528,7 @@ static OpStatus bones_transform_exec(Context &C, char kind)
     Layer *armature = m.armature;
     const std::vector<Bone> &start = m.start;
     if (kind == 'G') {
-      armature_grab_selected(*armature, start, m.to_armature.apply_vector(move), setup, C.wm->tool_settings.auto_ik,
-                             op_arg_bool(C, "stretch"));
+      armature_grab_selected(*armature, start, m.to_armature.apply_vector(move), setup, op_arg_bool(C, "stretch"));
       if (op_arg_bool(C, "knob_snap")) {
         armature_snap_knobs(*armature);
       }

@@ -3839,8 +3839,6 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
                            : b.inherit_scale == InheritScale::Uniform ? "UNIFORM"
                                                                       : "NONE";
       d["local_location"] = b.local_location;
-      d["ik_ignore"] = b.ik_ignore;
-      d["arc_ik"] = b.arc_ik;
       d["keep_end_distance"] = b.keep_end_distance;
       d["shape"] = b.shape == BoneShape::Custom ? "CUSTOM" : "BONE";
       d["pin_size"] = b.pin_size;
@@ -4011,12 +4009,6 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         bone.name = to;
         armature_bone_renamed(*current_context().document, id, before, bone.name);
       }
-      else if (key == "ik_ignore") {
-        bone.ik_ignore = value.cast<bool>();
-      }
-      else if (key == "arc_ik") {
-        bone.arc_ik = value.cast<bool>();
-      }
       else if (key == "shape") {
         const std::string shape = value.cast<std::string>();
         if (shape == "PIN") {
@@ -4183,8 +4175,6 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["factor"] = c.factor;
       d["delay"] = c.delay;
       d["follow_move"] = c.follow_move;
-      d["chain"] = c.chain;
-      d["max_stretch"] = c.max_stretch;
       d["ik_head"] = c.ik_head;
       d["keep_angle"] = c.keep_angle;
       d["soft"] = c.soft;
@@ -4329,12 +4319,6 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
       else if (key == "delay") {
         c.delay = std::max(0, value.cast<int>());
-      }
-      else if (key == "chain") {
-        c.chain = std::max(0, value.cast<int>());
-      }
-      else if (key == "max_stretch") {
-        c.max_stretch = std::max(1.0f, value.cast<float>());
       }
       else if (key == "ik_head") {
         c.ik_head = value.cast<bool>();
@@ -4570,7 +4554,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     const std::vector<Bone> original = layer.bones;
     const bool setup = current_context().document->frame_current == 0;
-    armature_grab_selected(layer, original, {dx, dy}, setup, current_context().wm->tool_settings.auto_ik);
+    armature_grab_selected(layer, original, {dx, dy}, setup);
     if (current_context().wm->tool_settings.mirror_x) {
       armature_mirror_edits(layer, original, setup);
     }
@@ -4589,7 +4573,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     const std::vector<Bone> original = layer.bones;
     const bool setup = doc.frame_current == 0;
     for (const auto &[dx, dy] : offsets) {
-      armature_grab_selected(layer, original, {dx, dy}, setup, current_context().wm->tool_settings.auto_ik);
+      armature_grab_selected(layer, original, {dx, dy}, setup);
       animation_refresh_action_bones(doc);
     }
     current_context().undo->mark_changed();

@@ -96,10 +96,6 @@ Transform2D bone_outer_frame(const Bone &bone, bool setup_frame);
 void bone_outer_parents_update(Document &doc);
 /* For a move of the bones picked in `moving`: marks those a bone moving in another of them carries (Bone::outer_carried). */
 void bones_mark_carried(Document &doc, const std::vector<Layer *> &moving);
-/* Interactive IK while posing (Moho's): turns the bone and its parents (up to a bone Ignored by
- * IK) so the bone's tip reaches `goal` (bone layer space); an Arc IK bone bends its chain evenly.
- * Returns false when the bone has no parent to turn with. */
-bool armature_reach(Layer &armature, uint64_t bone, float2 goal);
 /* IK points moved by hand. Where bone `i`'s IK End or IK Base puts its point, in `poses`. */
 float2 armature_ik_point(const Layer &armature, const std::vector<BonePose> &poses, size_t i, BoneConstraintType type);
 /* How a move of an IK point bends its chain: `more` bones longer (or shorter) than up to its base, stretching out of
@@ -216,7 +212,7 @@ std::vector<float2> armature_picked_heads(const Layer &armature, bool setup_fram
  * its body moves whole, its parent turning and stretching to stay connected; pinned points out of reach stretch their
  * chains to hold. */
 void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, float2 delta, bool setup_frame,
-                            bool auto_ik = false, bool stretch = false);
+                            bool stretch = false);
 void armature_rotate_selected(Layer &armature, const std::vector<Bone> &original, float angle,
                               bool setup_frame = false);
 /* S. On the setup frame it resizes the picked bones (their joints spread about the middle of

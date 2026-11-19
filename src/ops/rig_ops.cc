@@ -180,8 +180,6 @@ static void bone_symmetrize_settings(Document &doc, Layer &armature, const Bone 
   dst.inherit_scale = src.inherit_scale;
   dst.local_location = src.local_location;
   dst.keep_end_distance = src.keep_end_distance;
-  dst.ik_ignore = src.ik_ignore;
-  dst.arc_ik = src.arc_ik;
   dst.shape = src.shape;
   dst.pin_size = src.pin_size;
   dst.shape_layer = layer_mirror_id(doc, src.shape_layer);
@@ -1251,9 +1249,6 @@ static std::vector<std::string> bone_constraint_driven_fields(BoneConstraintType
     case BoneConstraintType::CopyPosition:
     case BoneConstraintType::CopyScale:
       fields.insert(fields.end(), {"factor", "delay"});
-      break;
-    case BoneConstraintType::IK:
-      fields.insert(fields.end(), {"chain", "max_stretch"});
       break;
     case BoneConstraintType::IKEnd:
       fields.insert(fields.end(), {"keep_angle", "soft"});

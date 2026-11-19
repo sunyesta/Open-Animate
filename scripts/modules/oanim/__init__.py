@@ -476,14 +476,14 @@ class _Layer:
 
     def bone_constraints(self, bone):
         """The constraints of bone `bone`, top first: dicts with type (LIMIT_ANGLE, INDEPENDENT_ANGLE,
-        MAINTAIN_VOLUME, COPY_ANGLE, COPY_POSITION, COPY_SCALE, TRACK_TO, STRETCH_TO, IK, IK_END, IK_BASE,
+        MAINTAIN_VOLUME, COPY_ANGLE, COPY_POSITION, COPY_SCALE, TRACK_TO, STRETCH_TO, IK_END, IK_BASE,
         DYNAMICS) and settings (angles in radians, target as a bone name; an IK End's or IK Base's ik_head,
         keep_angle, soft and pin: "", "SCENE" or a bone's name)."""
         return list(_oanim.layer_bone_constraints(self._id, bone))
 
     def bone_constraint_set(self, bone, index, **values):
         """Change constraint `index` of bone `bone`: enabled, influence, min_angle, max_angle,
-        amount, target, factor, delay, chain, max_stretch, ik_head, keep_angle, soft, pin ("", "SCENE"
+        amount, target, factor, delay, ik_head, keep_angle, soft, pin ("", "SCENE"
         or a bone's name), weight, wind_catch, own_gravity (with
         gravity), own_wind (with wind, wind_direction (radians), wind_gusts, wind_gust_speed,
         wind_turbulence), own_forces (both own_gravity and own_wind), angle_spring / position_spring /

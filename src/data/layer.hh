@@ -358,9 +358,6 @@ enum class BoneConstraintType {
   /* Blender's: point at the target bone's base; also stretch to reach it. */
   TrackTo,
   StretchTo,
-  /* Moho's IK target: the bone's tip reaches for the target bone's base, turning `chain` bones up
-   * from it (0: up to a bone Ignored by IK, or the root). */
-  IK,
   /* Moho's bone dynamics: springs per channel, simulated from frame to frame. */
   Dynamics,
   /* Keeps the bone's head (or the drawings it carries) inside a closed shape of another layer, as
@@ -382,7 +379,7 @@ enum class BoneConstraintType {
   /* IK Base, where IK chains stop: at the bone's tail (or a root's head). Pinned (keyed), it holds the same way. */
   IKBase,
 };
-inline constexpr int BONE_CONSTRAINT_TYPES = 16;
+inline constexpr int BONE_CONSTRAINT_TYPES = 15;
 /* An IK End's or IK Base's Pinned To, as keyed: none, the scene, or else a bone's id. */
 inline constexpr float IK_PIN_NONE = 0.0f;
 inline constexpr float IK_PIN_SCENE = -1.0f;
@@ -459,10 +456,6 @@ struct BoneConstraint {
    * the way there; on, it copies the target's move from its setup pose instead (Moho's control bones;
    * files saved before this keep it on). */
   bool follow_move = false;
-  /* IK: how many bones up it turns (0: up to a bone Ignored by IK, or the root). */
-  int chain = 0;
-  /* IK: how far the chain may stretch to reach (1: not at all, 1.5: half again). */
-  float max_stretch = 1.0f;
   /* IK End: the chain ends at the bone's head (its parent's tip, for a short end bone such as a foot) rather than its
    * tail. IK Base: the base is at the bone's head rather than its tail. */
   bool ik_head = false;
@@ -782,10 +775,6 @@ struct Bone {
   Channel<float> curve_tail_reach_keys;
   /* Top to bottom (see BoneConstraintType). */
   std::vector<BoneConstraint> constraints;
-  /* Moho's Ignored by IK: IK chains stop below it and never turn it. */
-  bool ik_ignore = false;
-  /* Moho's Arc IK solver: a chain ending at this bone bends evenly, as an arc. */
-  bool arc_ik = false;
   /* Posed on a parent stretched along its length, it keeps its distance from the parent's nearer end (a hand on a
    * stretched arm stays at the wrist) rather than spreading with the stretch. On for bones made now; bones from files
    * made before it are off, so they pose as they always did. */

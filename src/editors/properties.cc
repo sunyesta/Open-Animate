@@ -2160,29 +2160,6 @@ static void bone_panel(Context &C, Layer &armature)
         return;
       }
     }
-    /* Moho's IK settings of the bone itself. */
-    label("IK");
-    const std::string driven_ik_path = std::string("bones[\"" + active->name + "\"].") + "ik_ignore";
-    const int driven_ik = ui_driver_field_begin(C, armature.id, driven_ik_path, -1);
-    if (ImGui::Checkbox("Ignored by IK", &active->ik_ignore)) {
-      C.undo->push("Ignored by IK", doc);
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("IK chains stop below this bone and never turn it");
-    }
-    ui_driver_typed(C, armature.id, driven_ik_path, -1);
-    ui_driver_field_end(C, armature.id, driven_ik_path, -1, driven_ik);
-    ImGui::SameLine();
-    const std::string driven_arc_path = std::string("bones[\"" + active->name + "\"].") + "arc_ik";
-    const int driven_arc = ui_driver_field_begin(C, armature.id, driven_arc_path, -1);
-    if (ImGui::Checkbox("Arc Solver", &active->arc_ik)) {
-      C.undo->push("Arc IK Solver", doc);
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Moho's Arc IK solver: a chain ending at this bone bends evenly, as an arc");
-    }
-    ui_driver_typed(C, armature.id, driven_arc_path, -1);
-    ui_driver_field_end(C, armature.id, driven_arc_path, -1, driven_arc);
     ImGui::BeginDisabled(doc.frame_current != 0);
     label("Strength");
     ui_drag_float("##bone_strength", &active->strength, 0.01f, 0.0f, 100.0f, "%.2f");
@@ -5831,9 +5808,6 @@ static void constraint_type_icon(ImDrawList *dl, ImVec2 c, float s, BoneConstrai
     }
     dl->AddPolyline(pts, 7, COL_MOD_ICON, 0, 1.3f);
   }
-  else if (type == BoneConstraintType::IK) {
-    ui_link_icon(dl, c, s, COL_MOD_ICON);
-  }
   else {
     dl->AddCircle(ImVec2(c.x - s * 0.35f, c.y), s * 0.55f, COL_MOD_ICON, 0, 1.3f);
     dl->AddCircle(ImVec2(c.x + s * 0.35f, c.y), s * 0.55f, COL_MOD_ICON, 0, 1.3f);
@@ -5863,8 +5837,7 @@ static void constraints_panel(Context &C, Layer &armature)
         {"Transform",
          {BoneConstraintType::CopyAngle, BoneConstraintType::CopyPosition, BoneConstraintType::CopyScale,
           BoneConstraintType::LimitAngle}},
-        {"Tracking", {BoneConstraintType::TrackTo, BoneConstraintType::StretchTo, BoneConstraintType::IK,
-                      BoneConstraintType::IKEnd, BoneConstraintType::IKBase, BoneConstraintType::LookAt}},
+        {"Tracking", {BoneConstraintType::TrackTo, BoneConstraintType::StretchTo, BoneConstraintType::IKEnd, BoneConstraintType::IKBase, BoneConstraintType::LookAt}},
         {"Limit", {BoneConstraintType::LimitShape}},
         {"Relationship", {BoneConstraintType::ChildOf, BoneConstraintType::FollowPoint,
                           BoneConstraintType::IndependentAngle, BoneConstraintType::MaintainVolume}},
@@ -6833,27 +6806,6 @@ static void constraints_panel(Context &C, Layer &armature)
         case BoneConstraintType::StretchTo:
           target_row();
           break;
-        case BoneConstraintType::IK: {
-          target_row();
-          modifier_row_label("Chain Length", column,
-                             "How many bones up from this one the IK may turn.\n"
-                             "0 goes up to a bone Ignored by IK, or the root");
-          const std::string driven_chain_path = constraint_path + "chain";
-          const int driven_chain = ui_driver_field_begin(C, armature.id, driven_chain_path, -1);
-          ui_drag_int("##chain", &c.chain, 0.1f, 0, 64, c.chain == 0 ? "To Ignored / Root" : "%d");
-          done("IK Chain");
-          ui_driver_typed(C, armature.id, driven_chain_path, -1);
-          ui_driver_field_end(C, armature.id, driven_chain_path, -1, driven_chain);
-          modifier_row_label("Max Stretch", column,
-                             "How far the chain may stretch to reach a target out of reach: 1 never stretches, 2 up to twice as long");
-          const std::string driven_stretch_path = constraint_path + "max_stretch";
-          const int driven_stretch = ui_driver_field_begin(C, armature.id, driven_stretch_path, -1);
-          ui_drag_float("##stretch", &c.max_stretch, 0.01f, 1.0f, 10.0f, "%.2f");
-          done("IK Stretch");
-          ui_driver_typed(C, armature.id, driven_stretch_path, -1);
-          ui_driver_field_end(C, armature.id, driven_stretch_path, -1, driven_stretch);
-          break;
-        }
         case BoneConstraintType::Dynamics: {
           /* Between its sections (each channel, the bone's Weight and Wind Catch, its own gravity,
            * its own wind, baking): a gap, a faint line across the box, and a gap. */
