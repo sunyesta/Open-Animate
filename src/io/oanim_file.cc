@@ -1,3 +1,4 @@
+#include "anim/bone_curve.hh"
 #include "io/oanim_file.hh"
 
 #include <numeric>
@@ -680,7 +681,10 @@ static json layer_to_json(const Layer &layer)
     j["parent_bone"] = layer.parent_bone;
   }
   /* Always written: Points is the default now, and a file without it was saved when Layer was. */
-  j["parent_bone_deform"] = layer.parent_bone_points ? "POINTS" : "LAYER";
+  j["parent_bone_deform"] = !layer.parent_bone_points ? "LAYER" : layer.parent_bone_curve ? "CURVE" : "POINTS";
+  if (layer.parent_bone_chain_end != 0) {
+    j["parent_bone_chain_end"] = layer.parent_bone_chain_end;
+  }
   if (layer.clip_to_below) {
     j["clip_to_below"] = true;
   }
@@ -935,6 +939,13 @@ static json layer_to_json(const Layer &layer)
         bj["depth"] = num(b.depth);
         put_keys(bj, "depth_keys", b.depth_keys);
       }
+      /* Bendy bones' handles, where off their rest or keyed. */
+      bone_curve_channels(b, [&](std::string_view name, const float &value, const Channel<float> &keys) {
+        if (value != bone_curve_channel_default(name) || keys.animated()) {
+          bj[std::string(name)] = num(value);
+          put_keys(bj, (std::string(name) + "_keys").c_str(), keys);
+        }
+      });
       if (b.ik_ignore) {
         bj["ik_ignore"] = true;
       }
@@ -2862,8 +2873,11 @@ static Layer layer_from_json(const json &j, int depth)
   layer.parent_bone = get_id(j, "parent_bone");
   /* Older files left it out when it was Layer (then the default): a layer bound to a bone there stays
    * Layer, and one that wasn't takes today's default (Points). */
-  layer.parent_bone_points = j.contains("parent_bone_deform") ? get_string(j, "parent_bone_deform", "") == "POINTS"
+  const std::string deform = get_string(j, "parent_bone_deform", "");
+  layer.parent_bone_points = j.contains("parent_bone_deform") ? deform == "POINTS" || deform == "CURVE"
                                                               : !j.contains("parent_bone");
+  layer.parent_bone_curve = deform == "CURVE";
+  layer.parent_bone_chain_end = get_id(j, "parent_bone_chain_end");
   for (const json &a : get_array(j, "actions")) {
     if (a.is_string() && !a.get<std::string>().empty()) {
       layer.actions.push_back(a.get<std::string>());
@@ -3146,6 +3160,10 @@ static Layer layer_from_json(const json &j, int depth)
     get_keys(bj, "scale_keys", b.scale_keys);
     b.depth = std::max(1e-4f, get_float(bj, "depth", 1.0f));
     get_keys(bj, "depth_keys", b.depth_keys);
+    bone_curve_channels(b, [&](std::string_view name, float &value, Channel<float> &keys) {
+      value = get_float(bj, std::string(name).c_str(), bone_curve_channel_default(name));
+      get_keys(bj, (std::string(name) + "_keys").c_str(), keys);
+    });
     b.ik_ignore = get_bool(bj, "ik_ignore", false);
     b.arc_ik = get_bool(bj, "arc_ik", false);
     const std::string shape = bj.value("shape", std::string());

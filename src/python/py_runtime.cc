@@ -1,3 +1,4 @@
+#include "anim/bone_curve.hh"
 #include "python/py_runtime.hh"
 
 #include <cmath>
@@ -3812,6 +3813,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
       d["scale"] = py::make_tuple(b.scale.x, b.scale.y);
       d["depth"] = b.depth;
+      bone_curve_channels(b, [&](std::string_view name, const float &value, const Channel<float> &) {
+        d[py::str(std::string(name))] = value;
+      });
       d["strength"] = b.strength;
       d["selected"] = b.selected;
       d["id"] = b.id;
@@ -3931,6 +3935,18 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
       else if (key == "depth") {
         bone.depth = std::max(1e-4f, value.cast<float>());
+      }
+      else if (key.rfind("curve_", 0) == 0) {
+        bool found = false;
+        bone_curve_channels(bone, [&](std::string_view name, float &v, Channel<float> &) {
+          if (name == key) {
+            v = value.cast<float>();
+            found = true;
+          }
+        });
+        if (!found) {
+          throw py::key_error(key);
+        }
       }
       else if (key == "scale") {
         /* (x, y), or one number for both. */
@@ -4558,8 +4574,37 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return result;
   });
   m.def("layer_parent_bone_deform", [layer_or_raise](uint64_t id) {
-    return std::string(layer_or_raise(id).parent_bone_points ? "POINTS" : "LAYER");
+    const Layer &l = layer_or_raise(id);
+    return std::string(!l.parent_bone_points ? "LAYER" : l.parent_bone_curve ? "CURVE" : "POINTS");
   });
+  /* The bones a Deform: Curve drawing bends along, head to tail (empty: it doesn't bend). */
+  m.def("layer_parent_bone_chain", [layer_or_raise](uint64_t id) {
+    const Document &doc = *current_context().document;
+    const Layer &layer = layer_or_raise(id);
+    py::list result;
+    if (const Layer *armature = layer_armature(doc, layer.id)) {
+      for (const size_t i : layer_curve_chain(*armature, layer)) {
+        result.append(armature->bones[i].name);
+      }
+    }
+    return result;
+  });
+  /* A bone's curve as it shows now (bone layer space): head, head handle, tail handle, tail; and as it rests. */
+  m.def("bone_curve_controls", [layer_or_raise](uint64_t id, const std::string &name, bool rest) {
+    const Document &doc = *current_context().document;
+    const Layer &armature = layer_or_raise(id);
+    py::list result;
+    for (size_t i = 0; i < armature.bones.size(); i++) {
+      if (armature.bones[i].name == name) {
+        const std::vector<BonePose> poses = armature_pose(armature, doc.frame_current == 0);
+        for (const float2 p : bone_curve_controls(armature, poses, i, rest, doc.frame_current == 0)) {
+          result.append(py::make_tuple(p.x, p.y));
+        }
+        return result;
+      }
+    }
+    throw py::key_error(name);
+  }, py::arg("id"), py::arg("name"), py::arg("rest") = false);
   m.def("layer_parent_bone", [layer_or_raise](uint64_t id) {
     const Document &doc = *current_context().document;
     const Layer &layer = layer_or_raise(id);

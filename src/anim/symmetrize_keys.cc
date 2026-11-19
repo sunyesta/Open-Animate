@@ -1,3 +1,4 @@
+#include "anim/bone_curve.hh"
 #include "anim/symmetrize_keys.hh"
 
 #include <algorithm>
@@ -397,6 +398,12 @@ void keep_layer(Layer &now, const Layer &old)
       b.angle_keys = was->angle_keys;
       b.scale_keys = was->scale_keys;
       b.depth_keys = was->depth_keys;
+      {
+        std::vector<const Channel<float> *> theirs;
+        bone_curve_channels(*was, [&](std::string_view, const auto &, const auto &keys) { theirs.push_back(&keys); });
+        size_t k = 0;
+        bone_curve_channels(b, [&](std::string_view, float &, Channel<float> &keys) { keys = *theirs[k++]; });
+      }
       b.controller_actions = was->controller_actions;
       if (b.constraints.size() == was->constraints.size()) {
         for (size_t i = 0; i < b.constraints.size(); i++) {

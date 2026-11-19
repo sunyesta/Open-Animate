@@ -270,6 +270,7 @@ static void symmetrize_contents(Layer &l, const std::map<uint64_t, uint64_t> &bo
     }
   }
   l.parent_bone = flip_bone(l.parent_bone);
+  l.parent_bone_chain_end = l.parent_bone_chain_end ? flip_bone(l.parent_bone_chain_end) : 0;
   /* A reference kept (its original mirrored with it): what it moved, mirrored too; as the drawings, from the
    * setup frame. Its own weights take the other side's bones. */
   if (l.is_reference()) {

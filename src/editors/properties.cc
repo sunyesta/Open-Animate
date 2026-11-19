@@ -2,6 +2,7 @@
  * drawing (shapes and their styles). A Modifiers tab arrives with the modifier stack. */
 
 #define IMGUI_DEFINE_MATH_OPERATORS
+#include "anim/bone_curve.hh"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_stdlib.h"
@@ -2099,6 +2100,52 @@ static void bone_panel(Context &C, Layer &armature)
         }
       });
     }
+    /* Bendy bones: how far the curve leans along the bone at its head and at its tail (each handle's reach, 1 an arc's;
+     * the handles themselves are dragged in the viewport), and Reset Curve. The tail's reach, where a connected child
+     * shares the joint, is kept on the child. */
+    if (bone_curve_has(*active)) {
+      const size_t ai = size_t(active - armature.bones.data());
+      const int kid = bone_curve_kid(armature, ai);
+      Bone *tail_owner = kid >= 0 ? &armature.bones[size_t(kid)] : active;
+      const std::string tail_path = "bones[\"" + tail_owner->name + "\"]." +
+                                    (kid >= 0 ? "curve_parent_reach" : "curve_tail_reach");
+      float *tail_reach = kid >= 0 ? &tail_owner->curve_parent_reach : &tail_owner->curve_tail_reach;
+      const auto reach_field = [&](const char *name, const std::string &path, float *value, const char *id) {
+        const int state = layer_key_state(armature, {path}, doc.frame_current);
+        label(name);
+        ImGui::SetNextItemWidth(-ui_key_button_width());
+        const int pushed = ui_key_tint_push(state);
+        ui_drag_float(id, value, 0.01f, 0.0f, 3.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+          ImGui::SetTooltip("How far the bone's curve leans along it at this end: its handle's reach (1: an arc's, 0: "
+                            "it leaves the joint sharply). Keyable; drag the handles in the viewport to turn them");
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+          C.undo->push("Curve Reach", doc);
+        }
+        ImGui::PopStyleColor(pushed);
+        ImGui::PushID(id);
+        if (ui_key_button("##key", state)) {
+          operator_call(C, "anim.keyframe_toggle", {{"layer", std::to_string(armature.id)}, {"paths", path}});
+        }
+        ImGui::PopID();
+      };
+      reach_field("Curve Head", bone_path + "curve_head_reach", &active->curve_head_reach, "##curve_head_reach");
+      reach_field("Curve Tail", tail_path, tail_reach, "##curve_tail_reach");
+      label("");
+      if (ImGui::Button("Reset Curve", ImVec2(-1, 0))) {
+        operator_call(C, "armature.curve_reset", {{"bone", active->name}});
+      }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+        ImGui::SetTooltip("Both ends of the bone's curve as they rest: lined up with the bones beside it, the curve "
+                          "running smoothly through each joint");
+      }
+      active = bone_find(armature, armature.active_bone);
+      if (!active) {
+        ui_panel_end();
+        return;
+      }
+    }
     /* Moho's IK settings of the bone itself. */
     label("IK");
     const std::string driven_ik_path = std::string("bones[\"" + active->name + "\"].") + "ik_ignore";
@@ -3477,15 +3524,18 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
     ImGui::TableSetColumnIndex(1);
     const bool usable = !same_as_original && !layer.is_group() && doc.frame_current == 0;
     ImGui::BeginDisabled(!usable);
-    const float w = (ImGui::GetContentRegionAvail().x - 1.0f) * 0.5f;
+    const float w = (ImGui::GetContentRegionAvail().x - 2.0f) / 3.0f;
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, ImGui::GetStyle().ItemSpacing.y));
-    static const char *const NAMES[] = {"Layer", "Points"};
+    static const char *const NAMES[] = {"Layer", "Points", "Curve"};
     static const char *const TIPS[] = {
         "The bone moves the layer as a whole: its squash and stretch squashes the lines and brush stamps too",
         "The bone moves the points, as if each were weighted all to it: lines keep their width and brush "
-        "stamps their shape"};
-    const int now = layer.parent_bone_points && !layer.is_group() ? 1 : 0;
-    for (int k = 0; k < 2; k++) {
+        "stamps their shape",
+        "The points bend along the bone's curve (bendy bones), or a chain of connected bones' (Chain To): each "
+        "goes where its place on the curve goes"};
+    static const char *const ARGS[] = {"LAYER", "POINTS", "CURVE"};
+    const int now = layer.is_group() || !layer.parent_bone_points ? 0 : layer.parent_bone_curve ? 2 : 1;
+    for (int k = 0; k < 3; k++) {
       if (k > 0) {
         ImGui::SameLine();
       }
@@ -3493,7 +3543,7 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
         ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
       }
       if (ImGui::Button(NAMES[k], ImVec2(w, 0)) && k != now) {
-        operator_call(C, "layer.parent_bone_set", {{"deform", k == 1 ? "POINTS" : "LAYER"}});
+        operator_call(C, "layer.parent_bone_set", {{"deform", ARGS[k]}});
       }
       if (k == now) {
         ImGui::PopStyleColor();
@@ -3504,6 +3554,35 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
     }
     ImGui::PopStyleVar();
     ImGui::EndDisabled();
+    /* Chain To (Deform: Curve): the points bend along the curves from the Parent Bone on through its connected
+     * children to this bone. */
+    if (now == 2) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted("Chain To");
+      ImGui::TableSetColumnIndex(1);
+      ImGui::SetNextItemWidth(-1);
+      ImGui::BeginDisabled(!usable);
+      const std::vector<size_t> chain = layer_curve_chain(armature, layer);
+      const std::string end_name = chain.size() > 1 ? armature.bones[chain.back()].name : parent->name;
+      if (ImGui::BeginCombo("##chain_to", end_name.c_str())) {
+        for (const Bone &b : armature.bones) {
+          if (!bone_curve_chain_reaches(armature, parent->id, b.id)) {
+            continue;
+          }
+          if (ImGui::Selectable(b.name.c_str(), b.name == end_name)) {
+            operator_call(C, "layer.parent_bone_set", {{"chain_end", b.id == parent->id ? std::string() : b.name}});
+          }
+        }
+        ImGui::EndCombo();
+      }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("The bone the chain runs to, on from the Parent Bone through connected bones: the points "
+                          "bend along all their curves. The Parent Bone: its curve alone");
+      }
+      ImGui::EndDisabled();
+    }
   }
   /* Bone Follows Selection: the parent bone keyed onto the selection on each of its keyed frames. */
   if (parent && (layer.has_drawing() || layer.is_group())) {

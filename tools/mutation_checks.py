@@ -38,6 +38,22 @@ PENDING = [
     # Long IK chains bend in proportion to how they rest.
     ('src/data/bones.cc', '      if (n >= 3 && most > 1e-4) {\n', '      if (n >= 3 && most > 1e30) {\n',
      'a long IK chain bends smoothly, each joint the way it rests', 'tests/test_ik_axes.py'),
+    # Bendy bones.
+    ('src/anim/bone_curve.cc', '  s.head_mirror = s.kid >= 0 ? -s.tail_turn : 0.0f;\n',
+     '  s.head_mirror = 0.0f;\n',
+     'a free end mirrors the other end (the bone an arc)', 'tests/test_bendy_bones.py'),
+    ('src/anim/bone_curve.cc', '        b.curve_parent_angle = other;\n        b.curve_head_angle = dev;\n        b.curve_lined = 0.0f;\n',
+     '        b.curve_turn = wrap_angle(way - halfway(angle_of(way_of(poses, size_t(s.parent), false)), s.angle));\n        b.curve_lined = 1.0f;\n        (void)other;\n',
+     'Alt on a joint handle breaks the joint, each side keeping its angle', 'tests/test_bendy_bones.py'),
+    ('src/anim/deform.cc', '  if (!d.curve_rest.empty() && !d.curve_now.empty()) {\n',
+     '  if (false && !d.curve_rest.empty() && !d.curve_now.empty()) {\n',
+     'Deform: Curve bends a drawing along its chain', 'tests/test_bendy_bones.py'),
+    ('src/io/oanim_file.cc', '        if (value != bone_curve_channel_default(name) || keys.animated()) {\n',
+     '        if (false && (value != bone_curve_channel_default(name) || keys.animated())) {\n',
+     'curve channels and their keys are saved', 'tests/test_bendy_bones.py'),
+    ('src/anim/action_mirror.cc', '        mirror_keys(*theirs[k++], keys, from, to, [angle](float v) { return angle ? -v : v; });\n',
+     '        mirror_keys(*theirs[k++], keys, from, to, [angle](float v) { return angle ? v : v; });\n',
+     'a mirrored action turns curve handles the other way', 'tests/test_action_mirror.py'),
 ]
 
 def build(root):

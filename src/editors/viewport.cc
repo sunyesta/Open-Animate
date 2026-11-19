@@ -35,6 +35,7 @@
 #include "anim/deform.hh"
 #include "anim/merge.hh"
 #include "anim/vector_deform.hh"
+#include "anim/bone_curve.hh"
 #include "anim/draw_order.hh"
 #include "anim/follow_point.hh"
 #include "anim/switch.hh"
@@ -16345,6 +16346,239 @@ struct BoneBox {
 };
 static BoneBox g_bone_box;
 
+/* --- Bendy bones: curves and their handles (anim/bone_curve.hh) ------------------------------------------------- */
+
+static constexpr ImU32 COL_BONE_CURVE = IM_COL32(0x6f, 0xd3, 0xc9, 255);
+static constexpr float CURVE_HANDLE_PICK = 6.0f;
+
+/* A curve handle: bone `bone`'s (index) at its head or tail. */
+struct CurveHandle {
+  size_t bone = 0;
+  bool head = true;
+  bool operator==(const CurveHandle &) const = default;
+};
+
+/* Dragging a curve handle: the bones as the drag began (each step starts from them, so Alt can be let go and pressed
+ * again), never saved. */
+static struct {
+  bool active = false;
+  uint64_t layer = 0;
+  CurveHandle handle;
+  std::vector<Bone> was;
+} g_curve_drag;
+
+/* The bone layer whose bones' curves and handles show: the active layer, in the Select tool, not playing. */
+static Layer *curve_armature(Context &C)
+{
+  if (!C.document || C.wm->tool_settings.tool != Tool::Select || C.wm->playing) {
+    return nullptr;
+  }
+  Layer *l = document_active_layer(*C.document);
+  return l && l->is_bone_layer() && !l->bones.empty() ? l : nullptr;
+}
+
+/* The active bone, selected and with a curve (its index; -1: none). */
+static int curve_active_bone(const Layer &armature)
+{
+  for (size_t i = 0; i < armature.bones.size(); i++) {
+    const Bone &b = armature.bones[i];
+    if (b.id == armature.active_bone && b.selected && bone_curve_has(b)) {
+      return int(i);
+    }
+  }
+  return -1;
+}
+
+/* The handles shown: the active bone's, two at a joint it shares with a connected bone, one at an end. */
+static std::vector<CurveHandle> curve_handles_shown(const Layer &armature)
+{
+  std::vector<CurveHandle> out;
+  const int i = curve_active_bone(armature);
+  if (i < 0) {
+    return out;
+  }
+  if (const int p = bone_curve_parent(armature, size_t(i)); p >= 0) {
+    out.push_back({size_t(p), false});
+  }
+  out.push_back({size_t(i), true});
+  out.push_back({size_t(i), false});
+  if (const int k = bone_curve_kid(armature, size_t(i)); k >= 0) {
+    out.push_back({size_t(k), true});
+  }
+  return out;
+}
+
+/* The bones whose curves show where they bend: the active bone and those sharing its joints, and the chain of a
+ * drawing picked in the bone layer that bends along curves. */
+static std::vector<size_t> curve_bones_shown(const Document &doc, const Layer &armature)
+{
+  std::vector<size_t> out;
+  const auto put = [&](int i) {
+    if (i >= 0 && std::find(out.begin(), out.end(), size_t(i)) == out.end()) {
+      out.push_back(size_t(i));
+    }
+  };
+  if (const int i = curve_active_bone(armature); i >= 0) {
+    put(i);
+    put(bone_curve_parent(armature, size_t(i)));
+    put(bone_curve_kid(armature, size_t(i)));
+    for (size_t j = 0; j < armature.bones.size(); j++) {
+      if (bone_curve_parent(armature, j) == i) {
+        put(int(j));
+      }
+    }
+  }
+  if (const Layer *picked = doc.picked_drawing ? layer_find(doc, doc.picked_drawing) : nullptr;
+      picked && layer_armature(doc, picked->id) == &armature)
+  {
+    for (const size_t i : layer_curve_chain(armature, *picked)) {
+      put(int(i));
+    }
+  }
+  return out;
+}
+
+static ImVec2 curve_screen(const Transform2D &to_document, const ViewMapping &view, float2 p)
+{
+  return view.to_screen(to_document.apply(p));
+}
+
+/* The handle under the mouse (none: bone past the bones). */
+static std::optional<CurveHandle> curve_handle_under(const Document &doc, const Layer &armature,
+                                                     const ViewMapping &view, ImVec2 mouse)
+{
+  const Transform2D to_document = layer_world_transform(doc, armature.id);
+  const std::vector<BonePose> poses = armature_pose(armature, doc.frame_current == 0);
+  std::optional<CurveHandle> best;
+  float nearest = CURVE_HANDLE_PICK;
+  for (const CurveHandle &h : curve_handles_shown(armature)) {
+    const ImVec2 at = curve_screen(to_document, view, bone_curve_handle_at(armature, poses, h.bone, h.head));
+    const float d = std::hypot(at.x - mouse.x, at.y - mouse.y);
+    if (d <= nearest) {
+      nearest = d;
+      best = h;
+    }
+  }
+  return best;
+}
+
+/* The curves (where they bend) and the active bone's handles, over the bones. */
+static void draw_bone_curves(ImDrawList *dl, Context &C, const ViewMapping &view)
+{
+  const Layer *armature = curve_armature(C);
+  if (!armature) {
+    return;
+  }
+  const Document &doc = *C.document;
+  const Transform2D to_document = layer_world_transform(doc, armature->id);
+  const std::vector<BonePose> poses = armature_pose(*armature, doc.frame_current == 0);
+  for (const size_t i : curve_bones_shown(doc, *armature)) {
+    if (!bone_curve_bent(*armature, poses, i)) {
+      continue;
+    }
+    const std::array<float2, 4> p = bone_curve_controls(*armature, poses, i, false);
+    dl->AddBezierCubic(curve_screen(to_document, view, p[0]), curve_screen(to_document, view, p[1]),
+                       curve_screen(to_document, view, p[2]), curve_screen(to_document, view, p[3]), COL_BONE_CURVE,
+                       1.6f);
+  }
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  const std::optional<CurveHandle> hover = g_curve_drag.active ? std::optional<CurveHandle>(g_curve_drag.handle)
+                                                               : curve_handle_under(doc, *armature, view, mouse);
+  for (const CurveHandle &h : curve_handles_shown(*armature)) {
+    if (g_curve_drag.active && !(h == g_curve_drag.handle)) {
+      continue;
+    }
+    const ImVec2 joint = curve_screen(to_document, view, h.head ? poses[h.bone].head : poses[h.bone].tail);
+    const ImVec2 at = curve_screen(to_document, view, bone_curve_handle_at(*armature, poses, h.bone, h.head));
+    const bool lit = hover && *hover == h;
+    dl->AddLine(joint, at, COL_BONE_CURVE, 1.2f);
+    dl->AddCircleFilled(at, lit ? 5.0f : 3.8f, lit ? COL_BONE_CURVE : IM_COL32(0x2a, 0x2a, 0x2a, 255));
+    dl->AddCircle(at, lit ? 5.0f : 3.8f, COL_BONE_CURVE, 0, 1.5f);
+  }
+  if (hover && !g_curve_drag.active && ImGui::IsWindowHovered()) {
+    const Bone &b = armature->bones[hover->bone];
+    const bool joint = hover->head ? bone_curve_parent(*armature, hover->bone) >= 0
+                                   : bone_curve_kid(*armature, hover->bone) >= 0;
+    ImGui::SetTooltip("%s %s curve handle: drag to shape the curve%s", b.name.c_str(), hover->head ? "head" : "tail",
+                      joint ? "\nAlt: move this side alone (breaks the joint, which then stays sharp as the bones "
+                              "turn)"
+                            : "");
+  }
+}
+
+/* A press on a curve handle starts dragging it; while it lasts the handle follows the mouse (Alt: alone). True while
+ * the press is the handle's. */
+static bool curve_handle_input(Context &C, Layer &armature, const ViewMapping &view, bool hovered)
+{
+  Document &doc = *C.document;
+  const ImGuiIO &io = ImGui::GetIO();
+  if (g_curve_drag.active) {
+    if (g_curve_drag.layer != armature.id || g_curve_drag.handle.bone >= armature.bones.size() ||
+        g_curve_drag.was.size() != armature.bones.size())
+    {
+      g_curve_drag.active = false;
+      return false;
+    }
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      g_curve_drag.active = false;
+      if (!(armature.bones == g_curve_drag.was)) {
+        push_undo(C, "Curve Handle");
+      }
+      return true;
+    }
+    armature.bones = g_curve_drag.was;
+    const std::vector<BonePose> poses = armature_pose(armature, doc.frame_current == 0);
+    const float2 at = layer_world_transform(doc, armature.id).inverted().apply(view.to_document(io.MousePos));
+    bone_curve_handle_set(armature, poses, g_curve_drag.handle.bone, g_curve_drag.handle.head, at, io.KeyAlt);
+    return true;
+  }
+  if (!hovered || !ImGui::IsMouseClicked(ImGuiMouseButton_Left) || io.KeyShift || io.KeyCtrl ||
+      curve_armature(C) != &armature)
+  {
+    return false;
+  }
+  const std::optional<CurveHandle> h = curve_handle_under(doc, armature, view, io.MousePos);
+  if (!h) {
+    return false;
+  }
+  g_curve_drag = {true, armature.id, *h, armature.bones};
+  return true;
+}
+
+/* What a right-click on the bones was over, for the bone menu's curve items: a joint (Sharp Corner) or a bone's body
+ * (Flatten Both to Bone). */
+static struct {
+  uint64_t layer = 0;
+  std::string bone;
+  bool joint = false, head = false;
+} g_curve_menu;
+
+static void curve_menu_note(const Document &doc, const Layer &armature, const ViewMapping &view, ImVec2 mouse)
+{
+  g_curve_menu = {};
+  const std::vector<ScreenBone> sbs = screen_bones(doc, armature, view);
+  float nearest = 9.0f;
+  for (size_t i = 0; i < armature.bones.size() && i < sbs.size(); i++) {
+    if (!bone_curve_has(armature.bones[i])) {
+      continue;
+    }
+    for (const bool head : {true, false}) {
+      const ImVec2 at = head ? sbs[i].head : sbs[i].tail;
+      const float d = std::hypot(at.x - mouse.x, at.y - mouse.y);
+      if (d < nearest) {
+        nearest = d;
+        g_curve_menu = {armature.id, armature.bones[i].name, true, head};
+      }
+    }
+  }
+  if (g_curve_menu.joint) {
+    return;
+  }
+  if (const Bone *b = bone_find(armature, pick_bone(doc, armature, view, mouse)); b && bone_curve_has(*b)) {
+    g_curve_menu = {armature.id, b->name, false, false};
+  }
+}
+
 static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewMapping &view, bool hovered,
                             ImDrawList *dl)
 {
@@ -16352,6 +16586,10 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
   const ImGuiIO &io = ImGui::GetIO();
   if (C.wm->tool_settings.tool == Tool::TransformBones) {
     transform_bones_input(C, area, armature, view, hovered, dl);
+    return;
+  }
+  /* A curve handle pressed or dragged (bendy bones). */
+  if (curve_handle_input(C, armature, view, hovered)) {
     return;
   }
   /* Dragging a controller's corner on the setup frame: how far a frame is, so the corner stays under the mouse. */
@@ -16571,6 +16809,7 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
       !g_right_click_spent)
   {
     if (!bones_moving(doc, armature).empty()) {
+      curve_menu_note(doc, armature, view, io.MousePos);
       ImGui::OpenPopup("##bone_menu");
     }
     else {
@@ -17004,6 +17243,19 @@ static void bone_parent_menus(Context &C, bool hovered)
   }
   if (ui_menu_begin("##bone_menu")) {
     pose_menu_items(C);
+    /* Bendy bones: over a joint, its corner; over a bone, its curve. */
+    if (const Layer *rig = document_active_layer(*C.document);
+        rig && rig->id == g_curve_menu.layer && !g_curve_menu.bone.empty())
+    {
+      if (g_curve_menu.joint) {
+        menu_operator(C, "Sharp Corner", "armature.curve_sharp_corner",
+                      {{"bone", g_curve_menu.bone}, {"end", g_curve_menu.head ? "HEAD" : "TAIL"}});
+      }
+      else {
+        menu_operator(C, "Flatten Both to Bone", "armature.curve_flatten", {{"bone", g_curve_menu.bone}});
+      }
+      ImGui::Separator();
+    }
     menu_operator(C, "Subdivide", "armature.subdivide");
     ImGui::Separator();
     menu_operator(C, "Extrude", "armature.extrude");
@@ -19643,6 +19895,7 @@ static void viewport_draw_contents(Area &area, Context &C)
       }
     };
     visit(visit, doc.layers, true);
+    draw_bone_curves(dl, C, view);
   }
   draw_keyed_hover(dl, C, view);
   /* The active layer's masks, dashed (Mask Outlines); a mask symbol or field under the mouse,

@@ -720,6 +720,33 @@ struct Bone {
    * constraints aiming at it: close, the eyes cross; far, they look the same way. Keyable. */
   float depth = 1.0f;
   Channel<float> depth_keys;
+  /* Bendy bones (anim/bone_curve.hh): the bone bends along a curve from head to tail, shaped by a handle at each end.
+   * Where it is connected to its parent, the joint's two handles (its head's and the parent's tail's) are kept here:
+   * lined up (`curve_lined` 1), both turned `curve_turn` from halfway between the two bones, so they stay lined up as
+   * the bones turn; or broken (0), each at its own angle to its own bone (`curve_head_angle`, and the parent's
+   * `curve_parent_angle`), so a sharp corner stays sharp; between keys of each kind they blend. A free head keeps the
+   * same, `curve_turn` from the mirror of its tail's handle (the bone an arc). Reach: how far each handle leans along,
+   * 1 an arc's. A tail with no one connected child keeps its own (`curve_tail_*`). All keyable; frame 0 is the rest. */
+  float curve_turn = 0.0f;
+  float curve_lined = 1.0f;
+  float curve_head_angle = 0.0f;
+  float curve_parent_angle = 0.0f;
+  float curve_head_reach = 1.0f;
+  float curve_parent_reach = 1.0f;
+  float curve_tail_turn = 0.0f;
+  float curve_tail_lined = 1.0f;
+  float curve_tail_angle = 0.0f;
+  float curve_tail_reach = 1.0f;
+  Channel<float> curve_turn_keys;
+  Channel<float> curve_lined_keys;
+  Channel<float> curve_head_angle_keys;
+  Channel<float> curve_parent_angle_keys;
+  Channel<float> curve_head_reach_keys;
+  Channel<float> curve_parent_reach_keys;
+  Channel<float> curve_tail_turn_keys;
+  Channel<float> curve_tail_lined_keys;
+  Channel<float> curve_tail_angle_keys;
+  Channel<float> curve_tail_reach_keys;
   /* Top to bottom (see BoneConstraintType). */
   std::vector<BoneConstraint> constraints;
   /* Moho's Ignored by IK: IK chains stop below it and never turn it. */
@@ -1255,6 +1282,11 @@ struct Layer {
    * all to that bone (Points: lines keep their width and stamps their shape). Points for new
    * drawings; groups move as a whole. */
   bool parent_bone_points = true;
+  /* Deform: Curve (with parent_bone_points): the points bend along the bones' curve (bendy bones, anim/bone_curve.hh)
+   * rather than moving all with the one bone. `parent_bone_chain_end`: the chain runs on from the Parent Bone through
+   * its connected children to this bone (0: the Parent Bone alone), the points bending along all of it. */
+  bool parent_bone_curve = false;
+  uint64_t parent_bone_chain_end = 0;
   /* Bone layers: their bone collections, in list order, and the active one (its id; 0: All). */
   std::vector<BoneCollection> bone_collections;
   uint64_t active_collection = 0;

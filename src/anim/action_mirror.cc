@@ -1,3 +1,4 @@
+#include "anim/bone_curve.hh"
 #include "anim/action_mirror.hh"
 
 #include <algorithm>
@@ -526,6 +527,16 @@ void mirror_bone_keys(Layer &target, const Layer &source_layer, const Transform2
     mirror_keys(source->angle_keys, bone.angle_keys, from, to, [](float v) { return -v; });
     mirror_keys(source->scale_keys, bone.scale_keys, from, to, [](float2 v) { return v; });
     mirror_keys(source->depth_keys, bone.depth_keys, from, to, [](float v) { return v; });
+    {
+      /* Bendy bones' handles: their angles turn the other way. */
+      std::vector<const Channel<float> *> theirs;
+      bone_curve_channels(*source, [&](std::string_view, const auto &, const auto &keys) { theirs.push_back(&keys); });
+      size_t k = 0;
+      bone_curve_channels(bone, [&](std::string_view name, float &, Channel<float> &keys) {
+        const bool angle = bone_curve_channel_is_angle(name);
+        mirror_keys(*theirs[k++], keys, from, to, [angle](float v) { return angle ? -v : v; });
+      });
+    }
     if (source->constraints.size() == bone.constraints.size()) {
       for (size_t i = 0; i < bone.constraints.size(); i++) {
         BoneConstraint mine = source->constraints[i];

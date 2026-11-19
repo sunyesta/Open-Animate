@@ -92,6 +92,8 @@ def build():
     rig.bone_set("Turn_L", angle=setup["Turn_L"] + TURN)
     rig.bone_set("Arm_L", angle=setup["Arm_L"] + 0.4, position=(0.7, -0.9))
     rig.bone_set("Arm_R", angle=setup["Arm_R"] - 0.1)
+    # Bendy bones' handles: a turn comes across the other way, a reach as it is.
+    rig.bone_set("Arm_L", curve_turn=0.3, curve_head_reach=0.6)
     rig.bone_set("Spine_X", angle=setup["Spine_X"] + 0.2, position=(0.1, -0.9))
     ear_l.set_point(1, (1.0, 0.5))
     ear_r.set_point(1, (-0.8, 0.2))
@@ -168,6 +170,9 @@ assert close(angle[10], -TURN), ("the other way", angle)
 arm_r = {k["frame"]: k["value"] for k in rig.keyframes('bones["Arm_R"].angle')}
 arm_l = {k["frame"]: k["value"] for k in rig.keyframes('bones["Arm_L"].angle')}
 assert close(arm_r[10], -0.4) and close(arm_l[10], 0.1), ("each side takes the other's", arm_r, arm_l)
+curve = {k["frame"]: k["value"] for k in rig.keyframes('bones["Arm_R"].curve_turn')}
+reach = {k["frame"]: k["value"] for k in rig.keyframes('bones["Arm_R"].curve_head_reach')}
+assert close(curve[10], -0.3) and close(reach[10], 0.6), ("a curve handle turns the other way", curve, reach)
 spine = {k["frame"]: k["value"] for k in rig.keyframes('bones["Spine_X"].angle')}
 assert close(spine[10], -0.2), ("a centred bone turns the other way inside itself", spine)
 ear_keys = {k["frame"]: k["value"] for k in layer("Ear_R").keyframes("points[1].pos")}

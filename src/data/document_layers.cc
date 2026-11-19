@@ -891,6 +891,9 @@ static void bones_rebind(Layer &l, const std::map<uint64_t, uint64_t> &to)
   if (l.parent_bone) {
     l.parent_bone = mapped(l.parent_bone);
   }
+  if (l.parent_bone_chain_end) {
+    l.parent_bone_chain_end = mapped(l.parent_bone_chain_end);
+  }
   const auto rebound = [&](std::vector<BoneWeight> &weights) {
     std::erase_if(weights, [&](BoneWeight &w) {
       w.bone = mapped(w.bone);

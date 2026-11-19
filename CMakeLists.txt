@@ -14,6 +14,7 @@ include(cmake/Dependencies.cmake)
 set(OANIM_SOURCES
   src/main.cc
   src/anim/animation.cc
+  src/anim/bone_curve.cc
   src/anim/controller.cc
   src/anim/controller_preview.cc
   src/anim/drivers.cc
@@ -383,6 +384,8 @@ add_test(NAME ik_bend
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_ik_bend.py)
 add_test(NAME ik_axes
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_ik_axes.py)
+add_test(NAME bendy_bones
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bendy_bones.py)
 add_test(NAME move_bindings
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_move_bindings.py)
 add_test(NAME dynamics_squash

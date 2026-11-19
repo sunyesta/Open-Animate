@@ -12,6 +12,7 @@
 #include <set>
 #include <tuple>
 
+#include "anim/bone_curve.hh"
 #include "anim/switch.hh"
 #include "anim/bone_family.hh"
 #include "anim/draw_order.hh"
@@ -401,6 +402,124 @@ static void rig_operator(const char *idname, const char *name, const char *descr
   ot.exec = std::move(exec);
   ot.props = std::move(props);
   operators().add(std::move(ot));
+}
+
+/* --- Bendy bones (anim/bone_curve.hh) ------------------------------------------------------------------------- */
+
+static Layer *bone_layer_active(Context &C);
+
+/* The bone a curve operator works on: `bone` by name, else the active one (its index; -1 with a report). */
+static int curve_bone_arg(Context &C, Layer &armature)
+{
+  const std::string name = op_arg(C, "bone");
+  for (size_t i = 0; i < armature.bones.size(); i++) {
+    const Bone &b = armature.bones[i];
+    if (name.empty() ? b.id == armature.active_bone : b.name == name) {
+      if (!bone_curve_has(b)) {
+        report(ReportType::Warning, b.name + " has no curve: a pin or a 2 Axis Controller stays straight");
+        return -1;
+      }
+      return int(i);
+    }
+  }
+  report(ReportType::Warning, name.empty() ? std::string("No active bone") : "No bone named " + name);
+  return -1;
+}
+
+/* The bones a curve operator works on: `bone`, else the selected ones (indices). */
+static std::vector<size_t> curve_bones_arg(Context &C, Layer &armature)
+{
+  std::vector<size_t> out;
+  if (op_has_arg(C, "bone")) {
+    if (const int i = curve_bone_arg(C, armature); i >= 0) {
+      out.push_back(size_t(i));
+    }
+    return out;
+  }
+  for (size_t i = 0; i < armature.bones.size(); i++) {
+    if (armature.bones[i].selected && bone_curve_has(armature.bones[i])) {
+      out.push_back(i);
+    }
+  }
+  if (out.empty()) {
+    report(ReportType::Warning, "Select bones to change their curves");
+  }
+  return out;
+}
+
+/* Every bone's curve channels' values, to tell whether an operator changed any. */
+static std::vector<float> curve_values_of(const Layer &armature)
+{
+  std::vector<float> out;
+  for (const Bone &b : armature.bones) {
+    bone_curve_channels(b, [&](std::string_view, const float &v, const Channel<float> &) { out.push_back(v); });
+  }
+  return out;
+}
+
+static void register_curve_operators()
+{
+  rig_operator("armature.curve_handle_set", "Set Curve Handle",
+               "Drag bone `bone`'s curve handle at its head or tail (end=HEAD or TAIL) to (x, y) in the bone layer: its "
+               "direction and reach. At a joint between connected bones the two handles line up again, turning "
+               "together, unless alone=1, which breaks them (each keeps its angle to its own bone, so a sharp corner "
+               "stays sharp as the bones turn). Keyed as any edit",
+               bone_layer_active, [](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 const int i = curve_bone_arg(C, armature);
+                 const std::string end = op_arg(C, "end", "HEAD");
+                 if (i < 0 || (end != "HEAD" && end != "TAIL")) {
+                   if (end != "HEAD" && end != "TAIL") {
+                     report(ReportType::Error, "end is HEAD or TAIL");
+                   }
+                   return OpStatus::Cancelled;
+                 }
+                 const std::vector<float> before = curve_values_of(armature);
+                 const std::vector<BonePose> poses = armature_pose(armature, C.document->frame_current == 0);
+                 const float2 at(op_arg_float(C, "x", 0.0f), op_arg_float(C, "y", 0.0f));
+                 bone_curve_handle_set(armature, poses, size_t(i), end == "HEAD", at, op_arg_bool(C, "alone"));
+                 return curve_values_of(armature) != before ? OpStatus::Finished : OpStatus::Cancelled;
+               });
+  rig_operator("armature.curve_flatten", "Flatten Both to Bone",
+               "Lay both of the selected bones' curve handles (or bone `bone`'s) along them, so the bones go straight; "
+               "the handles across their joints stay as they are, broken, so the bones beside them keep their curves",
+               bone_layer_active, [](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 const std::vector<float> before = curve_values_of(armature);
+                 const std::vector<BonePose> poses = armature_pose(armature, C.document->frame_current == 0);
+                 for (const size_t i : curve_bones_arg(C, armature)) {
+                   bone_curve_flatten(armature, poses, i);
+                 }
+                 return curve_values_of(armature) != before ? OpStatus::Finished : OpStatus::Cancelled;
+               });
+  rig_operator("armature.curve_sharp_corner", "Sharp Corner",
+               "Point the curve handles at the joint at bone `bone`'s head or tail (end=HEAD or TAIL) along their "
+               "bones, broken: the bones meet in a sharp corner, which stays sharp however they turn",
+               bone_layer_active, [](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 const int i = curve_bone_arg(C, armature);
+                 const std::string end = op_arg(C, "end", "HEAD");
+                 if (i < 0 || (end != "HEAD" && end != "TAIL")) {
+                   if (end != "HEAD" && end != "TAIL") {
+                     report(ReportType::Error, "end is HEAD or TAIL");
+                   }
+                   return OpStatus::Cancelled;
+                 }
+                 const std::vector<float> before = curve_values_of(armature);
+                 bone_curve_sharp_corner(armature, size_t(i), end == "HEAD");
+                 return curve_values_of(armature) != before ? OpStatus::Finished : OpStatus::Cancelled;
+               });
+  rig_operator("armature.curve_reset", "Reset Curve",
+               "Put both ends of the selected bones' curves (or bone `bone`'s) back as they rest: lined up, the curve "
+               "running smoothly through each joint, each reach 1",
+               bone_layer_active, [](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 const std::vector<float> before = curve_values_of(armature);
+                 for (const size_t i : curve_bones_arg(C, armature)) {
+                   bone_curve_reset(armature, i);
+                 }
+                 return curve_values_of(armature) != before ? OpStatus::Finished : OpStatus::Cancelled;
+               });
 }
 
 /* "|"-separated names or ids of `drawing`'s shapes as ids; false (and a report) for one not there. */
@@ -2494,7 +2613,9 @@ void rig_operators_register()
                "Make the active and selected layers inside a bone layer follow bone `bone` as a whole, as "
                "parenting to a bone in Blender (\"\": Custom Weights, their points following their weights; a "
                "layer inside a group with a Parent Bone follows that group's and is left as it is); `deform`=LAYER moves the layer (a bone's "
-               "squash and stretch squashes its lines too), POINTS its points (lines keep their width). "
+               "squash and stretch squashes its lines too), POINTS its points (lines keep their width), CURVE bends "
+               "its points along the bone's curve (bendy bones); `chain_end`=a bone connected on from the Parent Bone "
+               "bends them along the whole chain to it (\"\": the Parent Bone alone), making Deform Curve. "
                "Either alone, or both. keep_animation=1: the layer shows where it did on every keyed frame "
                "(its transform keyed again there), as Keep Poses does for setup moves. Setup frame only",
                [](Context &C) {
@@ -2508,10 +2629,12 @@ void rig_operators_register()
                  const bool set_bone = op_has_arg(C, "bone");
                  const std::string name = op_arg(C, "bone");
                  const std::string deform = op_arg(C, "deform");
-                 if (!deform.empty() && deform != "LAYER" && deform != "POINTS") {
-                   report(ReportType::Error, "deform is LAYER or POINTS");
+                 if (!deform.empty() && deform != "LAYER" && deform != "POINTS" && deform != "CURVE") {
+                   report(ReportType::Error, "deform is LAYER, POINTS or CURVE");
                    return OpStatus::Cancelled;
                  }
+                 const bool set_chain = op_has_arg(C, "chain_end");
+                 const std::string chain_end = op_arg(C, "chain_end");
                  int changed = 0, same_as_original = 0, locked = 0;
                  /* Keep Animation: where each layer showed on the frames that matter, before its bone
                   * changes (worked out frame by frame, then the frame put back). */
@@ -2608,11 +2731,36 @@ void rig_operators_register()
                    const uint64_t id = bone ? bone->id : 0;
                    if (set_bone && layer->parent_bone != id) {
                      layer->parent_bone = id;
+                     /* A chain runs from its Parent Bone: a new bone starts it again. */
+                     layer->parent_bone_chain_end = 0;
                      changed++;
                    }
-                   if (!deform.empty() && layer->parent_bone_points != (deform == "POINTS")) {
-                     layer->parent_bone_points = deform == "POINTS";
-                     changed++;
+                   if (!deform.empty()) {
+                     const bool points = deform != "LAYER", curve = deform == "CURVE";
+                     if (layer->parent_bone_points != points || layer->parent_bone_curve != curve) {
+                       layer->parent_bone_points = points;
+                       layer->parent_bone_curve = curve;
+                       changed++;
+                     }
+                   }
+                   /* The chain the points bend along: on from the Parent Bone through connected children to `chain_end`
+                    * (bendy bones; it makes Deform Curve). */
+                   if (set_chain && layer->parent_bone != 0) {
+                     const Bone *end = chain_end.empty() ? nullptr : bone_find_by_name(*armature, chain_end);
+                     if (!chain_end.empty() && (!end || !bone_curve_chain_reaches(*armature, layer->parent_bone, end->id))) {
+                       report(ReportType::Warning, chain_end + " isn't connected on from the Parent Bone: a chain runs "
+                                                               "through connected bones");
+                       return OpStatus::Cancelled;
+                     }
+                     const uint64_t end_id = end && end->id != layer->parent_bone ? end->id : 0;
+                     if (layer->parent_bone_chain_end != end_id || (end_id != 0 && !layer->parent_bone_curve)) {
+                       layer->parent_bone_chain_end = end_id;
+                       if (end_id != 0) {
+                         layer->parent_bone_points = true;
+                         layer->parent_bone_curve = true;
+                       }
+                       changed++;
+                     }
                    }
                  }
                  /* The actions first, the mainline last: an action bone action's keys add to the mainline, so the
@@ -3316,6 +3464,7 @@ void rig_operators_register()
                  return OpStatus::Finished;
                });
 
+  register_curve_operators();
   rig_operator("armature.bone_convert", "Convert Bone",
                "Make the selected bones Regular, 2 Axis Controllers or Pins, in the setup pose (type=REGULAR, "
                "CONTROLLER_2D or PIN). A controller is a box with a knob whose four sides play actions; a pin is one "

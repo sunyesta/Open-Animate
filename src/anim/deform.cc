@@ -1,3 +1,4 @@
+#include "anim/bone_curve.hh"
 #include "anim/deform.hh"
 
 #include "anim/controller.hh"
@@ -224,6 +225,9 @@ struct Deformer {
   /* Parent Bone moving the points (Deform: Points): every point all this bone's, whatever its
    * weights. */
   uint64_t whole_bone = 0;
+  /* Deform: Curve (bendy bones): the Parent Bone's curve, or its chain's, as it rests and now (bone layer space); each
+   * point goes where its place on the rest line goes. */
+  BoneCurveLine curve_rest, curve_now;
 };
 
 }  // namespace
@@ -242,6 +246,11 @@ static bool deformer_init(const Document &doc, const Layer &layer, Deformer &r)
   r.to_armature = layer_relative_transform(doc, r.armature->id, layer.id);
   r.from_armature = r.to_armature.inverted();
   r.whole_bone = layer.points_follow_bone() ? layer.parent_bone : 0;
+  if (const std::vector<size_t> chain = layer_curve_chain(*r.armature, layer); !chain.empty()) {
+    const bool setup_frame = doc.frame_current == 0;
+    r.curve_rest = bone_curve_line(*r.armature, r.poses, chain, true, setup_frame);
+    r.curve_now = bone_curve_line(*r.armature, r.poses, chain, false, setup_frame);
+  }
   return true;
 }
 
@@ -405,6 +414,10 @@ static Transform2D skin_preserve_volume(const Deformer &d, const std::vector<Bon
 
 static Transform2D point_skin(const Deformer &d, const MeshPoint &p)
 {
+  if (!d.curve_rest.empty() && !d.curve_now.empty()) {
+    return d.from_armature * bone_curve_line_skin(d.curve_rest, d.curve_now, d.to_armature.apply(p.pos)) *
+           d.to_armature;
+  }
   const std::vector<BoneWeight> weights = point_weights(d, p);
   if (weights.empty()) {
     return {};

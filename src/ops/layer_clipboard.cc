@@ -313,6 +313,10 @@ static std::vector<uint64_t> layers_paste_text(Document &doc, const std::string 
         const auto it = bone_map.find(l.parent_bone);
         l.parent_bone = it != bone_map.end() ? it->second : 0;
       }
+      if (l.parent_bone_chain_end) {
+        const auto it = bone_map.find(l.parent_bone_chain_end);
+        l.parent_bone_chain_end = it != bone_map.end() ? it->second : 0;
+      }
       for (MeshPoint &p : l.drawing.points) {
         std::vector<BoneWeight> kept;
         for (BoneWeight w : p.weights) {

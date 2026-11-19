@@ -22,6 +22,7 @@
 #include <variant>
 
 #include "anim/action_mirror.hh"
+#include "anim/bone_curve.hh"
 #include "anim/controller.hh"
 #include "anim/deform.hh"
 #include "core/log.hh"
@@ -44,6 +45,7 @@ template<typename F> static void bone_other_channels(Bone &bone, F &&f)
 {
   f(bone.scale_keys, bone.scale);
   f(bone.depth_keys, bone.depth);
+  bone_curve_channels(bone, [&](std::string_view, float &value, Channel<float> &keys) { f(keys, value); });
   for (BoneConstraint &c : bone.constraints) {
     f(c.influence_keys, c.influence);
     f(c.follow_shift_keys, c.follow_shift);
@@ -5271,6 +5273,9 @@ std::vector<ChannelRef> layer_channels(Layer &layer, bool drawing)
     add(base + "angle", bone.angle_keys, bone.turn);
     add(base + "scale", bone.scale_keys, bone.scale);
     add(base + "depth", bone.depth_keys, bone.depth);
+    bone_curve_channels(bone, [&](std::string_view name, float &value, Channel<float> &keys) {
+      add(base + std::string(name), keys, value);
+    });
     for (size_t i = 0; i < bone.constraints.size(); i++) {
       BoneConstraint &c = bone.constraints[i];
       const std::string cb = base + "constraints[" + std::to_string(i) + "].";
@@ -5436,6 +5441,16 @@ static bool layer_channel_direct(Layer &layer, const std::string &path, ChannelR
     if (rest == "angle") return take(bone->angle_keys, bone->turn);
     if (rest == "scale") return take(bone->scale_keys, bone->scale);
     if (rest == "depth") return take(bone->depth_keys, bone->depth);
+    bool curve = false, curve_taken = false;
+    bone_curve_channels(*bone, [&](std::string_view name, float &value, Channel<float> &keys) {
+      if (!curve && rest == name) {
+        curve = true;
+        curve_taken = take(keys, value);
+      }
+    });
+    if (curve) {
+      return curve_taken;
+    }
     constexpr std::string_view prefix = "constraints[";
     if (rest.substr(0, prefix.size()) != prefix) {
       return false;
@@ -5846,6 +5861,16 @@ std::string channel_label(Layer &layer, const std::string &path, bool owner)
       {"scale", "Scale"},
       {"shear", "Shear"},
       {"depth", "Depth"},
+      {"curve_turn", "Curve Joint Turn"},
+      {"curve_lined", "Curve Joint Lined Up"},
+      {"curve_head_angle", "Curve Head Angle"},
+      {"curve_parent_angle", "Curve Parent Angle"},
+      {"curve_head_reach", "Curve Head Reach"},
+      {"curve_parent_reach", "Curve Parent Reach"},
+      {"curve_tail_turn", "Curve Tail Turn"},
+      {"curve_tail_lined", "Curve Tail Lined Up"},
+      {"curve_tail_angle", "Curve Tail Angle"},
+      {"curve_tail_reach", "Curve Tail Reach"},
       {"opacity", "Opacity"},
       {"visible", "Visibility"},
       {"draw_order", "Draw Order"},
@@ -6644,6 +6669,7 @@ std::vector<AnyChannel> together_candidates(Document &doc)
         any_add(out, b.angle_keys);
         any_add(out, b.scale_keys);
         any_add(out, b.depth_keys);
+        bone_curve_channels(b, [&](std::string_view, float &, Channel<float> &keys) { any_add(out, keys); });
       }
     }
     if (l.has_drawing() && !l.is_reference()) {
