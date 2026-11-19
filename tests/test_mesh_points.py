@@ -170,10 +170,13 @@ nodes.sort()
 
 
 def on_row(x):
-    """Where the middle row now runs, at the place along it that `x` was at rest (its handles a third along each way)."""
+    """Where the middle row now runs, at the place along it that `x` was at rest. The grid's handles have no length, and
+    a grid node's handle of no length is read as reaching a third along."""
     k = min(int((x + 1.0) / 0.5), 3)
     t = (x + 1.0) / 0.5 - k
     b = (nodes[k], row[k][2], row[k + 1][1], nodes[k + 1])
+    if math.dist(b[0], b[1]) < 1e-9 and math.dist(b[2], b[3]) < 1e-9:
+        b = (b[0], tuple(a + (c - a) / 3 for a, c in zip(b[0], b[3])), tuple(a + 2 * (c - a) / 3 for a, c in zip(b[0], b[3])), b[3])
     return tuple(sum(c * q[i] for c, q in zip(((1 - t) ** 3, 3 * t * (1 - t) ** 2, 3 * t * t * (1 - t), t ** 3), b))
                  for i in range(2))
 
@@ -235,6 +238,24 @@ near.modifier_set(0, falloff=0.6)
 at(10)
 wide_now = shown(near)
 assert min(moved(near_rest[2:], wide_now[2:])) > 2 * max(moved(near_rest[2:], near_now[2:])) + 0.002, (near_now, wide_now)
+doc.frame_current = 0
+
+# --- A grid node's handle pulled out along its line moves nothing -------------------------------------------------
+# The grid's handles have no length; pulled out along the line, any way up to a third of it, the line stays as it was
+# and so does what is on it and by it (a Bezier read by its t is slow by a handle of no length: no jump as it grows).
+pulled = new_grid("Pulled")
+by = new_layer("By")
+by.add_curve([(0.1, 0.02), (0.2, -0.02), (0.3, 0.0), (0.4, 0.01)])
+deform(by, pulled, falloff=0.1)
+by_rest = shown(by)
+spots = [(0.1, 0.02), (0.3, 0.1), (0.4, -0.2)]
+spots_rest = [pulled.grid_map(q) for q in spots]
+for reach in (1e-5, 0.01, 0.08, 0.5 / 3):
+    doc.frame_current = 10
+    pulled.place_handle(2, 2, "OUT", (reach, 0.0), keep_other=True)
+    at(10)
+    assert max(moved(by_rest, shown(by))) < 1e-5, ("a handle along its line moves nothing", reach, shown(by))
+    assert all(math.dist(a, pulled.grid_map(q)) < 1e-5 for a, q in zip(spots_rest, spots)), (reach, "grid_map")
 doc.frame_current = 0
 
 # --- Never across a gap ---------------------------------------------------------------------------------------------

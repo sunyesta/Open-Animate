@@ -486,6 +486,8 @@ static bool network_cells(const VectorDrawing &rest, const Shape &rest_shape, co
     std::array<float2, 4> rest_ctrl{}, now_ctrl{};
   };
   std::vector<Half> halves;
+  const std::vector<bool> nodes = drawing_grid_nodes(rest);
+  const auto node = [&](int point) { return point >= 0 && size_t(point) < nodes.size() && nodes[size_t(point)]; };
   for (const ShapeEdge &e : rest_shape.edges) {
     if (e.curve < 0 || e.curve >= int(rest.curves.size()) || (bent && e.curve >= int(bent->curves.size()))) {
       return false;
@@ -496,8 +498,10 @@ static bool network_cells(const VectorDrawing &rest, const Shape &rest_shape, co
       continue;
     }
     curve_segment_bezier(rest, rest.curves[size_t(e.curve)], e.segment, h.rest_ctrl.data());
+    bezier_grid_side(h.rest_ctrl.data(), node(h.from), node(h.to));
     if (bent) {
       curve_segment_bezier(*bent, bent->curves[size_t(e.curve)], e.segment, h.now_ctrl.data());
+      bezier_grid_side(h.now_ctrl.data(), node(h.from), node(h.to));
     }
     Half back = h;
     std::swap(back.from, back.to);
@@ -920,11 +924,17 @@ static bool envelope_deform_make(const VectorDrawing &rest, const Shape &rest_sh
   if (!shape_chain(rest, rest_shape, chain, &closed) || chain.empty()) {
     return false;
   }
-  const auto segment = [](const VectorDrawing &drawing, const OrientedEdge &o, std::array<float2, 4> &r_ctrl) {
+  const std::vector<bool> nodes = drawing_grid_nodes(rest);
+  const auto node = [&](int point) { return point >= 0 && size_t(point) < nodes.size() && nodes[size_t(point)]; };
+  const auto segment = [&](const VectorDrawing &drawing, const OrientedEdge &o, std::array<float2, 4> &r_ctrl) {
     if (o.edge.curve < 0 || size_t(o.edge.curve) >= drawing.curves.size()) {
       return false;
     }
-    curve_segment_bezier(drawing, drawing.curves[size_t(o.edge.curve)], o.edge.segment, r_ctrl.data());
+    const Curve &curve = drawing.curves[size_t(o.edge.curve)];
+    curve_segment_bezier(drawing, curve, o.edge.segment, r_ctrl.data());
+    int from, to;
+    curve_segment_points(curve, o.edge.segment, &from, &to);
+    bezier_grid_side(r_ctrl.data(), node(from), node(to));
     if (o.reversed) {
       std::swap(r_ctrl[0], r_ctrl[3]);
       std::swap(r_ctrl[1], r_ctrl[2]);
@@ -3726,6 +3736,8 @@ static void points_build_network(DeformShape &r, const Modifier &m, const Vector
 {
   /* As network_cells reads them: the bent drawing has the same curves. */
   std::vector<std::array<float2, 4>> rest, now;
+  const std::vector<bool> nodes = drawing_grid_nodes(rest_drawing);
+  const auto node = [&](int point) { return point >= 0 && size_t(point) < nodes.size() && nodes[size_t(point)]; };
   for (const ShapeEdge &e : rest_shape.edges) {
     if (e.curve < 0 || e.curve >= int(rest_drawing.curves.size()) || e.curve >= int(bent.curves.size())) {
       return;
@@ -3738,6 +3750,8 @@ static void points_build_network(DeformShape &r, const Modifier &m, const Vector
     std::array<float2, 4> a, b;
     curve_segment_bezier(rest_drawing, rest_drawing.curves[size_t(e.curve)], e.segment, a.data());
     curve_segment_bezier(bent, bent.curves[size_t(e.curve)], e.segment, b.data());
+    bezier_grid_side(a.data(), node(from), node(to));
+    bezier_grid_side(b.data(), node(from), node(to));
     rest.push_back(a);
     now.push_back(b);
   }

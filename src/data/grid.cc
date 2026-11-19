@@ -29,8 +29,9 @@ VectorDrawing grid_drawing(float2 a, float2 b, int columns, int rows, const Styl
       grid.nodes.push_back(p.id);
     }
   }
-  /* A line along each row, then one up each column; straight (their handles point along them). All of them
-   * are one outline shape, each line a run of it (as a Moho stroke shape of loose lines). */
+  /* A line along each row, then one up each column; straight, their handles of no length (a handle pulled out of a
+   * node bends only its own line). All of them are one outline shape, each line a run of it (as a Moho stroke shape of
+   * loose lines). */
   Shape shape;
   shape.name = grid.name;
   shape.style = style;
@@ -43,6 +44,8 @@ VectorDrawing grid_drawing(float2 a, float2 b, int columns, int rows, const Styl
       CurvePoint cp;
       cp.point = node_at(k);
       cp.curvature = CURVATURE_PEAKED;
+      cp.handles_set = true;
+      cp.handle_in = cp.handle_out = cp.setup_in = cp.setup_out = float2(0.0f, 0.0f);
       curve.points.push_back(cp);
     }
     drawing.curves.push_back(std::move(curve));
@@ -107,6 +110,7 @@ bool GridSurface::build(const VectorDrawing &drawing, const DrawingGrid &grid)
       curve_segment_points(*curve, s, &from, &to);
       float2 ctrl[4];
       curve_segment_bezier(drawing, *curve, s, ctrl);
+      bezier_grid_side(ctrl, true, true);
       if (from == a) {
         r = {ctrl[0], ctrl[1], ctrl[2], ctrl[3]};
       }

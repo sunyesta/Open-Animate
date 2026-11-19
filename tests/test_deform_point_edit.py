@@ -417,8 +417,9 @@ for resample_self in (True, False):
                     worst_line = max(worst_line, max(abs(x - y) for x, y in zip(box(a), box(b))) / size)
             if resample_self:
                 worst_end = max(worst_end, max(math.dist(e, (ends[0][0] + step[0] * k, ends[0][1] + step[1] * k)) for k, e in enumerate(ends)))
-    # Between what the fixes make of this frame and what it comes to without any one of them.
-    assert worst_line < (15.0 if resample_self else 60.0), ("the line leapt", resample_self, worst_line)
+    # Between what the fixes make of this frame and what it comes to without any one of them (up to 47). Its grid's
+    # handles of no length read as a third along: 15.2, from 14.5 when they read as none.
+    assert worst_line < (16.0 if resample_self else 60.0), ("the line leapt", resample_self, worst_line)
     assert worst_end < 0.006, ("its end left the cursor", worst_end)
 
 # Its points, dragged through the squeezed column: each stays with the mouse, step by step.

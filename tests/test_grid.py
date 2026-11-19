@@ -7,6 +7,7 @@ ordinary drawing from then on.
 Run with:  OpenAnimate --background --python tests/test_grid.py
 """
 
+import math
 import os
 import tempfile
 
@@ -103,6 +104,26 @@ assert oanim.wm.redo_last(columns="5", width="4") == 'FINISHED'
 assert [(g[1], g[2]) for g in layer.grids] == [(5, 2)] and layer.point_count == 18, (layer.grids, layer.point_count)
 xs = [p[0] for p in layer.points]
 assert abs(min(xs) + 1.0) < 1e-5 and abs(max(xs) - 3.0) < 1e-5, (min(xs), max(xs))
+
+
+def handle_lengths(l):
+    out = []
+    for c in range(l.curve_count):
+        for k, (_, h_in, h_out) in zip(l.curve_points(c), l.curve_handles(c)):
+            p = l.points[k]
+            out += [math.dist(p[:2], h_in), math.dist(p[:2], h_out)]
+    return out
+
+
+# Its lines' handles have no length, kept through saving and opening.
+assert layer.curve_count == 3 + 6 and max(handle_lengths(layer)) < 1e-6, max(handle_lengths(layer))
+grid_layer = layer.name
+grid_file = os.path.join(tempfile.mkdtemp(), "grid_handles.oanim")
+assert oanim.ops.wm.save_as_mainfile(filepath=grid_file) == {'FINISHED'}
+assert oanim.ops.wm.open_mainfile(filepath=grid_file, confirmed="1") == {'FINISHED'}
+layer = next(l for l in layers.all() if l.name == grid_layer)
+assert max(handle_lengths(layer)) < 1e-6, ("after opening", max(handle_lengths(layer)))
+layers.active = layer
 # The next grid starts with those cells.
 assert oanim.ops.mesh.primitive_grid_add(x="0", y="0", width="1", height="1") == {'FINISHED'}
 assert [(g[1], g[2]) for g in layer.grids] == [(5, 2), (5, 2)]

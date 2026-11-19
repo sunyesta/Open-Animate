@@ -435,6 +435,13 @@ bool curve_point_align_keys(CurvePoint &cp, AlignFollow follow);
 bool curve_point_align_action_keys(CurvePoint &cp, const std::string &name, AlignFollow follow);
 /* The four Bezier control points of a segment. */
 void curve_segment_bezier(const VectorDrawing &drawing, const Curve &curve, int segment, float2 r_ctrl[4]);
+/* Which of a drawing's points (by index) are nodes of its grids; empty when it has none. */
+std::vector<bool> drawing_grid_nodes(const VectorDrawing &drawing);
+/* A grid's line as deforms read it. A grid node's handles have no length, which a Bezier read by t paces unevenly
+ * (slow at its ends), so a node's handle shorter than a third of the segment reads as reaching a third along it, less
+ * as it grows (`from_node`, `to_node`: whether each end is a node): a line with no handles reads as evenly paced, a
+ * handle pulled out along the line moves nothing, and one pulled further reads as drawn. */
+void bezier_grid_side(float2 ctrl[4], bool from_node, bool to_node);
 float2 bezier_eval(const float2 ctrl[4], float t);
 /* Sample `i` of `steps` evenly in t along a segment, the very same point (to the last bit) as sample `steps - i` of the
  * segment run the other way: the first half worked out from its start, the second from its end, the middle by a sum

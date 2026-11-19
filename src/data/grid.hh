@@ -33,7 +33,7 @@ struct DrawingGrid {
 constexpr int GRID_CELLS_MAX = 32;
 
 /* A grid drawing for the Shape tool: the box between `a` and `b` split into `columns` × `rows` cells, its
- * lines straight (handles a third of the way along them), one outlined shape of all of them; its points
+ * lines straight (their handles of no length), one outlined shape of all of them; its points
  * have ids 1, 2, ... so `grids` can name them. Empty when the box is too small. */
 VectorDrawing grid_drawing(float2 a, float2 b, int columns, int rows, const Style &style);
 

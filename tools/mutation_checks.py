@@ -36,6 +36,8 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 # (file, old, new, name, test)
 PENDING = [
     ('src/anim/dynamics.cc', '  const int upto = std::min(frame, std::max(start, doc.frame_end));', '  const int upto = frame;', 'Dynamics stop at the end frame', 'tests/test_dynamics_end_frame.py'),
+    ('src/data/grid.cc', '      cp.handles_set = true;', '      cp.handles_set = false;', "The Shape tool's grid lines have handles of no length", 'tests/test_grid.py'),
+    ('src/data/vector.cc', '    if (w > 0.0f) {', '    if (false && w > 0.0f) {', "A grid node's short handle reads as reaching a third along", 'tests/test_mesh_points.py'),
 ]
 
 def build(root):

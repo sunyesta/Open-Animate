@@ -273,10 +273,14 @@ assert hand.extrude_selected() == [5]
 hand.set_point(5, (1.0, -0.5))
 pick(hand, 5, 3)
 assert ops.mesh.make_segment() == {'FINISHED'}
-# Corners, as the Shape tool's grid has (straight sides), so the two grids below are alike.
+# Corners with handles of no length, as the Shape tool's grid has (straight sides), so the two grids below are alike.
 pick(hand, 0, 1, 2, 3, 4, 5)
 assert ops.mesh.peak() == {'FINISHED'}
 ops.mesh.select_none()
+for c in range(hand.curve_count):
+    for k, point in enumerate(hand.curve_points(c)):
+        for side in ("IN", "OUT"):
+            hand.move_handle(c, k, side, hand.points[point][:2])
 assert hand.shape_count == 1
 art4 = new_layer("Art4")
 art4.add_curve([(-0.5, 0.0), (0.5, 0.2)])

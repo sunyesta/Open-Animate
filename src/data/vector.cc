@@ -518,6 +518,49 @@ void curve_segment_bezier(const VectorDrawing &drawing, const Curve &curve, int 
   r_ctrl[3] = drawing.points[curve.points[next].point].pos;
 }
 
+std::vector<bool> drawing_grid_nodes(const VectorDrawing &drawing)
+{
+  if (drawing.grids.empty()) {
+    return {};
+  }
+  std::unordered_map<uint64_t, int> index;
+  for (int i = 0; i < int(drawing.points.size()); i++) {
+    index.emplace(drawing.points[size_t(i)].id, i);
+  }
+  std::vector<bool> r(drawing.points.size(), false);
+  for (const DrawingGrid &grid : drawing.grids) {
+    for (const uint64_t id : grid.nodes) {
+      if (const auto it = index.find(id); it != index.end()) {
+        r[size_t(it->second)] = true;
+      }
+    }
+  }
+  return r;
+}
+
+void bezier_grid_side(float2 ctrl[4], bool from_node, bool to_node)
+{
+  const float2 third = (ctrl[3] - ctrl[0]) * (1.0f / 3.0f);
+  const float reach = length(third);
+  if (reach < 1e-12f) {
+    return;
+  }
+  /* The part of a third added, from all of it for a handle of no length to none for one a third long: no jump as a
+   * handle is pulled out. */
+  const auto lengthen = [&](float2 &handle, float2 end, float2 along) {
+    const float w = 1.0f - length(handle - end) / reach;
+    if (w > 0.0f) {
+      handle = handle + along * w;
+    }
+  };
+  if (from_node) {
+    lengthen(ctrl[1], ctrl[0], third);
+  }
+  if (to_node) {
+    lengthen(ctrl[2], ctrl[3], third * -1.0f);
+  }
+}
+
 float2 bezier_eval(const float2 c[4], float t)
 {
   const float u = 1.0f - t;
