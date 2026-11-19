@@ -685,6 +685,12 @@ static json layer_to_json(const Layer &layer)
   if (layer.parent_bone_chain_end != 0) {
     j["parent_bone_chain_end"] = layer.parent_bone_chain_end;
   }
+  if (layer.parent_bone_attach != BoneAttach::Body) {
+    j["parent_bone_attach"] = layer.parent_bone_attach == BoneAttach::Head ? "HEAD" : "TAIL";
+  }
+  if (layer.parent_bone_turn != BoneAttachTurn::Bone) {
+    j["parent_bone_turn"] = layer.parent_bone_turn == BoneAttachTurn::Half ? "HALF" : "NONE";
+  }
   if (layer.clip_to_below) {
     j["clip_to_below"] = true;
   }
@@ -2881,6 +2887,10 @@ static Layer layer_from_json(const json &j, int depth)
                                                               : !j.contains("parent_bone");
   layer.parent_bone_curve = deform == "CURVE";
   layer.parent_bone_chain_end = get_id(j, "parent_bone_chain_end");
+  const std::string attach = get_string(j, "parent_bone_attach", "BODY");
+  layer.parent_bone_attach = attach == "HEAD" ? BoneAttach::Head : attach == "TAIL" ? BoneAttach::Tail : BoneAttach::Body;
+  const std::string turn = get_string(j, "parent_bone_turn", "BONE");
+  layer.parent_bone_turn = turn == "HALF" ? BoneAttachTurn::Half : turn == "NONE" ? BoneAttachTurn::None : BoneAttachTurn::Bone;
   for (const json &a : get_array(j, "actions")) {
     if (a.is_string() && !a.get<std::string>().empty()) {
       layer.actions.push_back(a.get<std::string>());

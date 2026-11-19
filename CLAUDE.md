@@ -130,7 +130,7 @@ and onion skins, PNG sequence export, playback range.
 
 Rigging and modifiers (milestones 4 and 5, started early): bone layers (`LayerType::Bone`,
 `src/data/bones.*` for the skeleton and _L/_R names), weights (a new point averages its neighbours, one connected to nothing has none,
-Weight Select / Weight Paint tools) and Parent to Bone; collections (`Document::collections`, tags on any bone or layer;
+Weight Select / Weight Paint tools) and Parent to Bone (Attached To Body, Head or Tail with its Turn: `Layer::parent_bone_attach`, `parent_bone_turn`, worked out by `bone_follow_skin` in `src/data/bones.cc`); collections (`Document::collections`, tags on any bone or layer;
 a bone layer's panel of them is `Layer::bone_collections`, eyes and stars; helpers in `src/data/bones.*`, operators
 `armature.collection_*` in `src/ops/rig_ops.cc`, the chips in the Bone and Layer tabs by `collection_chips` in
 `src/editors/properties.cc`, the M menu and search list in `src/editors/editors.cc`; older files' per-rig ones merged by

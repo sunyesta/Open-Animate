@@ -674,6 +674,9 @@ struct ControllerSpot {
  * gives the bone it was; nothing connects to it (children hang with an offset), an IK chain stops at it, and it traces
  * one path, at the pin. */
 enum class BoneType : uint8_t { Regular, Controller2D, Pin };
+/* What of its Parent Bone a layer follows (Layer::parent_bone_attach), and how it turns at an end. */
+enum class BoneAttach : uint8_t { Body, Head, Tail };
+enum class BoneAttachTurn : uint8_t { Bone, Half, None };
 /* A 2 Axis Controller's sides, each with an action of its own. */
 enum ControllerSide { CONTROLLER_RIGHT, CONTROLLER_LEFT, CONTROLLER_UP, CONTROLLER_DOWN, CONTROLLER_SIDES };
 
@@ -1317,6 +1320,12 @@ struct Layer {
    * its connected children to this bone (0: the Parent Bone alone), the points bending along all of it. */
   bool parent_bone_curve = false;
   uint64_t parent_bone_chain_end = 0;
+  /* Attached To (a regular Parent Bone): Body, the bone's whole move (its squash and stretch too, as Deform says);
+   * Head or Tail, only where that end goes, the layer moving as a whole there and never squashed or skewed (a joint's
+   * round cap); `parent_bone_turn` how it turns there: with the bone, halfway with the bone that meets it at that end
+   * (connected), or not at all. */
+  BoneAttach parent_bone_attach = BoneAttach::Body;
+  BoneAttachTurn parent_bone_turn = BoneAttachTurn::Bone;
   /* Bone layers: their bone collections, in list order, and the active one (its id; 0: All). */
   std::vector<BoneCollection> bone_collections;
   uint64_t active_collection = 0;
@@ -1413,10 +1422,13 @@ struct Layer {
   {
     return (is_reference() && reference.match_original) || points_follow_bone() ? 0 : parent_bone;
   }
+  /* Attached to the Parent Bone's head or tail (moving as a whole there, whatever Deform says). */
+  bool attached_to_end() const { return parent_bone != 0 && parent_bone_attach != BoneAttach::Body; }
   /* Parent Bone moving its points rather than the layer (parent_bone_points). */
   bool points_follow_bone() const
   {
-    return parent_bone != 0 && parent_bone_points && !is_group() && !(is_reference() && reference.match_original);
+    return parent_bone != 0 && parent_bone_points && !attached_to_end() && !is_group() &&
+           !(is_reference() && reference.match_original);
   }
   /* Translate * Rotate * Shear * Scale: the X axis turned by its rotation plus shear.x, the Y axis by its
    * rotation plus shear.y, each then scaled. */

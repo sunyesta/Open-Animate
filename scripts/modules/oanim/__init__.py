@@ -560,6 +560,18 @@ class _Layer:
         return _oanim.layer_parent_bone_deform(self._id)
 
     @property
+    def parent_bone_attached_to(self):
+        """What of its Parent Bone it follows: "BODY" (the bone's whole move, as Deform says), "HEAD" or "TAIL" (only
+        where that end goes: moved as a whole there, never squashed). Set with layer.parent_bone_set(attached_to=)."""
+        return _oanim.layer_parent_bone_attach(self._id)[0]
+
+    @property
+    def parent_bone_turn(self):
+        """How a layer attached to a head or tail turns there: "BONE" (with the bone), "HALF" (halfway with the
+        connected bone meeting it there) or "NONE". Set with layer.parent_bone_set(turn=)."""
+        return _oanim.layer_parent_bone_attach(self._id)[1]
+
+    @property
     def parent_bone_group(self):
         """The group above whose Parent Bone overrides this layer's own (and its weights), or ""."""
         return _oanim.layer_parent_bone_group(self._id)

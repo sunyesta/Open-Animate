@@ -181,6 +181,23 @@ PENDING = [
      'Alt on a loose head moves the head alone', 'tests/test_bone_drag.py'),
     ('src/editors/viewport.cc', '    if (!bone || doc.frame_current == 0 || std::find(family.begin(), family.end(), owner) == family.end()) {', '    if (!bone || std::find(family.begin(), family.end(), owner) == family.end()) {',
      'armature.bone_drag only poses (not the setup frame)', 'tests/test_bone_drag.py'),
+    # Attached To (Body, Head, Tail) and Turn on a layer's Parent Bone (bone_follow_skin).
+    ('src/data/bones.cc', '  const Bone *b = attach == BoneAttach::Body ? nullptr : bone_find(armature, bone.id);', '  const Bone *b = nullptr;',
+     'Attached To Head or Tail: the layer follows only that end, never squashed', 'tests/test_bone_attach.py'),
+    ('src/data/bones.cc', '  if (turn != BoneAttachTurn::None) {\n    angle = turned(bone, *b);', '  if (true) {\n    angle = turned(bone, *b);',
+     'Turn Never: an attached layer keeps its angle', 'tests/test_bone_attach.py'),
+    ('src/data/bones.cc', '      if (op) {\n        angle += 0.5f * wrap_pi(', '      if (false && op) {\n        angle += 0.5f * wrap_pi(',
+     'Turn Halfway: half the bend at a connected joint', 'tests/test_bone_attach.py'),
+    ('src/data/bones.cc', '        other = b->connected && b->parent != b->id ? bone_find(armature, b->parent) : nullptr;', '        other = nullptr;',
+     'Turn Halfway at a head: with its connected parent', 'tests/test_bone_attach.py'),
+    ('src/data/layer.hh', '    return parent_bone != 0 && parent_bone_points && !attached_to_end() && !is_group() &&', '    return parent_bone != 0 && parent_bone_points && !is_group() &&',
+     'attached to an end, Deform Points still moves the layer as a whole', 'tests/test_bone_attach.py'),
+    ('src/ops/rig_ops.cc', '                   if (!regular && layer->parent_bone_attach != BoneAttach::Body) {', '                   if (false && !regular && layer->parent_bone_attach != BoneAttach::Body) {',
+     'a pin made the Parent Bone lets go of Attached To', 'tests/test_bone_attach.py'),
+    ('src/ops/rig_ops.cc', 'const Transform2D skin = bone_follow_skin(*armature, change, *p, layer->parent_bone_attach, layer->parent_bone_turn);', 'const Transform2D skin = p->skin;',
+     'Apply Pose as Rest moves an attached layer as its end moved', 'tests/test_bone_attach.py'),
+    ('src/io/oanim_file.cc', '  if (layer.parent_bone_attach != BoneAttach::Body) {\n    j["parent_bone_attach"]', '  if (false) {\n    j["parent_bone_attach"]',
+     'Attached To saved', 'tests/test_bone_attach.py'),
 ]
 
 def build(root):

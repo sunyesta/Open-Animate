@@ -2959,7 +2959,10 @@ void rig_operators_register()
                "layer inside a group with a Parent Bone follows that group's and is left as it is); `deform`=LAYER moves the layer (a bone's "
                "squash and stretch squashes its lines too), POINTS its points (lines keep their width), CURVE bends "
                "its points along the bone's curve (bendy bones); `chain_end`=a bone connected on from the Parent Bone "
-               "bends them along the whole chain to it (\"\": the Parent Bone alone), making Deform Curve. "
+               "bends them along the whole chain to it (\"\": the Parent Bone alone), making Deform Curve; `attached_to`=HEAD or TAIL "
+               "(a regular bone) makes the layer follow only that end, moving as a whole there, never squashed (BODY: the "
+               "whole bone, as Deform says), and `turn`=BONE, HALF (halfway with the connected bone meeting it there) "
+               "or NONE how it turns there. "
                "Either alone, or both. `extend_to`=a bone in line with the active layer's chain (through connected "
                "bones): above its Parent Bone the chain starts there, below its end it ends there (Deform Curve). keep_animation=1: the layer shows where it did on every keyed frame "
                "(its transform keyed again there), as Keep Poses does for setup moves. Setup frame only",
@@ -2978,6 +2981,16 @@ void rig_operators_register()
                    report(ReportType::Error, "deform is LAYER, POINTS or CURVE");
                    return OpStatus::Cancelled;
                  }
+                 const std::string attach_arg = op_arg(C, "attached_to"), turn_arg = op_arg(C, "turn");
+                 if (!attach_arg.empty() && attach_arg != "BODY" && attach_arg != "HEAD" && attach_arg != "TAIL") {
+                   report(ReportType::Error, "attached_to is BODY, HEAD or TAIL");
+                   return OpStatus::Cancelled;
+                 }
+                 if (!turn_arg.empty() && turn_arg != "BONE" && turn_arg != "HALF" && turn_arg != "NONE") {
+                   report(ReportType::Error, "turn is BONE, HALF or NONE");
+                   return OpStatus::Cancelled;
+                 }
+                 int not_regular = 0;
                  bool set_chain = op_has_arg(C, "chain_end");
                  std::string chain_end = op_arg(C, "chain_end");
                  /* Extend To: the active layer's chain carried on, as a drawing's right-click on a bone does. */
@@ -3099,6 +3112,33 @@ void rig_operators_register()
                      layer->parent_bone_chain_end = 0;
                      changed++;
                    }
+                   /* Attached To: only a regular bone has a head and tail apart (a new bone that isn't one lets go). */
+                   const bool regular = layer->parent_bone != 0 && bone_takes_attach(*armature, layer->parent_bone);
+                   if (!regular && layer->parent_bone_attach != BoneAttach::Body) {
+                     layer->parent_bone_attach = BoneAttach::Body;
+                     changed++;
+                   }
+                   if (!attach_arg.empty()) {
+                     const BoneAttach at = attach_arg == "HEAD"   ? BoneAttach::Head
+                                           : attach_arg == "TAIL" ? BoneAttach::Tail
+                                                                  : BoneAttach::Body;
+                     if (at != BoneAttach::Body && !regular) {
+                       not_regular++;
+                     }
+                     else if (layer->parent_bone_attach != at) {
+                       layer->parent_bone_attach = at;
+                       changed++;
+                     }
+                   }
+                   if (!turn_arg.empty()) {
+                     const BoneAttachTurn t = turn_arg == "HALF"   ? BoneAttachTurn::Half
+                                              : turn_arg == "NONE" ? BoneAttachTurn::None
+                                                                   : BoneAttachTurn::Bone;
+                     if (layer->parent_bone_turn != t) {
+                       layer->parent_bone_turn = t;
+                       changed++;
+                     }
+                   }
                    if (!deform.empty()) {
                      const bool points = deform != "LAYER", curve = deform == "CURVE";
                      if (layer->parent_bone_points != points || layer->parent_bone_curve != curve) {
@@ -3190,6 +3230,10 @@ void rig_operators_register()
                  if (locked > 0) {
                    report(ReportType::Warning, std::to_string(locked) + (locked == 1 ? " layer is" : " layers are") +
                                                    " inside a group with a Parent Bone, which decides for it");
+                 }
+                 if (not_regular > 0 && changed == 0) {
+                   report(ReportType::Warning, "Attached To Head or Tail takes a regular Parent Bone (a pin or a "
+                                               "controller has no ends apart)");
                  }
                  if (bent > 0 && changed == 0) {
                    animation_evaluate(doc, doc.frame_current);
@@ -5076,7 +5120,8 @@ void rig_operators_register()
                 continue;
               }
               const Transform2D above = layer_world_transform(doc, id) * layer->local_transform().inverted();
-              const Transform2D m = above.inverted() * armature_world * p->skin * armature_world.inverted() * above;
+              const Transform2D skin = bone_follow_skin(*armature, change, *p, layer->parent_bone_attach, layer->parent_bone_turn);
+              const Transform2D m = above.inverted() * armature_world * skin * armature_world.inverted() * above;
               const float turn = std::atan2(m.b, m.a) * 180.0f / PI;
               layer->position = m.apply(layer->position);
               layer->rotation += turn;

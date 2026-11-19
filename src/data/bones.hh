@@ -20,6 +20,8 @@ struct BoneCollection;
 struct Collection;
 struct BoneConstraint;
 enum class BoneConstraintType;
+enum class BoneAttach : uint8_t;
+enum class BoneAttachTurn : uint8_t;
 struct Document;
 struct Layer;
 
@@ -151,6 +153,14 @@ int armature_ik_point_bone(const Layer &armature, size_t i, bool head);
 /* The chain the IK End (or IK Base) of bone `i` turns, its point's bone first, up to the nearest IK Base (empty: none). */
 std::vector<size_t> armature_ik_chain(const Layer &armature, size_t i, BoneConstraintType type);
 const BonePose *bone_pose_find(const std::vector<BonePose> &poses, uint64_t id);
+/* What a layer following bone `bone` (its Parent Bone) is moved by, from the setup pose to `poses` (bone layer space):
+ * the bone's skin, or with Attached To at the head or tail of a regular bone, a move that only carries that end and turns
+ * as `turn` says about it (with the bone; halfway with the connected bone meeting it there, its parent at the head, its
+ * first connected child at the tail; or not), never squashing or skewing. */
+Transform2D bone_follow_skin(const Layer &armature, const std::vector<BonePose> &poses, const BonePose &bone,
+                             BoneAttach attach, BoneAttachTurn turn);
+/* Whether bone `bone` of `armature` takes Attached To (a regular bone). */
+bool bone_takes_attach(const Layer &armature, uint64_t bone);
 /* Limit to Shape: where a head (bone layer space) is kept, inside the constraint's shape as last worked
  * out (anim/shape_limit.hh); `head` itself when it fits or there is no shape. */
 float2 bone_shape_limit(const BoneConstraint &c, float2 head);

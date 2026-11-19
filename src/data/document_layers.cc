@@ -287,6 +287,13 @@ static bool layers_hold(const std::vector<Layer> &list, uint64_t id)
   return false;
 }
 
+/* What moves a layer following a bone as a whole: the bone's skin, or only an end of it (Attached To). */
+static Transform2D layer_follow_skin(const Layer &armature, const std::vector<BonePose> &poses, const BonePose &bone,
+                                     const Layer &layer)
+{
+  return bone_follow_skin(armature, poses, bone, layer.parent_bone_attach, layer.parent_bone_turn);
+}
+
 /* `own_local`: the layer's own transform instead of its values' (layer_world_transform_with). */
 static bool world_transform_in(const std::vector<Layer> &list, const Transform2D &parent, const Layer *armature,
                                const Transform2D &armature_world, bool setup_frame, uint64_t id,
@@ -303,7 +310,7 @@ static bool world_transform_in(const std::vector<Layer> &list, const Transform2D
     if (binds) {
       const std::vector<BonePose> poses = armature_pose(*armature, setup_frame);
       if (const BonePose *bone = bone_pose_find(poses, layer.followed_bone())) {
-        transform = armature_world * bone->skin * armature_world.inverted() *
+        transform = armature_world * layer_follow_skin(*armature, poses, *bone, layer) * armature_world.inverted() *
                     transform;
       }
     }
@@ -342,7 +349,8 @@ static bool world_transform_indexed(const LayerIndex &index, bool setup_frame, u
     if (binds) {
       const std::vector<BonePose> poses = armature_pose(*armature, setup_frame);
       if (const BonePose *bone = bone_pose_find(poses, layer.followed_bone())) {
-        transform = armature_world * bone->skin * armature_world.inverted() * transform;
+        transform = armature_world * layer_follow_skin(*armature, poses, *bone, layer) * armature_world.inverted() *
+                    transform;
       }
     }
     if (layer.id == id) {
@@ -401,7 +409,8 @@ static Transform2D chain_transform_below(const std::vector<const Layer *> &chain
     if (binds) {
       const std::vector<BonePose> poses = armature_pose(*armature, setup_frame);
       if (const BonePose *bone = bone_pose_find(poses, layer.followed_bone())) {
-        transform = armature_world * bone->skin * armature_world.inverted() * transform;
+        transform = armature_world * layer_follow_skin(*armature, poses, *bone, layer) * armature_world.inverted() *
+                    transform;
       }
     }
     const bool bones = layer.is_bone_layer();

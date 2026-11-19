@@ -4610,6 +4610,12 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     const Layer &l = layer_or_raise(id);
     return std::string(!l.parent_bone_points ? "LAYER" : l.parent_bone_curve ? "CURVE" : "POINTS");
   });
+  m.def("layer_parent_bone_attach", [layer_or_raise](uint64_t id) {
+    const Layer &l = layer_or_raise(id);
+    const char *at = l.parent_bone_attach == BoneAttach::Head ? "HEAD" : l.parent_bone_attach == BoneAttach::Tail ? "TAIL" : "BODY";
+    const char *turn = l.parent_bone_turn == BoneAttachTurn::Half ? "HALF" : l.parent_bone_turn == BoneAttachTurn::None ? "NONE" : "BONE";
+    return py::make_tuple(std::string(at), std::string(turn));
+  });
   /* The bones a Deform: Curve drawing bends along, head to tail (empty: it doesn't bend). */
   m.def("layer_parent_bone_chain", [layer_or_raise](uint64_t id) {
     const Document &doc = *current_context().document;

@@ -3532,8 +3532,66 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
                         "bone's motion from its setup pose (Deform: Layer only)");
     }
   }
-  /* Deform: what the bone moves, the layer as a whole or its points. A group moves as a whole. */
-  if (parent && !binding) {
+  /* Attached To (a regular bone): its whole move, or only its head's or tail's (a joint's round cap that never squashes),
+   * with how it turns there. Like Deform, set on Setup. */
+  const auto choice_row = [&](const char *label, const char *id, int now, int count, const char *const *names,
+                              const char *const *tips, bool usable, const auto &pick) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::PushID(id);
+    ImGui::BeginDisabled(!usable);
+    const float w = (ImGui::GetContentRegionAvail().x - float(count - 1)) / float(count);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, ImGui::GetStyle().ItemSpacing.y));
+    for (int k = 0; k < count; k++) {
+      if (k > 0) {
+        ImGui::SameLine();
+      }
+      if (k == now) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+      }
+      if (ImGui::Button(names[k], ImVec2(w, 0)) && k != now) {
+        pick(k);
+      }
+      if (k == now) {
+        ImGui::PopStyleColor();
+      }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("%s", usable || doc.frame_current == 0 ? tips[k] : "Switch to Setup (frame 0)");
+      }
+    }
+    ImGui::PopStyleVar();
+    ImGui::EndDisabled();
+    ImGui::PopID();
+  };
+  if (parent && !binding && parent->type == BoneType::Regular) {
+    const bool usable = !same_as_original && doc.frame_current == 0;
+    static const char *const NAMES[] = {"Body", "Head", "Tail"};
+    static const char *const TIPS[] = {
+        "The layer follows the whole bone: its turn, its move and its squash and stretch (as Deform says)",
+        "The layer follows only the bone's head: it moves as a whole with it and is never squashed or skewed",
+        "The layer follows only the bone's tip: it moves as a whole with it and is never squashed or skewed (a "
+        "joint's round cap)"};
+    static const char *const ARGS[] = {"BODY", "HEAD", "TAIL"};
+    choice_row("Attached To", "attached_to", int(layer.parent_bone_attach), 3, NAMES, TIPS, usable,
+               [&](int k) { operator_call(C, "layer.parent_bone_set", {{"attached_to", ARGS[k]}}); });
+    if (layer.attached_to_end()) {
+      static const char *const TURN_NAMES[] = {"With Bone", "Halfway", "Never"};
+      static const char *const TURN_TIPS[] = {
+          "It turns as the bone turns",
+          "It turns halfway between the bone and the connected bone meeting it there (its parent at the head, its "
+          "child at the tip), as a knee or elbow cap does; with none, as the bone",
+          "It keeps its angle and only moves"};
+      static const char *const TURN_ARGS[] = {"BONE", "HALF", "NONE"};
+      choice_row("Turn", "attach_turn", int(layer.parent_bone_turn), 3, TURN_NAMES, TURN_TIPS, usable,
+                 [&](int k) { operator_call(C, "layer.parent_bone_set", {{"turn", TURN_ARGS[k]}}); });
+    }
+  }
+  /* Deform: what the bone moves, the layer as a whole or its points. A group moves as a whole. Attached to an end, the
+   * layer only ever moves as a whole. */
+  if (parent && !binding && !layer.attached_to_end()) {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
     ImGui::AlignTextToFramePadding();

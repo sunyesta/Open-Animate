@@ -1866,6 +1866,54 @@ const BonePose *bone_pose_find(const std::vector<BonePose> &poses, uint64_t id)
   return nullptr;
 }
 
+bool bone_takes_attach(const Layer &armature, uint64_t bone)
+{
+  const Bone *b = bone_find(armature, bone);
+  return b && b->type == BoneType::Regular;
+}
+
+Transform2D bone_follow_skin(const Layer &armature, const std::vector<BonePose> &poses, const BonePose &bone,
+                             BoneAttach attach, BoneAttachTurn turn)
+{
+  const Bone *b = attach == BoneAttach::Body ? nullptr : bone_find(armature, bone.id);
+  if (!b || b->type != BoneType::Regular) {
+    return bone.skin;
+  }
+  /* The end in the bone's own frame (its length along x), where it was and where it is. */
+  const float2 end_local = attach == BoneAttach::Head ? float2(0.0f, 0.0f) : float2(b->length, 0.0f);
+  const float2 was = bone.setup.apply(end_local), now = bone.pose.apply(end_local);
+  /* How far a pose turned a bone from its setup: its length's way, as it shows (a stretched parent's skew included). */
+  const auto turned = [](const BonePose &p, const Bone &of) {
+    const float2 a = p.setup.apply_vector({of.length > 1e-7f ? of.length : 1.0f, 0.0f});
+    const float2 c = p.pose.apply_vector({of.length > 1e-7f ? of.length : 1.0f, 0.0f});
+    return wrap_pi(direction_angle(c) - direction_angle(a));
+  };
+  float angle = 0.0f;
+  if (turn != BoneAttachTurn::None) {
+    angle = turned(bone, *b);
+    if (turn == BoneAttachTurn::Half) {
+      /* The bone meeting it at that end: its parent at a connected head, its first connected child at the tail. */
+      const Bone *other = nullptr;
+      if (attach == BoneAttach::Head) {
+        other = b->connected && b->parent != b->id ? bone_find(armature, b->parent) : nullptr;
+      }
+      else {
+        for (const Bone &c : armature.bones) {
+          if (c.parent == b->id && c.id != b->id && c.connected) {
+            other = &c;
+            break;
+          }
+        }
+      }
+      const BonePose *op = other && other->type == BoneType::Regular ? bone_pose_find(poses, other->id) : nullptr;
+      if (op) {
+        angle += 0.5f * wrap_pi(turned(*op, *other) - angle);
+      }
+    }
+  }
+  return Transform2D::translate(now) * Transform2D::rotate(angle) * Transform2D::translate(-was);
+}
+
 Bone *bone_find(Layer &armature, uint64_t id)
 {
   for (Bone &b : armature.bones) {

@@ -600,6 +600,8 @@ add_test(NAME bone_pick_deselects_points
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_pick_deselects_points.py)
 add_test(NAME bone_drag
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_drag.py)
+add_test(NAME bone_attach
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_attach.py)
 add_test(NAME bone_tab_drawing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_tab_drawing.py)
 add_test(NAME controller_step_end
