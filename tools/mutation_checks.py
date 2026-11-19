@@ -38,6 +38,9 @@ PENDING = [
     ('src/anim/dynamics.cc', '  const int upto = std::min(frame, std::max(start, doc.frame_end));', '  const int upto = frame;', 'Dynamics stop at the end frame', 'tests/test_dynamics_end_frame.py'),
     ('src/data/grid.cc', '      cp.handles_set = true;', '      cp.handles_set = false;', "The Shape tool's grid lines have handles of no length", 'tests/test_grid.py'),
     ('src/data/vector.cc', '    if (w > 0.0f) {', '    if (false && w > 0.0f) {', "A grid node's short handle reads as reaching a third along", 'tests/test_mesh_points.py'),
+    ('src/anim/animation.cc', '      keyable[i] = inside.contains(flat[i]);', '      keyable[i] = true;', "In an action, layers outside its bone layer aren't auto-keyed", 'tests/test_action_outside_keys.py'),
+    ('src/ops/anim_ops.cc', '      return l == &doc.camera || l == &doc.simulation || !layer_keys_editable(doc, l->id);', '      return l == nullptr;', "In an action, the timeline leaves out layers outside its bone layer", 'tests/test_action_outside_keys.py'),
+    ('src/ops/anim_ops.cc', '!layer->locked && layer_keys_editable(doc, layer->id)) {', '!layer->locked) {', "In an action, I and Alt I key nothing outside its bone layer", 'tests/test_action_outside_keys.py'),
 ]
 
 def build(root):

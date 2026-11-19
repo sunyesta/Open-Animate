@@ -1,5 +1,6 @@
 #include "anim/animation.hh"
 
+#include "anim/draw_order.hh"
 #include "anim/drivers.hh"
 
 #include <algorithm>
@@ -1676,11 +1677,28 @@ void animation_record(Document &doc)
    * own. */
   /* Which layers this keyed (Key Together fills an action's timeline once something in it is keyed). */
   std::vector<char> keyed_here(flat.size(), 0);
+  /* While an action is edited, layers outside its bone layer aren't keyed (their keys are the mainline's). */
+  std::vector<char> keyable(flat.size(), 1);
+  if (!doc.action.empty()) {
+    std::set<const Layer *> inside;
+    const auto walk = [&](auto &&self, const Layer &l) -> void {
+      inside.insert(&l);
+      for (const Layer &child : l.children) {
+        self(self, child);
+      }
+    };
+    if (const Layer *owner = layer_find(doc, doc.action_layer)) {
+      walk(walk, *owner);
+    }
+    for (size_t i = 0; i < flat.size(); i++) {
+      keyable[i] = inside.contains(flat[i]);
+    }
+  }
   parallel_for(flat.size(), 16, [&](size_t begin, size_t end) {
     for (size_t i = begin; i < end; i++) {
       Layer &layer = *flat[i];
       const bool keys = auto_key && !(layer.is_media() && layer.media.no_auto_key) &&
-                        !(layer.is_text() && layer.text.no_auto_key);
+                        !(layer.is_text() && layer.text.no_auto_key) && keyable[i];
       /* The layer's poses, worked out once something on it is keyed (most layers have no edit). Keys put on the
        * frame meanwhile don't change which poses lie either side of it. */
       BonePoses poses;
@@ -1816,9 +1834,11 @@ void animation_record(Document &doc)
     }
   }
   simulation_in(doc);
-  layer_for_each_channel(doc.simulation, [&](auto &ch, auto &value) { record(ch, value, frame, auto_key, replace); });
+  /* The scene's own (gravity and wind, the camera) are outside every bone layer: not keyed while an action is. */
+  const bool scene_keys = auto_key && doc.action.empty();
+  layer_for_each_channel(doc.simulation, [&](auto &ch, auto &value) { record(ch, value, frame, scene_keys, replace); });
   layer_for_each_channel(document_camera(doc),
-                         [&](auto &ch, auto &value) { record(ch, value, frame, auto_key, replace); });
+                         [&](auto &ch, auto &value) { record(ch, value, frame, scene_keys, replace); });
   const bool keys_put = std::any_of(keyed_here.begin(), keyed_here.end(), [](char w) { return w != 0; });
   const bool keys_gone = std::any_of(keys_went.begin(), keys_went.end(), [](char w) { return w != 0; });
   /* In a fix that follows bones, which starts on frame 1: a channel first keyed later starts from its setup there, a
@@ -2597,6 +2617,11 @@ bool document_set_action(Document &doc, uint64_t owner_id, const std::string &na
   }
   animation_evaluate(doc, frame);
   return true;
+}
+
+bool layer_keys_editable(const Document &doc, uint64_t layer)
+{
+  return doc.action.empty() || layer_inside(doc, layer, doc.action_layer);
 }
 
 bool document_set_action_by_name(Document &doc, const std::string &name)

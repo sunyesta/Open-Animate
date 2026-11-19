@@ -44,7 +44,7 @@ std::vector<Layer *> keyed_layers(Context &C)
   }
   Document &doc = *C.document;
   for (const Layer *layer : document_layers_flat(doc)) {
-    if ((layer->id == doc.active_layer || layer->selected) && !layer->locked) {
+    if ((layer->id == doc.active_layer || layer->selected) && !layer->locked && layer_keys_editable(doc, layer->id)) {
       layers.push_back(layer_find(doc, layer->id));
     }
   }
@@ -136,17 +136,24 @@ const std::vector<uint64_t> &timeline_pinned_layer_ids(Context &C)
    * next change. */
   static const Document *pinned_doc = nullptr;
   static uint64_t pinned_changes = 0;
+  static std::string pinned_action;
+  static uint64_t pinned_action_layer = 0;
   static std::vector<uint64_t> pinned_ids;
   if (!C.document) {
     pinned_ids.clear();
     pinned_doc = nullptr;
     return pinned_ids;
   }
-  if (!C.undo || pinned_doc != C.document || pinned_changes != C.undo->change_count()) {
+  const Document &doc = *C.document;
+  if (!C.undo || pinned_doc != C.document || pinned_changes != C.undo->change_count() || pinned_action != doc.action ||
+      pinned_action_layer != doc.action_layer)
+  {
     const KeyFilter pins{KEY_ALL, false, "", true};
     pinned_ids.clear();
+    pinned_action = doc.action;
+    pinned_action_layer = doc.action_layer;
     for (const Layer *flat : document_layers_flat(*C.document)) {
-      if (!layer_filtered_channels(*const_cast<Layer *>(flat), pins).empty()) {
+      if (layer_keys_editable(doc, flat->id) && !layer_filtered_channels(*const_cast<Layer *>(flat), pins).empty()) {
         pinned_ids.push_back(flat->id);
       }
     }
@@ -174,6 +181,16 @@ static KeyFilter op_key_filter(Context &C)
   return filter;
 }
 
+/* Leaves out the layers whose keys can't be edited now (outside the bone layer of the action being edited). */
+static void keys_editable_only(const Document &doc, std::vector<Layer *> &layers)
+{
+  if (!doc.action.empty()) {
+    std::erase_if(layers, [&](const Layer *l) {
+      return l == &doc.camera || l == &doc.simulation || !layer_keys_editable(doc, l->id);
+    });
+  }
+}
+
 std::vector<Layer *> timeline_layers(Context &C)
 {
   /* What the rows show, and the layers of pinned channels (listed under Pinned, whatever layer is
@@ -192,6 +209,7 @@ std::vector<Layer *> timeline_layers(Context &C)
         layers.push_back(own);
       }
     }
+    keys_editable_only(*C.document, layers);
   }
   return layers;
 }
@@ -233,7 +251,18 @@ static std::vector<Layer *> timeline_selected_layers(Context &C)
   return layers;
 }
 
+static std::vector<Layer *> timeline_shown_layers_all(Context &C);
+
 std::vector<Layer *> timeline_shown_layers(Context &C)
+{
+  std::vector<Layer *> layers = timeline_shown_layers_all(C);
+  if (C.document) {
+    keys_editable_only(*C.document, layers);
+  }
+  return layers;
+}
+
+static std::vector<Layer *> timeline_shown_layers_all(Context &C)
 {
   std::vector<Layer *> picked = C.document && C.document->timeline_only_selected ? timeline_selected_layers(C)
                                                                                   : keyed_layers(C);
@@ -1012,6 +1041,11 @@ void anim_operators_register()
         layer = document_active_layer(doc);
       }
       if (!layer) {
+        return OpStatus::Cancelled;
+      }
+      if (!layer_keys_editable(doc, layer->id)) {
+        report(ReportType::Warning, layer->name + " is outside the bone layer of the action being edited: its keys can't "
+                                                  "be edited there");
         return OpStatus::Cancelled;
       }
       std::vector<std::string> paths;

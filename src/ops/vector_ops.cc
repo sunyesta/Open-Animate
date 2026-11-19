@@ -469,6 +469,9 @@ void vector_operators_register()
         animation_record(doc);
         int changed = 0;
         for (Layer *layer : editable_layers(C)) {
+          if (!layer_keys_editable(doc, layer->id)) {
+            continue;
+          }
           std::vector<std::string> paths;
           const auto own_key = [&](const auto &keys) {
             const auto *k = keys.key_at(doc.frame_current);

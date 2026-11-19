@@ -91,6 +91,9 @@ bool document_set_action(Document &doc, uint64_t owner, const std::string &name)
 /* By name alone: the bone layer is found from the active layer (the nearest around it that has it), else any bone layer
  * that has it. */
 bool document_set_action_by_name(Document &doc, const std::string &name);
+/* Whether a layer's keys can be edited: always on the mainline; while an action is edited, only the bone layer it
+ * belongs to and the layers inside it (the rest show their mainline keys, which the action doesn't hold). */
+bool layer_keys_editable(const Document &doc, uint64_t layer);
 /* The action being edited (its bone layer and name) and its frame 0 keys, for work that looks through other actions
  * and comes back (Keep Animation): leaving an action takes its frame 0 keys back into the setup, and coming back makes
  * them again only where the channel is keyed after frame 0 (or on the mainline), so a key made on frame 0 alone would be
