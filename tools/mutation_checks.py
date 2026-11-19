@@ -230,6 +230,18 @@ PENDING = [
      'an end with Curve bends its points', 'tests/test_bone_group_deform.py'),
     ('src/data/layer.hh', '    return parent_bone != 0 && parent_bone_points && (!attached_to_end() || parent_bone_curve) &&', '    return parent_bone != 0 && parent_bone_points && (!attached_to_end() || parent_bone_curve) && !is_group() &&',
      "a group's Deform counts", 'tests/test_bone_group_deform.py'),
+    # A handle dragged on a drawing bent by a Cage Deform, at the cage's corner.
+    ('src/anim/deform.cc', '  if (!fitted) {\n    handles_settle_bent(doc, layer, targets);\n    return;\n  }\n',
+     '  if (false && !fitted) {\n    handles_settle_bent(doc, layer, targets);\n    return;\n  }\n',
+     'a handle dragged at a cage corner lands where it is taken', 'tests/test_deform_handle_drag_corner.py'),
+    ('src/anim/deform.cc', '      const float grow = std::clamp(want_len / shown_len, 0.25f, 4.0f);\n',
+     '      const float grow = 1.0f + 0.0f * want_len;\n',
+     'the handle grows by how much longer it should show', 'tests/test_deform_handle_drag_corner.py'),
+    ('src/anim/deform.cc', 'if (g_resample_left_out != layer.id) {', 'if (true || g_resample_left_out != layer.id) {',
+     'with a Resample first, the handles settle against the drawing\'s own, bent', 'tests/test_deform_handle_drag_corner.py'),
+    ('src/editors/viewport.cc', '        if (!deformed || fitted) {\n          continue;\n        }\n        if (!own) {\n',
+     '        if (true || !deformed || fitted) {\n          continue;\n        }\n        if (!own) {\n',
+     'with a Resample first, the handles shown are the drawing\'s own, bent at their points', 'tests/test_deform_handle_drag_corner.py'),
 ]
 
 def build(root):

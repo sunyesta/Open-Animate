@@ -7,6 +7,7 @@
 #include <cmath>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
 
@@ -774,6 +775,19 @@ std::vector<float2> layer_group_deform_points(const Document &doc, const Layer &
 /* How far a step is taken to see how something moves around a place: a small part of a mouth. */
 static constexpr float STRETCH_STEP = 0.002f;
 
+/* ResampleLeftOutScope's layer on this thread (0: none). */
+static thread_local uint64_t g_resample_left_out = 0;
+
+ResampleLeftOutScope::ResampleLeftOutScope(uint64_t layer) : was(g_resample_left_out)
+{
+  g_resample_left_out = layer;
+}
+
+ResampleLeftOutScope::~ResampleLeftOutScope()
+{
+  g_resample_left_out = was;
+}
+
 /* The turn and stretch between a place and where a step each way from it went. False when it collapses there, with
  * nothing to take a drag back through. */
 static bool stretch_from_steps(float2 at, float2 step_x, float2 step_y, Transform2D &r)
@@ -970,7 +984,9 @@ static VectorDrawing stack_evaluated(const Document &doc, const Layer &layer, bo
       drawing = drawing_bevel(drawing, m);
     }
     else if (m.type == ModifierType::Resample) {
-      drawing = subdivided(doc, layer, std::move(drawing), m, render);
+      if (g_resample_left_out != layer.id) {
+        drawing = subdivided(doc, layer, std::move(drawing), m, render);
+      }
     }
     else if (m.type == ModifierType::Armature) {
       Deformer d;
@@ -1209,12 +1225,117 @@ bool layer_handles_fitted(const Document &doc, const Layer &layer)
          });
 }
 
+/* Each target's handle as the viewport shows and drags it, relative to its point as shown (`r_points`: where that is):
+ * bent at its own point, less the length the edit wire fitted it to (CurvePoint::wire_fit_in), the layer's own Resample
+ * left out (its points between would leave no such handle). Empty where none compares (a Bevel's points). */
+static std::vector<std::optional<float2>> handles_shown_bent(const Document &doc, const Layer &layer,
+                                                             const std::vector<HandleTarget> &targets,
+                                                             std::vector<float2> *r_points = nullptr)
+{
+  const ResampleLeftOutScope own(layer.id);
+  const VectorDeformWireScope wire;
+  const VectorDrawing shown = layer_evaluated_drawing(doc, layer, false);
+  const VectorDrawing &stored = layer.drawing;
+  std::vector<std::optional<float2>> r(targets.size());
+  for (size_t i = 0; i < targets.size(); i++) {
+    const HandleTarget &t = targets[i];
+    const size_t c = size_t(t.curve), k = size_t(t.index);
+    if (c >= shown.curves.size() || shown.curves[c].points.size() != stored.curves[c].points.size()) {
+      continue;
+    }
+    const CurvePoint &cp = shown.curves[c].points[k];
+    r[i] = curve_handle(shown, shown.curves[c], t.index, t.in) - (t.in ? cp.wire_fit_in : cp.wire_fit_out) -
+           shown.points[size_t(cp.point)].pos;
+    if (r_points) {
+      r_points->resize(targets.size());
+      (*r_points)[i] = shown.points[size_t(cp.point)].pos;
+    }
+  }
+  return r;
+}
+
+/* layer_handles_settle through a deform that bends each handle at its own point. A deform bends a handle by where it
+ * points, and at a cage's corner (or wherever the deform isn't smooth) differently each way, so the point's one
+ * stretch can't say how a stored handle shows: a small move on screen there could turn and stretch the stored handle
+ * far, and the line with it. Bent at its point, a handle shows in proportion to its length, so each step finds its
+ * way by how the shown handle turns as the stored one is turned a little, and its length by how much shorter or longer
+ * it shows than it is to: a few steps put the end where it is dragged, the stored handle turned and stretched no more
+ * than that takes. */
+static void handles_settle_bent(const Document &doc, Layer &layer, const std::vector<HandleTarget> &targets)
+{
+  VectorDrawing &drawing = layer.drawing;
+  constexpr float NUDGE = 0.05f;
+  const auto stored_of = [&](const HandleTarget &t) {
+    const Curve &curve = drawing.curves[size_t(t.curve)];
+    const float2 at = drawing.points[size_t(curve.points[size_t(t.index)].point)].pos;
+    return std::make_pair(at, curve_handle(drawing, curve, t.index, t.in) - at);
+  };
+  for (int pass = 0; pass < 5; pass++) {
+    /* Where each is to show, relative to its point as shown. */
+    std::vector<float2> points;
+    const std::vector<std::optional<float2>> now = handles_shown_bent(doc, layer, targets, &points);
+    std::vector<float2> to(targets.size());
+    for (size_t i = 0; i < targets.size(); i++) {
+      if (now[i]) {
+        to[i] = targets[i].at - points[i];
+      }
+    }
+    bool settled = true;
+    for (size_t i = 0; i < targets.size(); i++) {
+      if (now[i] && length(*now[i] - to[i]) > 1e-6f * std::max(length(to[i]), 1e-3f)) {
+        settled = false;
+      }
+    }
+    if (settled) {
+      return;
+    }
+    /* How each shown handle turns as its stored one turns a little. */
+    const std::vector<Curve> kept = drawing.curves;
+    for (size_t i = 0; i < targets.size(); i++) {
+      const HandleTarget &t = targets[i];
+      const auto [at, h] = stored_of(t);
+      if (now[i] && length(h) > 1e-9f) {
+        curve_point_move_handle(drawing, drawing.curves[size_t(t.curve)], t.index, t.in, at + rotate(h, NUDGE),
+                                t.keep_other);
+      }
+    }
+    const std::vector<std::optional<float2>> turned = handles_shown_bent(doc, layer, targets);
+    drawing.curves = kept;
+    for (size_t i = 0; i < targets.size(); i++) {
+      const HandleTarget &t = targets[i];
+      const auto [at, h] = stored_of(t);
+      Curve &curve = drawing.curves[size_t(t.curve)];
+      if (!now[i]) {
+        continue;
+      }
+      const float shown_len = length(*now[i]), want_len = length(to[i]);
+      if (length(h) <= 1e-9f || shown_len <= 1e-9f || !turned[i] || length(*turned[i]) <= 1e-9f) {
+        /* Nothing to turn: the point's stretch says where. */
+        curve_point_move_handle(drawing, curve, t.index, t.in, at + h + t.unskin.apply_vector(to[i] - *now[i]),
+                                t.keep_other);
+        continue;
+      }
+      const auto angle_of = [](float2 v) { return std::atan2(v.y, v.x); };
+      const auto wrapped = [](float a) { return std::atan2(std::sin(a), std::cos(a)); };
+      /* A deform keeps the way round, so the shown handle turns the way the stored one does: by how much, measured. */
+      const float rate = std::clamp(wrapped(angle_of(*turned[i]) - angle_of(*now[i])) / NUDGE, 0.1f, 10.0f);
+      const float turn = std::clamp(wrapped(angle_of(to[i]) - angle_of(*now[i])) / rate, -1.0f, 1.0f);
+      const float grow = std::clamp(want_len / shown_len, 0.25f, 4.0f);
+      curve_point_move_handle(drawing, curve, t.index, t.in, at + rotate(h, turn) * grow, t.keep_other);
+    }
+  }
+}
+
 void layer_handles_settle(const Document &doc, Layer &layer, const std::vector<HandleTarget> &targets)
 {
   if (doc.frame_current == 0 || targets.empty() || matched_original(doc, layer) || !layer_is_deformed(doc, layer)) {
     return;
   }
   const bool fitted = layer_handles_fitted(doc, layer);
+  if (!fitted) {
+    handles_settle_bent(doc, layer, targets);
+    return;
+  }
   VectorDrawing &drawing = layer.drawing;
   /* The same few steps for every update of a drag, none chosen over another, so the handle changes smoothly with the
    * mouse: what a bent handle does can turn sharply, and the best of several tries could differ from one update to the

@@ -480,17 +480,32 @@ static Posed posed(const Document &doc, const Layer &layer)
     /* Fitted by a Resample Self: the wire takes the fit, the handles stay as stored (layer_handles_fitted). */
     const bool fitted = layer_handles_fitted(doc, layer);
     bool added = fitted;
+    /* With a Resample before the deform, the drawing's own handles as the deform bends them at their points, from the
+     * stack without it (what dragging one settles against, layer_handles_settle): not the point's one stretch, which
+     * at a cage's corner can turn a handle far from where the line leaves the point. */
+    std::optional<VectorDrawing> own;
     for (size_t c = 0; c < r.storage.curves.size() && c < shown.curves.size(); c++) {
       Curve &curve = r.storage.curves[c];
-      if (curve.points.size() != shown.curves[c].points.size()) {
+      const Curve *bent = &shown.curves[c];
+      if (curve.points.size() != bent->points.size()) {
         added = true;
-        continue;
+        if (!deformed || fitted) {
+          continue;
+        }
+        if (!own) {
+          const ResampleLeftOutScope left(layer.id);
+          own = layer_evaluated_drawing(doc, layer, false);
+        }
+        if (c >= own->curves.size() || own->curves[c].points.size() != curve.points.size()) {
+          continue;
+        }
+        bent = &own->curves[c];
       }
       for (size_t k = 0; deformed && !fitted && k < curve.points.size(); k++) {
-        curve.points[k].handle_in = shown.curves[c].points[k].handle_in;
-        curve.points[k].handle_out = shown.curves[c].points[k].handle_out;
-        curve.points[k].wire_fit_in = shown.curves[c].points[k].wire_fit_in;
-        curve.points[k].wire_fit_out = shown.curves[c].points[k].wire_fit_out;
+        curve.points[k].handle_in = bent->points[k].handle_in;
+        curve.points[k].handle_out = bent->points[k].handle_out;
+        curve.points[k].wire_fit_in = bent->points[k].wire_fit_in;
+        curve.points[k].wire_fit_out = bent->points[k].wire_fit_out;
         curve.points[k].handles_set = true;
       }
     }

@@ -606,6 +606,8 @@ add_test(NAME bone_stretch
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_stretch.py)
 add_test(NAME bone_group_deform
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_group_deform.py)
+add_test(NAME deform_handle_drag_corner
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_deform_handle_drag_corner.py)
 add_test(NAME bone_tab_drawing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_tab_drawing.py)
 add_test(NAME controller_step_end

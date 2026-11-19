@@ -120,6 +120,16 @@ struct HandleTarget {
   float moved = 0.0f;
 };
 void layer_handles_settle(const Document &doc, Layer &layer, const std::vector<HandleTarget> &targets);
+/* While alive (on this thread), `layer`'s own Resample modifiers are left out of its stack: its own points and handles
+ * bent as they are, with no points between them, so a handle is shown and dragged as the deform bends it at its point
+ * when a Resample before the deform adds points (whose handles would be the Resample's, not the drawing's). */
+struct ResampleLeftOutScope {
+  explicit ResampleLeftOutScope(uint64_t layer);
+  ~ResampleLeftOutScope();
+  ResampleLeftOutScope(const ResampleLeftOutScope &) = delete;
+  ResampleLeftOutScope &operator=(const ResampleLeftOutScope &) = delete;
+  uint64_t was = 0;
+};
 /* The same with the bones posed as `poses` has them (each one's skin), for a change worked out
  * without posing the bones: Apply Pose as Rest Pose bending the setup drawing to the new rest. */
 std::vector<Transform2D> layer_point_skins_posed(const Document &doc, const Layer &layer,
