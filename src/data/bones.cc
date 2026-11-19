@@ -2530,31 +2530,6 @@ void armature_bone_drag(Layer &armature, const std::vector<Bone> &original, size
       spot[d] = std::make_pair(was[d].head + by, was[d].tail + by);
     }
   };
-  /* Bone c's base riding its parent k from (old_head, old_tail) to (new_head, new_tail): its distance from the nearer
-   * end kept (Keep End Distance), else as far along; its side offset kept; c and its own turned with k. */
-  const auto carried = [&](size_t k, size_t c, float2 old_head, float2 old_tail, float2 new_head, float2 new_tail) {
-    const float old_len = std::max(distance(old_tail, old_head), 1e-7f);
-    const float new_len = std::max(distance(new_tail, new_head), 1e-7f);
-    const float2 u = (old_tail - old_head) / old_len, nu = (new_tail - new_head) / new_len;
-    const float2 q = was[c].head - old_head;
-    float x = q.x * u.x + q.y * u.y;
-    const float y = -q.x * u.y + q.y * u.x;
-    if (armature.bones[c].connected) {
-      x = new_len;
-    }
-    else if (armature.bones[c].keep_end_distance) {
-      x = x / old_len > 0.5f ? x - old_len + new_len : x;
-    }
-    else {
-      x = x / old_len * new_len;
-    }
-    (void)k;
-    const float2 at = new_head + nu * x + float2(-nu.y, nu.x) * y;
-    const float turn = wrap_pi(direction_angle(nu) - direction_angle(u));
-    for (const size_t d : family_of(c)) {
-      spot[d] = std::make_pair(at + rotate(was[d].head - was[c].head, turn), at + rotate(was[d].tail - was[c].head, turn));
-    }
-  };
   Bone &b = armature.bones[index];
   Bone *parent = b.parent != 0 && b.parent != b.id ? bone_find(armature, b.parent) : nullptr;
   std::vector<BonePose> now;
@@ -2627,12 +2602,8 @@ void armature_bone_drag(Layer &armature, const std::vector<Bone> &original, size
           const float turn = wrap_pi(direction_angle(to) - direction_angle(from));
           const float grow = stretch && length(from) > 0.1f * reach ? length(to) / length(from) : 1.0f;
           const float2 tail = head + rotate(was[index].tail - head, turn) * grow;
+          /* Its children hang from it unstretched (BonePose::carry), as the mockup carries them. */
           aim(index, tail, stretch);
-          if (stretch) {
-            for (const size_t c : children(index)) {
-              carried(index, c, head, was[index].tail, head, tail);
-            }
-          }
         }
       }
       break;
