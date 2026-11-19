@@ -16579,6 +16579,342 @@ static void curve_menu_note(const Document &doc, const Layer &armature, const Vi
   }
 }
 
+/* --- IK dots and base rings ---------------------------------------------------------------------------------------- */
+
+static constexpr ImU32 COL_IK_END = IM_COL32(0xEF, 0x9F, 0x27, 255);
+static constexpr ImU32 COL_IK_BASE = IM_COL32(0x7F, 0x77, 0xDD, 255);
+static constexpr ImU32 COL_IK_PICKED = IM_COL32(0xbf, 0xe0, 0xff, 255);
+static constexpr float IK_DOT_PAST = 15.0f, IK_DOT_RADIUS = 6.0f, IK_RING_RADIUS = 12.0f;
+
+struct IKPoint {
+  size_t bone = 0;
+  BoneConstraintType type = BoneConstraintType::IKEnd;
+  bool operator==(const IKPoint &) const = default;
+};
+
+/* Dragging an IK dot or ring: the bones as it began (each step starts from them), the chain's length for this drag
+ * (more), flipped with F, never saved. */
+static struct {
+  bool active = false, moved = false;
+  uint64_t layer = 0;
+  IKPoint point;
+  std::vector<Bone> was;
+  ImVec2 start;
+  float2 offset;
+  int more = 0;
+  bool flip = false;
+} g_ik_drag;
+
+/* The IK dot clicked: its chain is shown tinted, and right-clicks pin it (to a bone, the scene). */
+static struct {
+  uint64_t layer = 0, bone = 0;
+} g_ik_picked;
+
+/* What a right-click was over for the IK menus: a dot, or (with a dot picked) a bone or empty space. */
+static struct {
+  uint64_t layer = 0;
+  std::string end, bone;
+  bool dot = false;
+} g_ik_menu;
+
+/* The bone layer whose IK dots and rings show: as the curve handles'. */
+static Layer *ik_armature(Context &C)
+{
+  return curve_armature(C);
+}
+
+/* An IK End picked by its dot, still there and active. */
+static const Bone *ik_picked_end(const Document &doc, const Layer &armature)
+{
+  if (g_ik_picked.layer != armature.id || doc.active_layer != armature.id || armature.active_bone != g_ik_picked.bone) {
+    return nullptr;
+  }
+  const Bone *b = bone_find(armature, g_ik_picked.bone);
+  return b && bone_ik_end(*b) ? b : nullptr;
+}
+
+static std::vector<IKPoint> ik_points(const Layer &armature)
+{
+  std::vector<IKPoint> out;
+  for (size_t i = 0; i < armature.bones.size(); i++) {
+    if (bone_ik_base(armature.bones[i])) {
+      out.push_back({i, BoneConstraintType::IKBase});
+    }
+    if (bone_ik_end(armature.bones[i])) {
+      out.push_back({i, BoneConstraintType::IKEnd});
+    }
+  }
+  return out;
+}
+
+/* Where an IK point is drawn: a base's ring on its point; an end's dot a little past it, along the bone it ends. */
+static ImVec2 ik_point_screen(const Document &doc, const Layer &armature, const std::vector<BonePose> &poses,
+                              const ViewMapping &view, const IKPoint &p)
+{
+  const Transform2D to_document = layer_world_transform(doc, armature.id);
+  const ImVec2 at = view.to_screen(to_document.apply(armature_ik_point(armature, poses, p.bone, p.type)));
+  if (p.type == BoneConstraintType::IKBase) {
+    return at;
+  }
+  const BoneConstraint *c = bone_ik_end(armature.bones[p.bone]);
+  const int e = c ? armature_ik_point_bone(armature, p.bone, c->ik_head) : -1;
+  if (e < 0) {
+    return at;
+  }
+  const ImVec2 head = view.to_screen(to_document.apply(poses[size_t(e)].head));
+  const float dx = at.x - head.x, dy = at.y - head.y, l = std::hypot(dx, dy);
+  return l > 1e-3f ? ImVec2(at.x + dx / l * IK_DOT_PAST, at.y + dy / l * IK_DOT_PAST) : at;
+}
+
+static std::optional<IKPoint> ik_point_under(const Document &doc, const Layer &armature, const ViewMapping &view,
+                                             ImVec2 mouse)
+{
+  const std::vector<BonePose> poses = armature_pose(armature, doc.frame_current == 0);
+  std::optional<IKPoint> best;
+  float nearest = 1e9f;
+  for (const IKPoint &p : ik_points(armature)) {
+    const ImVec2 at = ik_point_screen(doc, armature, poses, view, p);
+    const float d = std::hypot(at.x - mouse.x, at.y - mouse.y);
+    /* A dot is picked near it; a ring on its line (inside it is the bone's joint). */
+    const bool close_by = p.type == BoneConstraintType::IKEnd ? d <= IK_DOT_RADIUS + 4.0f
+                                                          : std::abs(d - IK_RING_RADIUS) <= 4.0f;
+    if (close_by && d < nearest) {
+      nearest = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/* The Pin button beside the picked IK End's dot (none while dragging). */
+static bool ik_pin_button(const Document &doc, const Layer &armature, const ViewMapping &view, ImVec2 &lo, ImVec2 &hi)
+{
+  const Bone *picked = ik_picked_end(doc, armature);
+  if (!picked || g_ik_drag.active) {
+    return false;
+  }
+  const std::vector<BonePose> poses = armature_pose(armature, doc.frame_current == 0);
+  const ImVec2 at = ik_point_screen(doc, armature, poses, view,
+                                    {size_t(picked - armature.bones.data()), BoneConstraintType::IKEnd});
+  lo = ImVec2(at.x + 12.0f, at.y - 26.0f);
+  hi = ImVec2(lo.x + 30.0f, lo.y + 15.0f);
+  return true;
+}
+
+/* The picked dot's chain, tinted; then the rings, the dots, a line from each end pinned to a bone to that bone. */
+static void draw_ik_points(ImDrawList *dl, Context &C, const ViewMapping &view)
+{
+  const Layer *armature = ik_armature(C);
+  if (!armature) {
+    return;
+  }
+  const Document &doc = *C.document;
+  const Transform2D to_document = layer_world_transform(doc, armature->id);
+  const std::vector<BonePose> poses = armature_pose(*armature, doc.frame_current == 0);
+  const auto screen = [&](float2 p) { return view.to_screen(to_document.apply(p)); };
+  const Bone *picked = ik_picked_end(doc, *armature);
+  if (picked || g_ik_drag.active) {
+    const size_t i = g_ik_drag.active ? g_ik_drag.point.bone : size_t(picked - armature->bones.data());
+    const BoneConstraintType type = g_ik_drag.active ? g_ik_drag.point.type : BoneConstraintType::IKEnd;
+    const int n = armature_ik_chain_size(*armature, i, type, g_ik_drag.active ? g_ik_drag.more : 0);
+    const std::vector<size_t> base = armature_ik_chain(*armature, i, type);
+    if (!base.empty()) {
+      /* The chain this drag bends: the point's own, longer or shorter. */
+      std::vector<size_t> chain = base;
+      while (int(chain.size()) > n && chain.size() > 1) {
+        chain.pop_back();
+      }
+      for (size_t at = chain.back(); int(chain.size()) < n;) {
+        const Bone *p = bone_find(*armature, armature->bones[at].parent);
+        if (!p) {
+          break;
+        }
+        at = size_t(p - armature->bones.data());
+        chain.push_back(at);
+      }
+      for (const size_t j : chain) {
+        dl->AddLine(screen(poses[j].head), screen(poses[j].tail), IM_COL32(0xEF, 0x9F, 0x27, 110), 7.0f);
+      }
+    }
+  }
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  const std::optional<IKPoint> hover = g_ik_drag.active ? std::optional<IKPoint>(g_ik_drag.point)
+                                                        : ik_point_under(doc, *armature, view, mouse);
+  for (const IKPoint &p : ik_points(*armature)) {
+    const ImVec2 at = ik_point_screen(doc, *armature, poses, view, p);
+    const bool lit = hover && *hover == p;
+    const BoneConstraint *c = p.type == BoneConstraintType::IKEnd ? bone_ik_end(armature->bones[p.bone])
+                                                                  : bone_ik_base(armature->bones[p.bone]);
+    const bool pinned = c && c->pin != IK_PIN_NONE;
+    if (p.type == BoneConstraintType::IKBase) {
+      if (pinned) {
+        dl->AddCircleFilled(at, IK_RING_RADIUS, IM_COL32(0x7F, 0x77, 0xDD, 90));
+      }
+      dl->AddCircle(at, IK_RING_RADIUS, COL_IK_BASE, 0, lit ? 3.5f : 2.2f);
+      continue;
+    }
+    if (picked && size_t(picked - armature->bones.data()) == p.bone) {
+      dl->AddCircle(at, 10.5f, COL_IK_PICKED, 0, 2.0f);
+    }
+    const float r = lit ? 7.5f : IK_DOT_RADIUS;
+    dl->AddCircleFilled(at, r, pinned ? COL_IK_END : IM_COL32(0x2a, 0x2a, 0x2a, 255));
+    dl->AddCircle(at, r, COL_IK_END, 0, 2.0f);
+    if (g_ik_drag.active && g_ik_drag.point == p && g_ik_drag.moved) {
+      const std::string n = std::to_string(armature_ik_chain_size(*armature, p.bone, p.type, g_ik_drag.more));
+      dl->AddText(ImVec2(at.x + 12.0f, at.y - 7.0f), COL_IK_END, n.c_str());
+    }
+    /* Pinned to a bone: a dotted line to the nearest place on it. */
+    if (c && c->pin > 0.0f) {
+      if (const Bone *to = bone_find(*armature, uint64_t(c->pin))) {
+        const size_t t = size_t(to - armature->bones.data());
+        const ImVec2 h = screen(poses[t].head), tl = screen(poses[t].tail);
+        const float vx = tl.x - h.x, vy = tl.y - h.y, vv = vx * vx + vy * vy;
+        const float u = vv > 0.0f ? std::clamp(((at.x - h.x) * vx + (at.y - h.y) * vy) / vv, 0.0f, 1.0f) : 0.0f;
+        const ImVec2 q(h.x + vx * u, h.y + vy * u);
+        const float dx = q.x - at.x, dy = q.y - at.y, l = std::hypot(dx, dy);
+        for (float s = 0.0f; s < l; s += 5.0f) {
+          const float e = std::min(l, s + 2.0f);
+          dl->AddLine(ImVec2(at.x + dx * s / l, at.y + dy * s / l), ImVec2(at.x + dx * e / l, at.y + dy * e / l),
+                      IM_COL32(0xEF, 0x9F, 0x27, 200), 1.2f);
+        }
+        dl->AddCircleFilled(q, 2.5f, COL_IK_END);
+      }
+    }
+  }
+  if (ImVec2 lo, hi; ik_pin_button(doc, *armature, view, lo, hi)) {
+    const bool pinned = bone_ik_end(*picked)->pin != IK_PIN_NONE;
+    const bool over = mouse.x >= lo.x && mouse.x <= hi.x && mouse.y >= lo.y && mouse.y <= hi.y;
+    dl->AddRectFilled(lo, hi, pinned ? COL_IK_END : IM_COL32(0x2a, 0x2a, 0x2a, 255), 4.0f);
+    dl->AddRect(lo, hi, over ? IM_COL32(255, 255, 255, 255) : COL_IK_END, 4.0f);
+    const ImVec2 ts = ImGui::CalcTextSize("Pin");
+    dl->AddText(ImVec2((lo.x + hi.x - ts.x) * 0.5f, (lo.y + hi.y - ts.y) * 0.5f),
+                pinned ? IM_COL32(0x1d, 0x1d, 0x1d, 255) : IM_COL32(0xdd, 0xdd, 0xdd, 255), "Pin");
+    if (over && ImGui::IsWindowHovered()) {
+      ImGui::SetTooltip("%s: keyed, holds until the next key (U)", pinned ? "Unpin" : "Pin to the scene");
+      return;
+    }
+  }
+  if (hover && !g_ik_drag.active && ImGui::IsWindowHovered()) {
+    const Bone &b = armature->bones[hover->bone];
+    if (hover->type == BoneConstraintType::IKEnd) {
+      ImGui::SetTooltip("%s IK End: drag to bend its chain, click to select it\nWhile dragging: F flips the bend, the "
+                        "wheel or + - makes the chain longer or shorter, Alt stretches\nU: pin or unpin. Right-click: "
+                        "its menu",
+                        b.name.c_str());
+    }
+    else {
+      ImGui::SetTooltip("%s IK Base: drag to move it, the bones above bending, pinned ends staying\nU: pin or unpin",
+                        b.name.c_str());
+    }
+  }
+}
+
+/* A press on an IK dot or ring starts dragging it; while it lasts the point follows the mouse. Let go without moving:
+ * a dot selects its chain, a ring its bone. True while the press is the point's. */
+static bool ik_point_input(Context &C, Layer &armature, const ViewMapping &view, bool hovered)
+{
+  Document &doc = *C.document;
+  const ImGuiIO &io = ImGui::GetIO();
+  if (g_ik_drag.active) {
+    if (g_ik_drag.layer != armature.id || g_ik_drag.point.bone >= armature.bones.size() ||
+        g_ik_drag.was.size() != armature.bones.size())
+    {
+      g_ik_drag.active = false;
+      C.wm->modal_running = false;
+      return false;
+    }
+    for (const ModalKey &k : C.wm->modal_keys) {
+      if (k.type == "F") {
+        g_ik_drag.flip = !g_ik_drag.flip;
+      }
+      else if (k.type == "EQUAL" || k.type == "NUMPAD_PLUS" || k.type == "PLUS") {
+        g_ik_drag.more++;
+      }
+      else if (k.type == "MINUS" || k.type == "NUMPAD_MINUS") {
+        g_ik_drag.more--;
+      }
+    }
+    C.wm->modal_keys.clear();
+    if (io.MouseWheel != 0.0f) {
+      g_ik_drag.more += io.MouseWheel > 0.0f ? 1 : -1;
+    }
+    /* Not past what the chain can be. */
+    const int now = armature_ik_chain_size(armature, g_ik_drag.point.bone, g_ik_drag.point.type, g_ik_drag.more);
+    const int base = armature_ik_chain_size(armature, g_ik_drag.point.bone, g_ik_drag.point.type, 0);
+    g_ik_drag.more = now - base;
+    const float dx = io.MousePos.x - g_ik_drag.start.x, dy = io.MousePos.y - g_ik_drag.start.y;
+    g_ik_drag.moved |= dx * dx + dy * dy > 9.0f;
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      g_ik_drag.active = false;
+      C.wm->modal_running = false;
+      if (g_ik_drag.moved) {
+        if (!(armature.bones == g_ik_drag.was)) {
+          push_undo(C, g_ik_drag.point.type == BoneConstraintType::IKEnd ? "IK End" : "IK Base");
+        }
+        return true;
+      }
+      /* A click: a dot selects its chain (the end bone active), a ring its bone. */
+      Bone &b = armature.bones[g_ik_drag.point.bone];
+      armature_deselect_all(armature);
+      if (g_ik_drag.point.type == BoneConstraintType::IKEnd) {
+        for (const size_t j : armature_ik_chain(armature, g_ik_drag.point.bone, BoneConstraintType::IKEnd)) {
+          bone_select(armature.bones[j], true);
+        }
+        g_ik_picked = {armature.id, b.id};
+      }
+      else {
+        g_ik_picked = {};
+      }
+      bone_select(b, true);
+      armature.active_bone = b.id;
+      armature_flush_selection(armature);
+      push_undo(C, "Select IK Chain");
+      return true;
+    }
+    if (!g_ik_drag.moved || doc.frame_current == 0) {
+      return true;
+    }
+    armature.bones = g_ik_drag.was;
+    const float2 goal = layer_world_transform(doc, armature.id).inverted().apply(view.to_document(io.MousePos)) +
+                        g_ik_drag.offset;
+    IKReach how;
+    how.more = g_ik_drag.more;
+    how.flip = g_ik_drag.flip;
+    how.stretch = io.KeyAlt;
+    armature_ik_reach(armature, g_ik_drag.point.bone, g_ik_drag.point.type, goal, how);
+    armature_ik_hold(armature, g_ik_drag.was, g_ik_drag.point.bone, g_ik_drag.point.type);
+    return true;
+  }
+  if (!hovered || !ImGui::IsMouseClicked(ImGuiMouseButton_Left) || io.KeyShift || io.KeyCtrl ||
+      ik_armature(C) != &armature)
+  {
+    return false;
+  }
+  if (ImVec2 lo, hi; ik_pin_button(doc, armature, view, lo, hi) && io.MousePos.x >= lo.x && io.MousePos.x <= hi.x &&
+                     io.MousePos.y >= lo.y && io.MousePos.y <= hi.y)
+  {
+    operator_call(C, "armature.ik_pin_toggle");
+    return true;
+  }
+  const std::optional<IKPoint> p = ik_point_under(doc, armature, view, io.MousePos);
+  if (!p) {
+    return false;
+  }
+  const std::vector<BonePose> poses = armature_pose(armature, doc.frame_current == 0);
+  const float2 mouse = layer_world_transform(doc, armature.id).inverted().apply(view.to_document(io.MousePos));
+  g_ik_drag = {};
+  g_ik_drag.active = true;
+  g_ik_drag.layer = armature.id;
+  g_ik_drag.point = *p;
+  g_ik_drag.was = armature.bones;
+  g_ik_drag.start = io.MousePos;
+  /* The dot sits past the point: the point keeps its place from the mouse. */
+  g_ik_drag.offset = armature_ik_point(armature, poses, p->bone, p->type) - mouse;
+  C.wm->modal_running = true;
+  C.wm->modal_keys.clear();
+  return true;
+}
+
 static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewMapping &view, bool hovered,
                             ImDrawList *dl)
 {
@@ -16590,6 +16926,10 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
   }
   /* A curve handle pressed or dragged (bendy bones). */
   if (curve_handle_input(C, armature, view, hovered)) {
+    return;
+  }
+  /* An IK dot or ring pressed or dragged. */
+  if (ik_point_input(C, armature, view, hovered)) {
     return;
   }
   /* Dragging a controller's corner on the setup frame: how far a frame is, so the corner stays under the mouse. */
@@ -16808,7 +17148,34 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
       ImGui::IsMouseReleased(ImGuiMouseButton_Right) && !ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Right) &&
       !g_right_click_spent)
   {
-    if (!bones_moving(doc, armature).empty()) {
+    g_ik_menu = {};
+    const std::optional<IKPoint> dot = ik_armature(C) == &armature ? ik_point_under(doc, armature, view, io.MousePos)
+                                                                   : std::nullopt;
+    const Bone *picked = ik_picked_end(doc, armature);
+    if (dot && dot->type == BoneConstraintType::IKEnd) {
+      /* An IK dot: its chain picked, and its menu. */
+      Bone &b = armature.bones[dot->bone];
+      armature_deselect_all(armature);
+      for (const size_t j : armature_ik_chain(armature, dot->bone, BoneConstraintType::IKEnd)) {
+        bone_select(armature.bones[j], true);
+      }
+      bone_select(b, true);
+      armature.active_bone = b.id;
+      armature_flush_selection(armature);
+      g_ik_picked = {armature.id, b.id};
+      g_ik_menu = {armature.id, b.name, "", true};
+      ImGui::OpenPopup("##ik_menu");
+    }
+    else if (picked && !bone_find(armature, pick_bone(doc, armature, view, io.MousePos))) {
+      /* An IK End picked, empty space: pin it to the scene or unpin it. */
+      g_ik_menu = {armature.id, picked->name, "", false};
+      ImGui::OpenPopup("##ik_menu");
+    }
+    else if (!bones_moving(doc, armature).empty()) {
+      if (const Bone *on = bone_find(armature, pick_bone(doc, armature, view, io.MousePos)); picked && on) {
+        /* An IK End picked, a bone: the bone menu leads with pinning the end to it. */
+        g_ik_menu = {armature.id, picked->name, on->name, false};
+      }
       curve_menu_note(doc, armature, view, io.MousePos);
       ImGui::OpenPopup("##bone_menu");
     }
@@ -17241,7 +17608,46 @@ static void bone_parent_menus(Context &C, bool hovered)
     bone_apply_items(C);
     ui_menu_end();
   }
+  if (ui_menu_begin("##ik_menu")) {
+    const Layer *rig = document_active_layer(*C.document);
+    const Bone *end = rig && rig->id == g_ik_menu.layer ? bone_find_by_name(*rig, g_ik_menu.end) : nullptr;
+    const BoneConstraint *c = end ? bone_ik_end(*end) : nullptr;
+    if (c) {
+      ImGui::TextDisabled("%s IK End", end->name.c_str());
+      ImGui::Separator();
+      if (ui_menu_item("Pin to Scene", nullptr, c->pin == IK_PIN_SCENE)) {
+        operator_call(C, "armature.ik_pin_set", {{"bone", end->name}, {"to", "SCENE"}});
+      }
+      if (c->pin != IK_PIN_NONE && ui_menu_item("Unpin")) {
+        operator_call(C, "armature.ik_pin_set", {{"bone", end->name}, {"to", ""}});
+      }
+      if (g_ik_menu.dot) {
+        ImGui::Separator();
+        menu_operator(C, "Flip Bend", "armature.ik_flip", {{"bone", end->name}});
+        menu_operator(C, "Clear Chain Scale", "armature.ik_clear_scale", {{"bone", end->name}});
+      }
+    }
+    ui_menu_end();
+  }
   if (ui_menu_begin("##bone_menu")) {
+    /* An IK End picked by its dot, right-clicked on a bone: pin the end to it. */
+    if (const Layer *rig = document_active_layer(*C.document);
+        rig && rig->id == g_ik_menu.layer && !g_ik_menu.bone.empty())
+    {
+      const Bone *end = bone_find_by_name(*rig, g_ik_menu.end), *to = bone_find_by_name(*rig, g_ik_menu.bone);
+      const BoneConstraint *c = end ? bone_ik_end(*end) : nullptr;
+      if (c && to) {
+        const std::string why = armature_ik_pin_refusal(*rig, *end, *to);
+        const std::string label = "Pin " + end->name + " to " + to->name;
+        if (ui_menu_item(label.c_str(), nullptr, c->pin == float(to->id), why.empty())) {
+          operator_call(C, "armature.ik_pin_set", {{"bone", end->name}, {"to", to->name}});
+        }
+        if (!why.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+          ImGui::SetTooltip("%s", why.c_str());
+        }
+        ImGui::Separator();
+      }
+    }
     pose_menu_items(C);
     /* Bendy bones: over a joint, its corner; over a bone, its curve. */
     if (const Layer *rig = document_active_layer(*C.document);
@@ -17267,6 +17673,21 @@ static void bone_parent_menus(Context &C, bool hovered)
     ImGui::Separator();
     menu_operator(C, "Symmetrize", "armature.symmetrize");
     ImGui::Separator();
+    /* IK on the active bone: set on the setup frame. */
+    if (const Layer *armature = document_active_layer(*C.document); armature) {
+      if (const Bone *active = bone_find(*armature, armature->active_bone)) {
+        const bool zero = C.document->frame_current == 0;
+        const bool end = bone_ik_end(*active) != nullptr, base = bone_ik_base(*active) != nullptr;
+        if (ui_menu_item("IK End", "Shift I", end, zero && !base)) {
+          operator_call(C, end ? "armature.ik_remove" : "armature.ik_end_add", {{"bone", active->name}});
+        }
+        if (ui_menu_item("IK Base", nullptr, base, zero && !end)) {
+          operator_call(C, base ? "armature.ik_remove" : "armature.ik_base_add",
+                        base ? OpArgs{{"bone", active->name}, {"type", "IK_BASE"}} : OpArgs{{"bone", active->name}});
+        }
+        ImGui::Separator();
+      }
+    }
     if (ImGui::BeginMenu("Convert To", C.document->frame_current == 0)) {
       const Layer *armature = document_active_layer(*C.document);
       const Bone *active = armature ? bone_find(*armature, armature->active_bone) : nullptr;
@@ -18828,6 +19249,9 @@ static void viewport_draw_contents(Area &area, Context &C)
     g_path_slide.again = true;
     g_path_scale.again = true;
   }
+  else if (g_ik_drag.active) {
+    /* The wheel makes the IK chain dragged longer or shorter. */
+  }
   else if (hovered && io.MouseWheel != 0.0f) {
     const float2 under_mouse = view.to_document(io.MousePos);
     const float factor = std::pow(1.15f, io.MouseWheel);
@@ -19896,6 +20320,7 @@ static void viewport_draw_contents(Area &area, Context &C)
     };
     visit(visit, doc.layers, true);
     draw_bone_curves(dl, C, view);
+    draw_ik_points(dl, C, view);
   }
   draw_keyed_hover(dl, C, view);
   /* The active layer's masks, dashed (Mask Outlines); a mask symbol or field under the mouse,

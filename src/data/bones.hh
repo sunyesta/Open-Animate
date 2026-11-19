@@ -98,6 +98,27 @@ void bones_mark_carried(Document &doc, const std::vector<Layer *> &moving);
  * IK) so the bone's tip reaches `goal` (bone layer space); an Arc IK bone bends its chain evenly.
  * Returns false when the bone has no parent to turn with. */
 bool armature_reach(Layer &armature, uint64_t bone, float2 goal);
+/* IK points moved by hand. Where bone `i`'s IK End or IK Base puts its point, in `poses`. */
+float2 armature_ik_point(const Layer &armature, const std::vector<BonePose> &poses, size_t i, BoneConstraintType type);
+/* How a move of an IK point bends its chain: `more` bones longer (or shorter) than up to its base, stretching out of
+ * reach, flipped to bend the other way, Soft drawn in near full reach, `free` of Limit Angle. */
+struct IKReach {
+  int more = 0;
+  bool stretch = false, flip = false, soft = true, free = false;
+};
+/* How many bones a move with `more` bends. */
+int armature_ik_chain_size(const Layer &armature, size_t i, BoneConstraintType type, int more);
+/* Turns (and with stretch, stretches) bone `i`'s IK chain, as keyed, so its point reaches `goal` (a root's head: the
+ * root moves). False when it has none. */
+bool armature_ik_reach(Layer &armature, size_t i, BoneConstraintType type, float2 goal, const IKReach &how);
+/* After an edit off the setup frame: every pinned IK End and IK Base whose chain the edit left alone (not moved from
+ * `original`) back where `original` showed it (an end pinned to a bone where that bone took it), bases first. The
+ * point `skip` of `skip_type` is the one being moved. */
+void armature_ik_hold(Layer &armature, const std::vector<Bone> &original, size_t skip, BoneConstraintType skip_type);
+/* Why IK End `end` can't be pinned to bone `to` ("" when it can). */
+std::string armature_ik_pin_refusal(const Layer &armature, const Bone &end, const Bone &to);
+/* Bone `i`'s IK End chain back to its setup size. */
+bool armature_ik_clear_scale(Layer &armature, size_t i);
 /* A bone's IK End or IK Base (enabled; null: none). */
 const BoneConstraint *bone_ik_end(const Bone &bone);
 const BoneConstraint *bone_ik_base(const Bone &bone);

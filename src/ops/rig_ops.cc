@@ -544,55 +544,6 @@ static BoneConstraint *ik_constraint_of(Bone &b, BoneConstraintType type)
   return nullptr;
 }
 
-/* Why IK End `end` (a bone) can't be pinned to bone `to` ("" when it can): a bone its chain moves would carry its own
- * goal, and one that already follows this end (through other ends pinned to bones) would chase it round. */
-static std::string ik_pin_refusal(const Layer &armature, const Bone &end, const Bone &to)
-{
-  const auto index_of = [&](const Bone &b) { return size_t(&b - armature.bones.data()); };
-  const auto moved_by = [&](const Bone &e) {
-    std::vector<size_t> out;
-    const BoneConstraint *c = bone_ik_end(e);
-    const std::vector<size_t> chain = armature_ik_chain(armature, index_of(e),
-                                                        c ? BoneConstraintType::IKEnd : BoneConstraintType::IKBase);
-    if (chain.empty()) {
-      return out;
-    }
-    const uint64_t top = armature.bones[chain.back()].id;
-    for (size_t j = 0; j < armature.bones.size(); j++) {
-      if (bone_is_descendant(armature, armature.bones[j].id, top)) {
-        out.push_back(j);
-      }
-    }
-    return out;
-  };
-  const auto moves = [&](const Bone &e, const Bone &b) {
-    const std::vector<size_t> m = moved_by(e);
-    return std::find(m.begin(), m.end(), index_of(b)) != m.end();
-  };
-  if (moves(end, to)) {
-    return to.name + " moves with " + end.name + "'s chain";
-  }
-  std::set<uint64_t> seen;
-  const std::function<bool(const Bone &)> follows = [&](const Bone &x) {
-    for (const Bone &e2 : armature.bones) {
-      const BoneConstraint *c2 = bone_ik_end(e2);
-      if (!c2 || !moves(e2, x)) {
-        continue;
-      }
-      if (&e2 == &end) {
-        return true;
-      }
-      if (c2->pin > 0.0f && seen.insert(e2.id).second) {
-        if (const Bone *t = bone_find(armature, uint64_t(c2->pin)); t && follows(*t)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
-  return follows(to) ? to.name + " already follows " + end.name : std::string();
-}
-
 static void register_ik_operators()
 {
   const auto bone_arg = [](Context &C, Layer &armature) -> Bone * {
@@ -688,7 +639,7 @@ static void register_ik_operators()
                      report(ReportType::Warning, base ? std::string("An IK Base is pinned to the scene") : "No bone named " + to);
                      return OpStatus::Cancelled;
                    }
-                   if (const std::string why = ik_pin_refusal(armature, *b, *t); !why.empty()) {
+                   if (const std::string why = armature_ik_pin_refusal(armature, *b, *t); !why.empty()) {
                      report(ReportType::Warning, why);
                      return OpStatus::Cancelled;
                    }
@@ -699,6 +650,57 @@ static void register_ik_operators()
                  }
                  c->pin = pin;
                  return OpStatus::Finished;
+               });
+  /* Moving an IK point by hand: what the viewport's IK dots and rings do. */
+  const auto ik_move = [](Context &C, bool flip_only) {
+    Layer &armature = *active_armature(C);
+    const std::string name = op_arg(C, "bone");
+    Bone *b = name.empty() ? bone_find(armature, armature.active_bone)
+                           : const_cast<Bone *>(bone_find_by_name(armature, name));
+    const BoneConstraintType type = op_arg(C, "type", "IK_END") == "IK_BASE" ? BoneConstraintType::IKBase
+                                                                             : BoneConstraintType::IKEnd;
+    if (!b || !(type == BoneConstraintType::IKEnd ? bone_ik_end(*b) : bone_ik_base(*b))) {
+      report(ReportType::Warning,
+             std::string(b ? b->name + " has no " : "No bone with an ") + bone_constraint_name(type));
+      return OpStatus::Cancelled;
+    }
+    if (C.document->frame_current == 0) {
+      report(ReportType::Warning, "IK poses are made off the setup frame (0)");
+      return OpStatus::Cancelled;
+    }
+    const size_t i = size_t(b - armature.bones.data());
+    const std::vector<Bone> was = armature.bones;
+    const float2 now = armature_ik_point(armature, armature_pose(armature, false), i, type);
+    const float2 goal = flip_only ? now : float2(op_arg_float(C, "x", now.x), op_arg_float(C, "y", now.y));
+    IKReach how;
+    how.more = flip_only ? 0 : int(op_arg_float(C, "more", 0.0f));
+    how.stretch = !flip_only && op_arg_bool(C, "stretch");
+    how.flip = flip_only || op_arg_bool(C, "flip");
+    how.soft = !flip_only;
+    armature_ik_reach(armature, i, type, goal, how);
+    armature_ik_hold(armature, was, i, type);
+    return armature.bones == was ? OpStatus::Cancelled : OpStatus::Finished;
+  };
+  rig_operator("armature.ik_drag", "Move IK Point",
+               "Move bone `bone`'s IK End (default: the active bone's; type=IK_BASE: its IK Base) to x, y (the bone "
+               "layer's units, default where it is), bending its chain: more=N bones longer (or shorter) for this "
+               "move, stretch=1 to stretch out of reach, flip=1 to bend the other way. Pinned ends and bases the "
+               "chain doesn't move stay where they are",
+               bone_layer_active, [ik_move](Context &C) { return ik_move(C, false); });
+  rig_operator("armature.ik_flip", "Flip Bend",
+               "Bend bone `bone`'s IK End chain (default: the active bone's) the other way, its point staying put",
+               bone_layer_active, [ik_move](Context &C) { return ik_move(C, true); });
+  rig_operator("armature.ik_clear_scale", "Clear Chain Scale",
+               "Bone `bone`'s IK End chain (default: the active bone's) back to its setup size, where a stretch left it",
+               bone_layer_active, [](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 const std::string name = op_arg(C, "bone");
+                 const Bone *b = name.empty() ? bone_find(armature, armature.active_bone) : bone_find_by_name(armature, name);
+                 if (!b || !bone_ik_end(*b) || C.document->frame_current == 0) {
+                   return OpStatus::Cancelled;
+                 }
+                 return armature_ik_clear_scale(armature, size_t(b - armature.bones.data())) ? OpStatus::Finished
+                                                                                            : OpStatus::Cancelled;
                });
   rig_operator("armature.ik_pin_toggle", "Pin",
                "Pin or unpin the active bone's IK End (to the scene), or its IK Base. Keyed",

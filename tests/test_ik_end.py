@@ -142,6 +142,7 @@ assert fk > 1e-3, ("unpinned, the leg hangs from the pelvis", fk)
 # --- Pinned to a bone: the ankle rides it.
 doc.frame_current = 0
 assert ops.armature.ik_pin_set(bone="Foot_L", to="Thigh_L") == {'CANCELLED'}, "the chain moves its own thigh"
+assert "moves with" in oanim.wm.banner_report()[3], oanim.wm.banner_report()
 assert ops.armature.ik_pin_set(bone="Foot_L", to="Foot_L") == {'CANCELLED'}, "the foot moves with the chain"
 assert ops.armature.ik_pin_set(bone="Foot_L", to="Ground") == {'FINISHED'}
 assert end_of("Foot_L")["pin"] == "Ground"
@@ -195,6 +196,95 @@ assert not any(c["type"] == "IK_END" for c in rig.bone_constraints("Foot_L"))
 assert ops.armature.ik_remove(bone="Pelvis", type="IK_BASE") == {'FINISHED'}
 assert list(_oanim.layer_bone_ik_chain(rig.id, "Foot_R", "IK_END")) == ["Calf_R", "Thigh_R", "Pelvis", "Root"], \
     "without the base the chain runs to the root"
+
+# --- Moving IK points by hand (the viewport's dots and rings): a fresh pair of legs.
+ops.wm.read_homefile(confirmed="1")
+doc, layers = oanim.data.document, oanim.data.layers
+doc.auto_freeze_keys = False
+doc.frame_current = 0
+ops.layer.new_bone()
+rig = layers.active
+add("Root", (0, -2.5), (0, -2.3))
+add("Pelvis", (0, 0), (0, 0.4), "Root")
+for tag, s in (("_R", -1), ("_L", 1)):
+    add("Thigh" + tag, (0.15 * s, 0), (0.25 * s, -1.0), "Pelvis")
+    add("Calf" + tag, (0.25 * s, -1.0), (0.2 * s, -2.0), "Thigh" + tag)
+    add("Foot" + tag, (0.2 * s, -2.0), (0.5 * s, -2.05), "Calf" + tag)
+assert ops.armature.ik_base_add(bone="Pelvis") == {'FINISHED'}
+for tag in ("_R", "_L"):
+    assert ops.armature.ik_end_add(bone="Foot" + tag) == {'FINISHED'}
+rest = bones()
+assert ops.armature.ik_drag(bone="Foot_R", x="-0.5", y="-1.6") == {'CANCELLED'}, "posed off the setup frame"
+doc.auto_key = True
+doc.frame_current = 10
+
+
+def side(b):
+    h, k, t = b["Thigh_R"]["head"], b["Thigh_R"]["tail"], b["Calf_R"]["tail"]
+    return (t[0] - h[0]) * (k[1] - h[1]) - (t[1] - h[1]) * (k[0] - h[0])
+
+
+assert ops.armature.ik_drag(bone="Foot_R", x="-0.5", y="-1.6") == {'FINISHED'}
+b = bones()
+assert dist(b["Calf_R"]["tail"], (-0.5, -1.6)) < 1e-4, ("the ankle goes where it is dragged", b["Calf_R"]["tail"])
+assert turn(way(b["Foot_R"]), way(rest["Foot_R"])) < 1e-4, "Keep Angle: the foot keeps its angle"
+assert turn(way(b["Pelvis"]), way(rest["Pelvis"])) < 1e-6, "the chain stops at the IK Base"
+assert ops.armature.ik_flip(bone="Foot_R") == {'FINISHED'}
+f = bones()
+assert dist(f["Calf_R"]["tail"], (-0.5, -1.6)) < 1e-3, ("a flip keeps the ankle", f["Calf_R"]["tail"])
+assert side(f) * side(b) < 0, "a flip bends the knee the other way"
+assert dist(f["Thigh_R"]["tail"], b["Thigh_R"]["tail"]) > 0.1
+# One bone more: the pelvis bends too (past its base, for this move).
+assert ops.armature.ik_drag(bone="Foot_R", x="-0.9", y="-1.2", more="1") == {'FINISHED'}
+m = bones()
+assert dist(m["Calf_R"]["tail"], (-0.9, -1.2)) < 1e-3, m["Calf_R"]["tail"]
+assert turn(way(m["Pelvis"]), way(rest["Pelvis"])) > 1e-3, "one bone more turns the pelvis"
+# Out of reach: Soft draws it in short of full reach; stretch reaches.
+reach = dist(rest["Thigh_R"]["head"], rest["Thigh_R"]["tail"]) + dist(rest["Calf_R"]["head"], rest["Calf_R"]["tail"])
+far = (m["Thigh_R"]["head"][0], m["Thigh_R"]["head"][1] - 3.0)
+edge = (m["Thigh_R"]["head"][0], m["Thigh_R"]["head"][1] - reach)
+assert ops.armature.ik_drag(bone="Foot_R", x=repr(edge[0]), y=repr(edge[1])) == {'FINISHED'}
+got = dist(bones()["Calf_R"]["tail"], bones()["Thigh_R"]["head"])
+assert reach * 0.9 < got < reach - 0.03, ("Soft: a goal at full reach is drawn in", got, reach)
+rig.bone_constraint_set("Foot_R", end_index("Foot_R"), soft=False)
+assert ops.armature.ik_drag(bone="Foot_R", x=repr(edge[0]), y=repr(edge[1] + 0.001)) == {'FINISHED'}
+got = dist(bones()["Calf_R"]["tail"], bones()["Thigh_R"]["head"])
+assert abs(got - reach) < 2e-3, ("not Soft: straight out to full reach", got, reach)
+rig.bone_constraint_set("Foot_R", end_index("Foot_R"), soft=True)
+assert ops.armature.ik_drag(bone="Foot_R", x=repr(far[0]), y=repr(far[1]), stretch="1") == {'FINISHED'}
+s = bones()
+assert dist(s["Calf_R"]["tail"], far) < 1e-3, ("stretched, it reaches", s["Calf_R"]["tail"], far)
+assert abs(s["Thigh_R"]["scale"][1] - 1.0) > 0.1, s["Thigh_R"]["scale"]
+assert ops.armature.ik_clear_scale(bone="Foot_R") == {'FINISHED'}
+assert all(abs(v - 1.0) < 1e-6 for v in bones()["Thigh_R"]["scale"]), bones()["Thigh_R"]["scale"]
+assert ops.armature.ik_clear_scale(bone="Foot_R") == {'CANCELLED'}, "nothing left to clear"
+
+# Holds: the left foot pinned stays put while the pelvis moves; the right, unpinned, goes with it.
+rig.select_bone("Foot_L")
+assert ops.armature.ik_pin_toggle() == {'FINISHED'}
+before = bones()
+rig.select_bone("Pelvis")
+assert ops.armature.translate(move_x="0.15", move_y="-0.3", posing="1") == {'FINISHED'}
+b = bones()
+assert dist(b["Calf_L"]["tail"], before["Calf_L"]["tail"]) < 1e-4, ("a pinned ankle holds", b["Calf_L"]["tail"])
+assert dist(b["Calf_R"]["tail"], before["Calf_R"]["tail"]) > 0.1, "an unpinned ankle goes with the pelvis"
+doc.frame_current = 11
+doc.frame_current = 10
+assert dist(bones()["Calf_L"]["tail"], before["Calf_L"]["tail"]) < 1e-4, "keyed where it was held"
+# Pinned to a bone: an ankle held rides that bone as it moves.
+assert ops.armature.ik_pin_set(bone="Foot_R", to="Root") == {'FINISHED'}
+b0 = bones()
+rig.select_bone("Root")
+# Toward the left ankle, so it stays in reach.
+toward = (b0["Calf_L"]["tail"][0] - b0["Thigh_L"]["head"][0], b0["Calf_L"]["tail"][1] - b0["Thigh_L"]["head"][1])
+k = 0.15 / math.hypot(*toward)
+assert ops.armature.translate(move_x=repr(toward[0] * k), move_y=repr(toward[1] * k), posing="1") == {'FINISHED'}
+b1 = bones()
+moved = (b1["Root"]["head"][0] - b0["Root"]["head"][0], b1["Root"]["head"][1] - b0["Root"]["head"][1])
+assert dist(moved, (0, 0)) > 0.1
+want = (b0["Calf_R"]["tail"][0] + moved[0], b0["Calf_R"]["tail"][1] + moved[1])
+assert dist(b1["Calf_R"]["tail"], want) < 1e-3, ("pinned to the root, the ankle rides it", b1["Calf_R"]["tail"], want)
+assert dist(b1["Calf_L"]["tail"], b0["Calf_L"]["tail"]) < 1e-4, "pinned to the scene, the other stays"
 
 # --- Symmetrize: the copy's IK End is pinned to the other side's bone, and so is the mirrored action's.
 ops.wm.read_homefile(confirmed="1")

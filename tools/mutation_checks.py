@@ -83,6 +83,21 @@ PENDING = [
      "Pinned To's keys are saved", 'tests/test_ik_end.py'),
     ('src/io/oanim_file.cc', '                     {"pin", num(c.pin)},\n', '                     {"pin", num(IK_PIN_NONE)},\n',
      'Pinned To is saved', 'tests/test_ik_end.py'),
+    # IK Ends and IK Bases (stage 3: moving IK points by hand, holds).
+    ('src/data/bones.cc', '  if (how.flip && chain.size() >= 2) {\n', '  if (false) {\n',
+     'Flip Bend bends the chain the other way, its point staying', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '    goal = ik_soft_goal(base, goal, reach);\n', '    goal = goal + 0.0f * ik_soft_goal(base, goal, reach);\n',
+     'Soft draws a goal near full reach in', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '      root.scale.y *= want / now;\n', '      root.scale.y *= 1.0f + 0.0f * want / now;\n',
+     'Alt stretches a chain out of reach', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '  for (; more > 0; more--) {\n', '  for (; more > 0 && false; more--) {\n',
+     'a drag can bend one bone more than up to the base', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '    /* Pinned ends and bases the move left alone stay where they were. */\n    armature_ik_hold(armature, original, armature.bones.size(), BoneConstraintType::IKEnd);\n', '',
+     'moving bones keeps pinned ends outside the moved chain put', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '      goal = ik_fk_pose(armature)[size_t(h.on)].pose.apply(h.local);\n', '      goal = h.place + 0.0f * h.local;\n',
+     'a held end pinned to a bone rides that bone', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '    x.scale = setup_value(x.scale_keys, x.scale, false) + x.scale_keys.from_action_bones;\n', '    (void)x;\n',
+     'Clear Chain Scale puts the chain back to its size', 'tests/test_ik_end.py'),
 ]
 
 def build(root):
