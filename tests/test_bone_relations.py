@@ -78,13 +78,24 @@ assert abs(world_angle("hand") - math.radians(20)) < 1e-3, world_angle("hand")
 assert math.dist(bone("hand")["head"], (0.0, 1.0)) < 1e-4, "its head stays"
 relations(inherit_rotation=True)
 
-# Inherit Scale: the arm stretched to twice its length (and kept its thickness).
+# A stretch stays with its bone: the arm stretched to twice its length (keeping its thickness) carries the hand on its
+# tip at its own size, whatever Inherit Scale says.
 at(20, arm=dict(angle=arm_rest, scale=(1.0, 2.0)), hand=dict(angle=0.0))
+for inherit in ("FULL", "NONE", "UNIFORM"):
+    relations(inherit_scale=inherit)
+    assert abs(length("hand") - 0.5) < 1e-4 and math.dist(bone("hand")["head"], (2.0, 0.0)) < 1e-4,         (inherit, "the stretch isn't passed down", length("hand"), bone("hand")["head"])
+# Turned across the arm, it isn't skewed either.
+at(20, hand=dict(angle=math.pi / 2))
+assert abs(length("hand") - 0.5) < 1e-4, ("not stretched sideways", length("hand"))
+assert abs(world_angle("hand") - math.pi / 2) < 1e-4, ("nor skewed", world_angle("hand"))
+# Inherit Scale: the arm made twice as big all over passes its size down.
+at(20, arm=dict(scale=(2.0, 2.0)), hand=dict(angle=0.0))
+relations(inherit_scale="FULL")
 assert abs(length("hand") - 1.0) < 1e-4 and math.dist(bone("hand")["head"], (2.0, 0.0)) < 1e-4, (length("hand"), bone("hand")["head"])
 relations(inherit_scale="NONE")
 assert abs(length("hand") - 0.5) < 1e-4 and math.dist(bone("hand")["head"], (2.0, 0.0)) < 1e-4, ("its own size", length("hand"))
 relations(inherit_scale="UNIFORM")
-assert abs(length("hand") - 0.5 * math.sqrt(2.0)) < 1e-3, ("its overall size", length("hand"))
+assert abs(length("hand") - 1.0) < 1e-3, ("its overall size", length("hand"))
 assert ops.armature.bone_relations_set(bone="hand", inherit_scale="SIDEWAYS") == {'CANCELLED'}
 relations(inherit_scale="FULL")
 

@@ -47,6 +47,10 @@ struct BonePose {
   float2 head, tail;
   /* How far it is stretched along its length against its setup (posing; 1 unstretched). */
   float stretch = 1.0f;
+  /* What its children's axes hang from: its pose without its stretch, squash or Maintain Volume (its length and its
+   * width each brought to its keyed width's scale), so a stretch stays with the bone and what hangs from it is never
+   * stretched or skewed by it; its size (its width's scale, evenly) passes down. The same as `pose` on Setup. */
+  Transform2D carry;
 };
 
 /* Every bone of a bone layer, in the order of `layer.bones`. `setup_frame`: the document is on

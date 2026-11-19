@@ -409,17 +409,62 @@ float bone_parent_axes_angle(const Bone &bone, const BonePose *parent, bool setu
   return transform_angle(bone_parent_axes(bone, parent->pose, parent->setup, setup_frame));
 }
 
-/* The bone's frame from its own values (`local`, in its parent's space): its head where the parent takes
- * it, its axes as bone_parent_axes hangs them. */
-static Transform2D bone_on_parent(const Bone &b, const Transform2D &parent_now, const Transform2D &parent_setup,
-                                  const Transform2D &local, bool setup_frame)
+/* A bone's frame with its length's and its width's scale each brought to `keep` (bone frame: x along, y across): what
+ * its children hang from (BonePose::carry). A stretch stays with its bone: what hangs from it rides its tip (Keep End
+ * Distance) but is never stretched or skewed by it. */
+static Transform2D unstretched(const Transform2D &pose, float along, float across, float keep)
 {
-  const Transform2D axes = bone_parent_axes(b, parent_now, parent_setup, setup_frame);
+  if (std::abs(along) < 1e-6f || std::abs(across) < 1e-6f ||
+      (std::abs(along - keep) < 1e-7f && std::abs(across - keep) < 1e-7f))
+  {
+    return pose;
+  }
+  return pose * Transform2D::scaling({keep / along, keep / across});
+}
+
+/* A bone's length's scale against its width's from its values (posing, against its setup's): what unstretched takes
+ * out of a frame worked out from bone values alone (no constraints). */
+static float bone_own_stretch(const Bone &b, bool setup_frame)
+{
+  const float2 rest = setup_value(b.scale_keys, b.scale, false);
+  if (setup_frame || std::abs(rest.x) < 1e-6f || std::abs(rest.y) < 1e-6f || std::abs(b.scale.x) < 1e-6f) {
+    return 1.0f;
+  }
+  return (b.scale.y / rest.y) / (b.scale.x / rest.x);
+}
+
+/* A frame from bone values without its bone's stretch (bone_own_stretch). */
+static Transform2D unstretched(const Transform2D &frame, float stretch)
+{
+  return unstretched(frame, stretch, 1.0f, 1.0f);
+}
+
+/* The bone's frame from its own values (`local`, in its parent's space): its head where the parent takes
+ * it (`parent_now`, stretched), its axes as bone_parent_axes hangs them from `parent_carry` (the parent without its
+ * stretch: BonePose::carry). */
+static Transform2D bone_on_parent(const Bone &b, const Transform2D &parent_now, const Transform2D &parent_setup,
+                                  const Transform2D &local, bool setup_frame, const Transform2D &parent_carry)
+{
+  const Transform2D axes = bone_parent_axes(b, setup_frame ? parent_now : parent_carry, parent_setup, setup_frame);
   Transform2D out = axes * Transform2D{local.a, local.b, local.c, local.d, 0.0f, 0.0f};
   const float2 head = parent_now.apply({local.tx, local.ty});
   out.tx = head.x;
   out.ty = head.y;
   return out;
+}
+
+/* The way from bone layer space into the axes bone `b`'s angle and scale are in (directions only): its parent's as
+ * bone_on_parent hangs it, without the parent's stretch; an outer bone's frame for a root. Its position is in the
+ * parent's own frame (stretched) instead. */
+static Transform2D bone_axes_inverse(const Layer &armature, const Bone &b, const BonePose *parent, bool setup_frame)
+{
+  if (!parent) {
+    return bone_outer_frame(b, setup_frame).inverted();
+  }
+  const Bone *pb = bone_find(armature, b.parent);
+  const bool knob = b.follow_knob && pb && bone_is_controller(*pb);
+  const Transform2D now = knob ? parent->knob : setup_frame ? parent->pose : parent->carry;
+  return bone_parent_axes(b, now, parent->setup, setup_frame).inverted();
 }
 
 /* Follow Point's change of shape, `w` of the way from none. */
@@ -461,6 +506,10 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
       parent_setup = bone.outer_setup;
       parent_pose = bone_outer_frame(bone, setup_frame);
     }
+    /* What its axes hang from: a controller's knob, else the parent without its stretch. */
+    const Transform2D parent_carry = pi >= 0 && pi != i && depth < 256 && !(bone.follow_knob && bone_is_controller(bones[size_t(pi)]))
+                                         ? poses[pi].carry
+                                         : parent_pose;
     BonePose &p = poses[i];
     p.id = bone.id;
     const float2 setup_position = bone.setup_position;
@@ -498,7 +547,8 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
     if (knob_pulled) {
       rest_box.setup = parent_setup * bone_local(setup_position, setup_angle, setup_scale);
       rest_box.pose = bone_on_parent(bone, parent_pose, parent_setup,
-                                     bone_local_xy(setup_position, setup_angle, setup_scale.y, setup_scale.x), false);
+                                     bone_local_xy(setup_position, setup_angle, setup_scale.y, setup_scale.x), false,
+                                     parent_carry);
       rest_box.skin = rest_box.box_skin = rest_box.pose * rest_box.setup.inverted();
       rest_box.head = rest_box.pose.apply({0, 0});
       rest_box.setup_head = rest_box.setup.apply({0, 0});
@@ -720,7 +770,8 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
         position.x = position.x > 0.5f * l ? l + (position.x - l) / r : position.x / r;
       }
     }
-    p.pose = bone_on_parent(bone, parent_pose, parent_setup, bone_local_xy(position, angle, scale.y * sx, scale.x * sy), setup_frame);
+    p.pose = bone_on_parent(bone, parent_pose, parent_setup, bone_local_xy(position, angle, scale.y * sx, scale.x * sy), setup_frame,
+                            parent_carry);
     if (!setup_frame) {
       /* Pointing at another bone: after the rest, from where this bone has ended up. */
       for (const BoneConstraint &c : bone.constraints) {
@@ -740,12 +791,14 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
           continue;
         }
         angle += wrap_pi(direction_angle(goal - head) - transform_angle(p.pose)) * w;
-        p.pose = bone_on_parent(bone, parent_pose, parent_setup, bone_local_xy(position, angle, scale.y * sx, scale.x * sy), setup_frame);
+        p.pose = bone_on_parent(bone, parent_pose, parent_setup, bone_local_xy(position, angle, scale.y * sx, scale.x * sy), setup_frame,
+                            parent_carry);
         if (c.type == BoneConstraintType::StretchTo) {
           const float reach = distance(p.pose.apply({bone.length, 0}), head);
           if (reach > 1e-7f) {
             sx *= 1.0f + (distance(goal, head) / reach - 1.0f) * w;
-            p.pose = bone_on_parent(bone, parent_pose, parent_setup, bone_local_xy(position, angle, scale.y * sx, scale.x * sy), setup_frame);
+            p.pose = bone_on_parent(bone, parent_pose, parent_setup, bone_local_xy(position, angle, scale.y * sx, scale.x * sy), setup_frame,
+                            parent_carry);
           }
         }
       }
@@ -761,7 +814,8 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
         if (along > 1e-6f && across > 1e-6f) {
           const float a = std::max(c.amount, 0.0f) * w;
           sy *= std::pow(across, -a) * std::pow(along, -a);
-          p.pose = bone_on_parent(bone, parent_pose, parent_setup, bone_local_xy(position, angle, scale.y * sx, scale.x * sy), setup_frame);
+          p.pose = bone_on_parent(bone, parent_pose, parent_setup, bone_local_xy(position, angle, scale.y * sx, scale.x * sy), setup_frame,
+                            parent_carry);
         }
       }
     }
@@ -789,6 +843,14 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
     p.head = p.pose.apply({0, 0});
     p.tail = p.pose.apply({bone.length, 0});
     p.stretch = !setup_frame && !rests && std::abs(setup_scale.y) > 1e-6f ? scale.y * sx / setup_scale.y : 1.0f;
+    /* Its length's and width's scale (constraints, IK and Maintain Volume included) each brought to its keyed width's,
+     * for what hangs from it. */
+    if (setup_frame || rests || std::abs(setup_scale.x) < 1e-6f || std::abs(setup_scale.y) < 1e-6f) {
+      p.carry = p.pose;
+    }
+    else {
+      p.carry = unstretched(p.pose, p.stretch, scale.x * sy / setup_scale.x, scale.x / setup_scale.x);
+    }
     if (rests) {
       /* The knob moves and turns what hangs from it, as a pin would: the box stays. */
       float2 frames = bone.controller_knob_editing ? bone.controller_knob_edit_at :
@@ -825,7 +887,8 @@ static Transform2D ik_axes(const std::vector<Bone> &bones, const std::map<uint64
   const Bone &b = bones[base];
   if (const auto it = index.find(b.parent); it != index.end() && it->second != base) {
     const BonePose &p = poses[it->second];
-    return bone_parent_axes(b, b.follow_knob ? p.knob : p.pose, p.setup, false);
+    const bool knob = b.follow_knob && bone_is_controller(bones[size_t(it->second)]);
+    return bone_parent_axes(b, knob ? p.knob : p.carry, p.setup, false);
   }
   if (b.outer_bone != 0) {
     return bone_parent_axes(b, bone_outer_frame(b, false), b.outer_setup, false);
@@ -1527,14 +1590,17 @@ bool armature_ik_reach(Layer &armature, size_t i, BoneConstraintType type, float
            [&] { return poses[e].tail; }, [&](int j) { return poses[j].head; });
   /* Alt: out of reach, the chain stretches (on its base bone, the bones above it stretching with it). */
   if (how.stretch) {
-    Bone &root = armature.bones[chain.back()];
+    /* Each bone of the chain stretched alike along its own length (a stretch isn't passed down): the chain keeps its
+     * shape, what hangs from it its size. */
     for (int pass = 0; pass < 6; pass++) {
       const float now = distance(poses[e].tail, base);
       const float want = distance(goal, base);
       if (now < 1e-6f || want <= now + 1e-6f) {
         break;
       }
-      root.scale.y *= want / now;
+      for (const int j : chain) {
+        armature.bones[size_t(j)].scale.y *= want / now;
+      }
       pose();
     }
   }
@@ -2296,8 +2362,7 @@ void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, 
       Bone *p = bone_find(armature, b.parent);
       if (p && !p->outer_carried && !bone_is_controller(*p)) {
         const size_t pi = size_t(p - armature.bones.data());
-        const BonePose *grand = bone_pose_find(poses, p->parent);
-        const Transform2D to_grand = grand ? grand->pose.inverted() : bone_outer_frame(*p, false).inverted();
+        const Transform2D to_grand = bone_axes_inverse(armature, *p, bone_pose_find(poses, p->parent), false);
         const float2 head = to_grand.apply(poses[pi].head), tail = to_grand.apply(poses[pi].tail);
         const float2 goal = to_grand.apply(poses[i].head + delta);
         const float now = distance(tail, head), want = distance(goal, head);
@@ -2328,8 +2393,8 @@ void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, 
     }
     /* The tip follows the mouse: the bone turns about its base, and on the setup frame it also
      * grows or shrinks (length isn't animated, so elsewhere it only turns). */
-    const float2 tip = to_parent.apply(poses[i].tail + delta);
-    const float2 d = tip - b.position;
+    const Transform2D to_axes = bone_axes_inverse(armature, b, parent, setup_frame);
+    const float2 d = to_axes.apply_vector(poses[i].tail + delta - poses[i].head);
     if (length(d) > 1e-7f) {
       float angle = std::atan2(d.y, d.x);
       angle += 2.0f * PI * std::round((was_turned[i] - angle) / (2.0f * PI));
@@ -2340,7 +2405,7 @@ void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, 
     }
     else if (stretch) {
       /* Alt: the tip goes exactly to the mouse, the bone stretching. */
-      const float now = length(to_parent.apply(poses[i].tail) - b.position);
+      const float now = length(to_axes.apply_vector(poses[i].tail - poses[i].head));
       if (now > 1e-7f && length(d) > 1e-7f) {
         b.scale.y *= length(d) / now;
       }
@@ -2372,11 +2437,16 @@ void armature_bone_drag(Layer &armature, const std::vector<Bone> &original, size
   }
   const std::vector<BonePose> was = armature_keyed_pose(armature, false);
   const float2 move = mouse - press;
-  /* The poses now and the way from the scene into bone k's parent (where its angle and position are). */
+  /* The poses now and the way from the scene into bone k's parent (where its position is). */
   const auto parent_space = [&](size_t k, std::vector<BonePose> &r_now) {
     r_now = armature_keyed_pose(armature, false);
     const BonePose *parent = bone_pose_find(r_now, armature.bones[k].parent);
     return parent ? parent->pose.inverted() : bone_outer_frame(armature.bones[k], false).inverted();
+  };
+  /* And into the axes its angle and stretch are in (its parent's without the parent's stretch). */
+  const auto axes_space = [&](size_t k, std::vector<BonePose> &r_now) {
+    r_now = armature_keyed_pose(armature, false);
+    return bone_axes_inverse(armature, armature.bones[k], bone_pose_find(r_now, armature.bones[k].parent), false);
   };
   /* Bone k turned to point at `goal` (and with `grow`, stretched to reach it), its base where it is. Worked out in its
    * parent's space and tried again, as a stretched parent skews what it carries: without `grow` its length in the scene
@@ -2393,8 +2463,8 @@ void armature_bone_drag(Layer &armature, const std::vector<Bone> &original, size
       goal = now[k].head + way / length(way) * len;
     }
     for (int pass = 0; pass < 4; pass++) {
-      const Transform2D to_parent = parent_space(k, now);
-      const float2 h = to_parent.apply(now[k].head), t = to_parent.apply(now[k].tail), g = to_parent.apply(goal);
+      const Transform2D to_axes = axes_space(k, now);
+      const float2 h = to_axes.apply(now[k].head), t = to_axes.apply(now[k].tail), g = to_axes.apply(goal);
       const float have = distance(t, h), want = distance(g, h);
       if (have < 1e-7f || want < 1e-7f) {
         return;
@@ -2747,7 +2817,12 @@ static void armature_map_selected_by(Layer &armature, const std::vector<Bone> &o
         tip = map(tip);
       }
       const Transform2D to_parent = parent_frame.inverted();
-      const Transform2D to_axes = bone_parent_axes(b, parent_frame, parent_rest, setup_frame).inverted();
+      const Transform2D to_axes =
+          bone_parent_axes(b,
+                           has_parent ? unstretched(parent_frame, bone_own_stretch(armature.bones[size_t(parent->second)], setup_frame))
+                                      : parent_frame,
+                           parent_rest, setup_frame)
+              .inverted();
       const float2 h = to_parent.apply(head), t = h + to_axes.apply_vector(tip - head);
       b.position = h;
       const float dist = distance(h, t);
@@ -2774,7 +2849,9 @@ static void armature_map_selected_by(Layer &armature, const std::vector<Bone> &o
         b.scale = picked ? original[i].scale * stretch(was_head) : original[i].scale;
       }
     }
-    frame[i] = bone_on_parent(b, parent_frame, parent_rest, bone_local(b.position, b.angle, b.scale), setup_frame);
+    frame[i] = bone_on_parent(b, parent_frame, parent_rest, bone_local(b.position, b.angle, b.scale), setup_frame,
+                              has_parent ? unstretched(parent_frame, bone_own_stretch(armature.bones[size_t(parent->second)], setup_frame))
+                                         : parent_frame);
   }
   if (setup_frame) {
     seat_connected_children(armature);
@@ -2810,7 +2887,12 @@ void armature_keep_children(Layer &armature, const std::vector<Bone> &original, 
       const float reach = b.length > 1e-4f ? b.length : 1.0f;
       const float2 head = was[i].pose.apply({0, 0}), tip = was[i].pose.apply({reach, 0});
       const Transform2D to_parent = parent_frame.inverted();
-      const Transform2D to_axes = bone_parent_axes(b, parent_frame, parent_rest, setup_frame).inverted();
+      const Transform2D to_axes =
+          bone_parent_axes(b,
+                           has_parent ? unstretched(parent_frame, bone_own_stretch(armature.bones[size_t(parent->second)], setup_frame))
+                                      : parent_frame,
+                           parent_rest, setup_frame)
+              .inverted();
       float2 h = to_parent.apply(head);
       if (b.connected) {
         /* On the parent's tip as it is now, pointing the way it did, as long as it was. */
@@ -2833,7 +2915,9 @@ void armature_keep_children(Layer &armature, const std::vector<Bone> &original, 
         }
       }
     }
-    frame[i] = bone_on_parent(b, parent_frame, parent_rest, bone_local(b.position, b.angle, b.scale), setup_frame);
+    frame[i] = bone_on_parent(b, parent_frame, parent_rest, bone_local(b.position, b.angle, b.scale), setup_frame,
+                              has_parent ? unstretched(parent_frame, bone_own_stretch(armature.bones[size_t(parent->second)], setup_frame))
+                                         : parent_frame);
   }
 }
 
@@ -2957,7 +3041,12 @@ void armature_mirror_edits(Layer &armature, const std::vector<Bone> &original, b
     if (source[i] >= 0) {
       const Bone &src = armature.bones[source[i]];
       const Transform2D to_parent = parent_frame.inverted();
-      const Transform2D to_axes = bone_parent_axes(b, parent_frame, parent_rest, setup_frame).inverted();
+      const Transform2D to_axes =
+          bone_parent_axes(b,
+                           has_parent ? unstretched(parent_frame, bone_own_stretch(armature.bones[size_t(parent->second)], setup_frame))
+                                      : parent_frame,
+                           parent_rest, setup_frame)
+              .inverted();
       const float2 h = to_parent.apply(reflect(after[source[i]].head));
       const float2 t = h + to_axes.apply_vector(reflect(after[source[i]].tail) - reflect(after[source[i]].head));
       b.position = h;
@@ -2972,7 +3061,9 @@ void armature_mirror_edits(Layer &armature, const std::vector<Bone> &original, b
         b.length = src.length;
       }
     }
-    frame[i] = bone_on_parent(b, parent_frame, parent_rest, bone_local(b.position, b.angle, b.scale), setup_frame);
+    frame[i] = bone_on_parent(b, parent_frame, parent_rest, bone_local(b.position, b.angle, b.scale), setup_frame,
+                              has_parent ? unstretched(parent_frame, bone_own_stretch(armature.bones[size_t(parent->second)], setup_frame))
+                                         : parent_frame);
   }
   if (setup_frame) {
     /* The other side's bones that followed move whole; what hangs from them stays, as on this side. */

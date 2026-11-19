@@ -198,6 +198,15 @@ PENDING = [
      'Apply Pose as Rest moves an attached layer as its end moved', 'tests/test_bone_attach.py'),
     ('src/io/oanim_file.cc', '  if (layer.parent_bone_attach != BoneAttach::Body) {\n    j["parent_bone_attach"]', '  if (false) {\n    j["parent_bone_attach"]',
      'Attached To saved', 'tests/test_bone_attach.py'),
+    # A stretch stays with its bone (BonePose::carry; IK stretches the whole chain).
+    ('src/data/bones.cc', '      p.carry = unstretched(p.pose, p.stretch, scale.x * sy / setup_scale.x, scale.x / setup_scale.x);', '      p.carry = p.pose;',
+     'a stretch stays with its bone: what hangs from it is not stretched or skewed', 'tests/test_bone_stretch.py'),
+    ('src/data/bones.cc', '      for (const int j : chain) {\n        armature.bones[size_t(j)].scale.y *= want / now;', '      for (const int j : {chain.back()}) {\n        armature.bones[size_t(j)].scale.y *= want / now;',
+     'an IK stretch lengthens every bone of the chain', 'tests/test_bone_stretch.py'),
+    ('src/data/bones.cc', '  const Transform2D now = knob ? parent->knob : setup_frame ? parent->pose : parent->carry;', '  const Transform2D now = knob ? parent->knob : parent->pose;',
+     'G on a tip under a stretched parent: it points where it is taken', 'tests/test_bone_stretch.py'),
+    ('src/data/bones.cc', "    /* Its length's and width's scale (constraints, IK and Maintain Volume included) each brought to its keyed width's,\n     * for what hangs from it. */\n    if (setup_frame || rests ||", "    /* Its length's and width's scale (constraints, IK and Maintain Volume included) each brought to its keyed width's,\n     * for what hangs from it. */\n    if (true || setup_frame || rests ||",
+     "a bone's size all over still passes down", 'tests/test_bone_stretch.py'),
 ]
 
 def build(root):
