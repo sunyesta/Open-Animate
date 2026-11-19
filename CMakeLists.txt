@@ -382,6 +382,8 @@ add_test(NAME bone_constraints
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_constraints.py)
 add_test(NAME ik_bend
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_ik_bend.py)
+add_test(NAME ik_end
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_ik_end.py)
 add_test(NAME ik_axes
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_ik_axes.py)
 add_test(NAME bendy_bones

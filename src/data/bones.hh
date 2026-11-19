@@ -19,6 +19,7 @@ struct Bone;
 struct BoneCollection;
 struct Collection;
 struct BoneConstraint;
+enum class BoneConstraintType;
 struct Document;
 struct Layer;
 
@@ -97,6 +98,14 @@ void bones_mark_carried(Document &doc, const std::vector<Layer *> &moving);
  * IK) so the bone's tip reaches `goal` (bone layer space); an Arc IK bone bends its chain evenly.
  * Returns false when the bone has no parent to turn with. */
 bool armature_reach(Layer &armature, uint64_t bone, float2 goal);
+/* A bone's IK End or IK Base (enabled; null: none). */
+const BoneConstraint *bone_ik_end(const Bone &bone);
+const BoneConstraint *bone_ik_base(const Bone &bone);
+/* The bone whose tail an IK End or IK Base on bone `i` puts its point at: itself, or with Head its parent (-1: a root's
+ * head). */
+int armature_ik_point_bone(const Layer &armature, size_t i, bool head);
+/* The chain the IK End (or IK Base) of bone `i` turns, its point's bone first, up to the nearest IK Base (empty: none). */
+std::vector<size_t> armature_ik_chain(const Layer &armature, size_t i, BoneConstraintType type);
 const BonePose *bone_pose_find(const std::vector<BonePose> &poses, uint64_t id);
 /* Limit to Shape: where a head (bone layer space) is kept, inside the constraint's shape as last worked
  * out (anim/shape_limit.hh); `head` itself when it fits or there is no shape. */

@@ -8,6 +8,7 @@
 #include <map>
 #include <mutex>
 #include <numbers>
+#include <set>
 
 #include "anim/controller.hh"
 #include "data/document.hh"
@@ -17,11 +18,11 @@ namespace oanim {
 static const char *const CONSTRAINT_IDS[BONE_CONSTRAINT_TYPES] = {
     "LIMIT_ANGLE", "INDEPENDENT_ANGLE", "MAINTAIN_VOLUME", "COPY_ANGLE", "COPY_POSITION",
     "COPY_SCALE",  "TRACK_TO",          "STRETCH_TO",     "IK",         "DYNAMICS", "LIMIT_SHAPE",
-    "CHILD_OF",    "LOOK_AT",           "FOLLOW_POINT"};
+    "CHILD_OF",    "LOOK_AT",           "FOLLOW_POINT",   "IK_END",     "IK_BASE"};
 static const char *const CONSTRAINT_NAMES[BONE_CONSTRAINT_TYPES] = {
     "Limit Angle", "Independent Angle", "Maintain Volume", "Copy Angle", "Copy Position",
     "Copy Scale",  "Track To",          "Stretch To",       "IK",         "Dynamics", "Limit to Shape",
-    "Child Of",    "Look At",           "Follow Point"};
+    "Child Of",    "Look At",           "Follow Point",     "IK End",     "IK Base"};
 
 const char *bone_constraint_identifier(BoneConstraintType type)
 {
@@ -1088,6 +1089,144 @@ static void ik_solve(const std::vector<int> &chain, float2 goal_at, bool arc, co
   pose();
 }
 
+const BoneConstraint *bone_ik_end(const Bone &bone)
+{
+  for (const BoneConstraint &c : bone.constraints) {
+    if (c.type == BoneConstraintType::IKEnd && c.enabled) {
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+const BoneConstraint *bone_ik_base(const Bone &bone)
+{
+  for (const BoneConstraint &c : bone.constraints) {
+    if (c.type == BoneConstraintType::IKBase && c.enabled) {
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+/* The bone whose tail an IK End or IK Base on bone `i` puts its point at: the bone itself, or with Head its parent
+ * (-1: none, a root's head). */
+static int ik_point_bone(const std::vector<Bone> &bones, const std::map<uint64_t, int> &index, int i, bool head)
+{
+  if (!head) {
+    return i;
+  }
+  const auto it = index.find(bones[i].parent);
+  return it == index.end() || it->second == i ? -1 : it->second;
+}
+
+/* An IK End's or IK Base's chain, its point's bone first: up through the parents to the nearest IK Base (a base at the
+ * head of a bone the chain is connected to takes that bone in, so a hip turns with its spine), not past a bone Ignored
+ * by IK, a pin or a controller. */
+static std::vector<int> ik_point_chain(const std::vector<Bone> &bones, const std::map<uint64_t, int> &index, int e)
+{
+  std::vector<int> chain;
+  for (int b = e, guard = 0; b >= 0 && guard < 256; guard++) {
+    const Bone &bone = bones[b];
+    if (bone.ik_ignore || bone.type == BoneType::Pin || bone.type == BoneType::Controller2D) {
+      break;
+    }
+    chain.push_back(b);
+    const auto it = index.find(bone.parent);
+    if (it == index.end() || it->second == b) {
+      break;
+    }
+    const int p = it->second;
+    if (const BoneConstraint *base = bone_ik_base(bones[p])) {
+      if (base->ik_head && bone.connected && !bone_ik_end(bones[p]) && !bones[p].ik_ignore) {
+        chain.push_back(p);
+      }
+      break;
+    }
+    b = p;
+  }
+  return chain;
+}
+
+static std::map<uint64_t, int> bones_index(const std::vector<Bone> &bones)
+{
+  std::map<uint64_t, int> index;
+  for (int i = 0; i < int(bones.size()); i++) {
+    index[bones[i].id] = i;
+  }
+  return index;
+}
+
+std::vector<size_t> armature_ik_chain(const Layer &armature, size_t i, BoneConstraintType type)
+{
+  std::vector<size_t> out;
+  if (i >= armature.bones.size()) {
+    return out;
+  }
+  const Bone &b = armature.bones[i];
+  const BoneConstraint *c = type == BoneConstraintType::IKEnd ? bone_ik_end(b) : bone_ik_base(b);
+  if (!c) {
+    return out;
+  }
+  const std::map<uint64_t, int> index = bones_index(armature.bones);
+  const int e = ik_point_bone(armature.bones, index, int(i), c->ik_head);
+  if (e < 0) {
+    return out;
+  }
+  for (const int j : ik_point_chain(armature.bones, index, e)) {
+    out.push_back(size_t(j));
+  }
+  return out;
+}
+
+int armature_ik_point_bone(const Layer &armature, size_t i, bool head)
+{
+  if (i >= armature.bones.size()) {
+    return -1;
+  }
+  return ik_point_bone(armature.bones, bones_index(armature.bones), int(i), head);
+}
+
+/* The frames a pinned point's stretches run between: the setup frame, its Pinned To keys and every key of the bones its
+ * chain turns (so a point pinned with no keys stays where the setup frame has it). */
+static std::vector<int> ik_pin_frames(const std::vector<Bone> &bones, const std::vector<int> &chain,
+                                      const BoneConstraint &c)
+{
+  std::set<int> frames = {0};
+  const auto add = [&](const auto &ch) {
+    for (const auto &k : ch.keys) {
+      frames.insert(k.frame);
+    }
+  };
+  add(c.pin_keys);
+  for (const int j : chain) {
+    add(bones[j].position_keys);
+    add(bones[j].angle_keys);
+    add(bones[j].scale_keys);
+  }
+  return {frames.begin(), frames.end()};
+}
+
+/* How far along a stretch from key frame `k0` to `k1` frame `f` is, as the point's chain eases there: straight with
+ * Linear keys, held with Step, else easing in and out. */
+static float ik_pin_progress(const Bone &end, int k0, int k1, int f)
+{
+  const float u = k1 > k0 ? std::clamp(float(f - k0) / float(k1 - k0), 0.0f, 1.0f) : 0.0f;
+  Interp interp = Interp::Smooth;
+  for (const auto &k : end.angle_keys.keys) {
+    if (k.frame == k0) {
+      interp = k.interp;
+    }
+  }
+  if (interp == Interp::Linear) {
+    return u;
+  }
+  if (interp == Interp::Step) {
+    return 0.0f;
+  }
+  return u * u * (3.0f - 2.0f * u);
+}
+
 /* The whole pose of some bones: constraints, dynamics and IK targets included. */
 static std::vector<BonePose> bones_full_pose(const std::vector<Bone> &bones, bool setup_frame, int frame,
                                              const std::map<uint64_t, BoneDynamicsState> *dynamics)
@@ -1102,6 +1241,7 @@ static std::vector<BonePose> bones_full_pose(const std::vector<Bone> &bones, boo
   if (setup_frame) {
     return poses;
   }
+  (void)frame;
   /* IK targets: the chains are turned (and stretched) after everything else. */
   const size_t n = armature.bones.size();
   std::map<uint64_t, int> index;
@@ -1163,6 +1303,127 @@ static std::vector<BonePose> bones_full_pose(const std::vector<Bone> &bones, boo
         }
         pose();
       }
+    }
+  }
+  /* Pinned IK Ends and IK Bases: between keys the point goes from where the key before has it to where the key after
+   * has it (in the scene, or riding the bone it is pinned to), the chain turned to reach it each frame; on a key, and
+   * unpinned, the keys' pose stands. Bases first (the higher the earlier), then ends, so an end below a base reaches
+   * from where the base was put. */
+  struct PinnedPoint {
+    int bone = 0, end = 0;
+    const BoneConstraint *c = nullptr;
+    int depth = 0;
+  };
+  std::vector<PinnedPoint> pinned;
+  for (int i = 0; i < int(n); i++) {
+    for (const BoneConstraint &c : armature.bones[i].constraints) {
+      if ((c.type != BoneConstraintType::IKEnd && c.type != BoneConstraintType::IKBase) || !c.enabled ||
+          (!c.pin_keys.animated() && c.pin == IK_PIN_NONE))
+      {
+        continue;
+      }
+      const int e = ik_point_bone(armature.bones, index, i, c.ik_head);
+      if (e < 0) {
+        continue;
+      }
+      int depth = 0;
+      for (int at = e; at >= 0 && depth < 256; depth++) {
+        const auto it = index.find(armature.bones[at].parent);
+        at = it == index.end() || it->second == at ? -1 : it->second;
+      }
+      pinned.push_back({i, e, &c, (c.type == BoneConstraintType::IKBase ? 0 : 1000) + depth});
+    }
+  }
+  std::stable_sort(pinned.begin(), pinned.end(), [](const auto &a, const auto &b) { return a.depth < b.depth; });
+  std::map<int, std::vector<BonePose>> keyed_poses;
+  const auto keyed_pose = [&](int k) -> const std::vector<BonePose> & {
+    const auto it = keyed_poses.find(k);
+    if (it != keyed_poses.end()) {
+      return it->second;
+    }
+    std::vector<Bone> at = armature.bones;
+    for (Bone &b : at) {
+      b.position = bone_position_at(b, k, false);
+      b.angle = bone_angle_at(b, k, false);
+      if (b.scale_keys.animated()) {
+        b.scale = b.scale_keys.evaluate(k);
+      }
+    }
+    PoseExtras ek;
+    ek.frame = k;
+    return keyed_poses.emplace(k, bones_pose(at, false, ek)).first->second;
+  };
+  for (const PinnedPoint &pp : pinned) {
+    const BoneConstraint &c = *pp.c;
+    const std::vector<int> chain = ik_point_chain(armature.bones, index, pp.end);
+    if (chain.empty()) {
+      continue;
+    }
+    const std::vector<int> frames = ik_pin_frames(armature.bones, chain, c);
+    int k0 = -1, k1 = -1;
+    for (const int k : frames) {
+      if (k <= frame) {
+        k0 = k;
+      }
+      else if (k1 < 0) {
+        k1 = k;
+      }
+    }
+    if (k0 < 0 || k0 == frame) {
+      continue;
+    }
+    const float pin = c.pin_keys.animated() ? c.pin_keys.evaluate(k0) : c.pin;
+    if (pin == IK_PIN_NONE) {
+      continue;
+    }
+    const float e = k1 >= 0 ? ik_pin_progress(armature.bones[pp.end], k0, k1, frame) : 0.0f;
+    const std::vector<BonePose> &p0 = keyed_pose(k0);
+    const std::vector<BonePose> &p1 = keyed_pose(k1 >= 0 ? k1 : k0);
+    float2 goal = p0[pp.end].tail + (p1[pp.end].tail - p0[pp.end].tail) * e;
+    if (pin > 0.0f) {
+      const auto to = index.find(uint64_t(pin));
+      const bool moved = to != index.end() &&
+                         std::any_of(chain.begin(), chain.end(),
+                                     [&](int j) { return bone_is_descendant_in(armature.bones, index, armature.bones[j].id, to->second); });
+      if (to != index.end() && !moved) {
+        const int b = to->second;
+        const float2 l0 = p0[b].pose.inverted().apply(p0[pp.end].tail);
+        const float2 l1 = p1[b].pose.inverted().apply(p1[pp.end].tail);
+        goal = poses[b].pose.apply(l0 + (l1 - l0) * e);
+      }
+    }
+    if (distance(goal, poses[pp.end].tail) < 1e-7f) {
+      continue;
+    }
+    if (!any) {
+      extras.ik_angle = &ik_angle;
+      extras.ik_stretch = &ik_stretch;
+      any = true;
+    }
+    /* Keep Angle: the end bone's children keep their angle in the scene. */
+    std::vector<std::pair<int, float>> kept;
+    if (c.type == BoneConstraintType::IKEnd && c.keep_angle) {
+      for (int j = 0; j < int(n); j++) {
+        const auto it = index.find(armature.bones[j].parent);
+        if (it != index.end() && it->second == pp.end && j != pp.end) {
+          kept.emplace_back(j, transform_angle(poses[j].pose));
+        }
+      }
+    }
+    const auto pose = [&] { poses = bones_pose(armature.bones, false, extras); };
+    const bool arc = std::any_of(chain.begin(), chain.end(), [&](int j) { return armature.bones[j].arc_ik; });
+    ik_solve(
+        chain, goal, arc, ik_axes(armature.bones, index, poses, chain.back()),
+        [&](int j, float d) {
+          ik_angle[j] += d;
+          return d;
+        },
+        pose, [&] { return poses[pp.end].tail; }, [&](int j) { return poses[j].head; });
+    if (!kept.empty()) {
+      for (const auto &[j, was] : kept) {
+        ik_angle[j] += wrap_pi(was - transform_angle(poses[j].pose));
+      }
+      pose();
     }
   }
   return poses;

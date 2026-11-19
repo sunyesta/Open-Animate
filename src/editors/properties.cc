@@ -5850,7 +5850,7 @@ static void constraints_panel(Context &C, Layer &armature)
          {BoneConstraintType::CopyAngle, BoneConstraintType::CopyPosition, BoneConstraintType::CopyScale,
           BoneConstraintType::LimitAngle}},
         {"Tracking", {BoneConstraintType::TrackTo, BoneConstraintType::StretchTo, BoneConstraintType::IK,
-                      BoneConstraintType::LookAt}},
+                      BoneConstraintType::IKEnd, BoneConstraintType::IKBase, BoneConstraintType::LookAt}},
         {"Limit", {BoneConstraintType::LimitShape}},
         {"Relationship", {BoneConstraintType::ChildOf, BoneConstraintType::FollowPoint,
                           BoneConstraintType::IndependentAngle, BoneConstraintType::MaintainVolume}},
@@ -6439,6 +6439,88 @@ static void constraints_panel(Context &C, Layer &armature)
           modifier_row_label("", column);
           ImGui::TextDisabled("Keeps its angle when its parent turns.");
           break;
+        case BoneConstraintType::IKEnd:
+        case BoneConstraintType::IKBase: {
+          const bool end = c.type == BoneConstraintType::IKEnd;
+          /* Where it is (the point the IK dot or ring sits on) is part of the rig: set on frame 0. */
+          modifier_row_label("Point", column,
+                             end ? "Which end of the bone the chain reaches with: its tip, or its head (a foot: the ankle)"
+                                 : "Which end of the bone the chain stops at: its tail, or a root's head");
+          ImGui::BeginDisabled(doc.frame_current != 0);
+          bool point_changed = ImGui::RadioButton("Head", c.ik_head);
+          if (point_changed) {
+            c.ik_head = true;
+          }
+          ImGui::SameLine();
+          if (ImGui::RadioButton("Tail", !c.ik_head)) {
+            c.ik_head = false;
+            point_changed = true;
+          }
+          ImGui::EndDisabled();
+          if (point_changed) {
+            C.undo->push(end ? "IK End Point" : "IK Base Point", doc);
+          }
+          modifier_row_label(end ? "Pinned To" : "Pinned", column,
+                             end ? "Keyed. Pinned, the end stays where it is (or, pinned to a bone, follows it) while the "
+                                   "rest of the rig moves; between keys it goes straight from where the key before has it "
+                                   "to where the key after has it"
+                                 : "Keyed. Pinned, the point stays where it is while the rest of the rig moves");
+          const std::string end_bone = bone_name;
+          const auto pin_to = [&](const std::string &to) {
+            OpArgs args = {{"bone", end_bone}, {"to", to}};
+            if (!end) {
+              args["type"] = "IK_BASE";
+            }
+            operator_call(C, "armature.ik_pin_set", args);
+          };
+          if (end) {
+            const Bone *pin_bone = c.pin > 0.0f ? bone_find(armature, uint64_t(c.pin)) : nullptr;
+            const char *shown = c.pin == IK_PIN_SCENE ? "Scene" : pin_bone ? pin_bone->name.c_str() : "None";
+            if (ImGui::BeginCombo("##pin", shown, ImGuiComboFlags_HeightLarge)) {
+              if (ImGui::Selectable("None", c.pin == IK_PIN_NONE)) {
+                pin_to("");
+              }
+              if (ImGui::Selectable("Scene", c.pin == IK_PIN_SCENE)) {
+                pin_to("SCENE");
+              }
+              ImGui::Separator();
+              for (const Bone &b : armature.bones) {
+                if (&b == bone) {
+                  continue;
+                }
+                ImGui::PushID(int(b.id));
+                if (ImGui::Selectable(b.name.c_str(), pin_bone == &b)) {
+                  pin_to(b.name);
+                }
+                ImGui::PopID();
+              }
+              ImGui::EndCombo();
+            }
+            modifier_row_label("", column);
+            if (ImGui::Checkbox("Keep Angle", &c.keep_angle)) {
+              C.undo->push("IK End", doc);
+            }
+            if (ImGui::IsItemHovered()) {
+              ImGui::SetTooltip("The end bone's children keep their angle in the scene however the chain bends");
+            }
+            ImGui::SameLine();
+            if (ImGui::Checkbox("Soft", &c.soft)) {
+              C.undo->push("IK End", doc);
+            }
+            if (ImGui::IsItemHovered()) {
+              ImGui::SetTooltip("Eases the chain into its full reach, so a leg doesn't snap straight");
+            }
+          }
+          else {
+            bool pinned = c.pin != IK_PIN_NONE;
+            ImGui::BeginDisabled(!bone_find(armature, bone->parent));
+            if (ImGui::Checkbox("##pinned", &pinned)) {
+              pin_to(pinned ? "SCENE" : "");
+            }
+            ImGui::EndDisabled();
+          }
+          break;
+        }
         case BoneConstraintType::LimitShape: {
           shape_rows();
           modifier_row_label("", column);

@@ -48,6 +48,7 @@ template<typename F> static void bone_other_channels(Bone &bone, F &&f)
   bone_curve_channels(bone, [&](std::string_view, float &value, Channel<float> &keys) { f(keys, value); });
   for (BoneConstraint &c : bone.constraints) {
     f(c.influence_keys, c.influence);
+    f(c.pin_keys, c.pin);
     f(c.follow_shift_keys, c.follow_shift);
     f(c.follow_shift2_keys, c.follow_shift2);
     f(c.follow_shift3_keys, c.follow_shift3);
@@ -5280,6 +5281,9 @@ std::vector<ChannelRef> layer_channels(Layer &layer, bool drawing)
       BoneConstraint &c = bone.constraints[i];
       const std::string cb = base + "constraints[" + std::to_string(i) + "].";
       add(cb + "influence", c.influence_keys, c.influence);
+      if (c.type == BoneConstraintType::IKEnd || c.type == BoneConstraintType::IKBase) {
+        add(cb + "pin", c.pin_keys, c.pin);
+      }
       if (c.type == BoneConstraintType::FollowPoint) {
         add(cb + "follow_shift", c.follow_shift_keys, c.follow_shift);
         add(cb + "follow_shift2", c.follow_shift2_keys, c.follow_shift2);
@@ -5466,6 +5470,7 @@ static bool layer_channel_direct(Layer &layer, const std::string &path, ChannelR
     BoneConstraint &c = bone->constraints[i];
     const std::string_view field = rest.substr(close + 2);
     if (field == "influence") return take(c.influence_keys, c.influence);
+    if (field == "pin") return take(c.pin_keys, c.pin);
     if (field == "follow_shift") return take(c.follow_shift_keys, c.follow_shift);
     if (field == "follow_shift2") return take(c.follow_shift2_keys, c.follow_shift2);
     if (field == "follow_shift3") return take(c.follow_shift3_keys, c.follow_shift3);

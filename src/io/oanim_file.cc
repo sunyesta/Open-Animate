@@ -1037,6 +1037,10 @@ static json layer_to_json(const Layer &layer)
                      {"follow_move", c.follow_move},
                      {"chain", c.chain},
                      {"max_stretch", num(c.max_stretch)},
+                     {"ik_head", c.ik_head},
+                     {"keep_angle", c.keep_angle},
+                     {"soft", c.soft},
+                     {"pin", num(c.pin)},
                      {"shape_layer", c.shape_layer},
                      {"shape", c.shape_id},
                      {"follow_layer", c.follow_layer},
@@ -1084,6 +1088,7 @@ static json layer_to_json(const Layer &layer)
                      {"position_spring", spring(c.position_spring)},
                      {"scale_spring", spring(c.scale_spring)}};
           put_keys(cj, "influence_keys", c.influence_keys);
+          put_keys(cj, "pin_keys", c.pin_keys);
           put_keys(cj, "follow_shift_keys", c.follow_shift_keys);
           put_keys(cj, "follow_shift2_keys", c.follow_shift2_keys);
           put_keys(cj, "follow_shift3_keys", c.follow_shift3_keys);
@@ -3295,6 +3300,10 @@ static Layer layer_from_json(const json &j, int depth)
       c.delay = std::max(0, get_int(cj, "delay", 0));
       c.chain = std::max(0, get_int(cj, "chain", 0));
       c.max_stretch = std::max(1.0f, get_float(cj, "max_stretch", 1.0f));
+      c.ik_head = get_bool(cj, "ik_head", false);
+      c.keep_angle = get_bool(cj, "keep_angle", true);
+      c.soft = get_bool(cj, "soft", true);
+      c.pin = get_float(cj, "pin", IK_PIN_NONE);
       c.shape_layer = get_id(cj, "shape_layer");
       c.shape_id = get_id(cj, "shape");
       c.follow_layer = get_id(cj, "follow_layer");
@@ -3390,6 +3399,7 @@ static Layer layer_from_json(const json &j, int depth)
         }
       }
       get_keys(cj, "influence_keys", c.influence_keys);
+      get_keys(cj, "pin_keys", c.pin_keys);
       get_keys(cj, "gravity_keys", c.gravity_keys);
       get_keys(cj, "wind_keys", c.wind_keys);
       get_keys(cj, "wind_direction_keys", c.wind_direction_keys);

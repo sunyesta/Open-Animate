@@ -546,6 +546,15 @@ void mirror_bone_keys(Layer &target, const Layer &source_layer, const Transform2
                     [](float2 v) { return float2(-v.x, v.y); });
         mirror_keys(mine.follow_shift3_keys, bone.constraints[i].follow_shift3_keys, from, to,
                     [](float2 v) { return float2(-v.x, v.y); });
+        /* An IK End pinned to a bone is pinned to that bone's other side. */
+        mirror_keys(mine.pin_keys, bone.constraints[i].pin_keys, from, to, [&](float v) {
+          const Bone *was = v > 0.0f ? bone_find(source_layer, uint64_t(v)) : nullptr;
+          if (!was) {
+            return v;
+          }
+          const uint64_t id = bone_mirror_source(source_layer, *was, target);
+          return id ? float(id) : v;
+        });
         const std::vector<Channel<float> *> a = constraint_channels(mine), b = constraint_channels(bone.constraints[i]);
         for (size_t k = 0; k < a.size(); k++) {
           mirror_keys(*a[k], *b[k], from, to, [](float v) { return v; });

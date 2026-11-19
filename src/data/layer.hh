@@ -375,8 +375,17 @@ enum class BoneConstraintType {
   /* Harmony's Point Kinematic Output: the bone takes the move a Curve, Cage or Mesh Deform gives a point of
    * its own, staying on the bending shape without bending (anim/follow_point.hh). */
   FollowPoint,
+  /* IK End, on the end bone of a chain (a foot): its tip (or head) can be dragged by its IK dot, the chain running up to
+   * the nearest IK Base, and pinned (keyed Pinned To: the scene or a bone), so between keys it holds or goes straight
+   * from where the key before has it to where the key after has it (anim/ik_pin.hh). */
+  IKEnd,
+  /* IK Base, where IK chains stop: at the bone's tail (or a root's head). Pinned (keyed), it holds the same way. */
+  IKBase,
 };
-inline constexpr int BONE_CONSTRAINT_TYPES = 14;
+inline constexpr int BONE_CONSTRAINT_TYPES = 16;
+/* An IK End's or IK Base's Pinned To, as keyed: none, the scene, or else a bone's id. */
+inline constexpr float IK_PIN_NONE = 0.0f;
+inline constexpr float IK_PIN_SCENE = -1.0f;
 
 /* LimitShape: what has to stay inside the shape, the bone's head or the whole of the drawings it
  * carries. */
@@ -454,6 +463,21 @@ struct BoneConstraint {
   int chain = 0;
   /* IK: how far the chain may stretch to reach (1: not at all, 1.5: half again). */
   float max_stretch = 1.0f;
+  /* IK End: the chain ends at the bone's head (its parent's tip, for a short end bone such as a foot) rather than its
+   * tail. IK Base: the base is at the bone's head rather than its tail. */
+  bool ik_head = false;
+  /* IK End: the end bone's children keep their angle in the scene as the chain moves (a foot stays flat); it wins over
+   * the end bone's own Limit Angle. */
+  bool keep_angle = true;
+  /* IK End: near full reach the chain eases out straight, stretching a little, rather than snapping. */
+  bool soft = true;
+  /* IK End: Pinned To; IK Base: Pinned (IK_PIN_SCENE) or not. Keyed like a switch, each key holding until the next. */
+  float pin = IK_PIN_NONE;
+  Channel<float> pin_keys = [] {
+    Channel<float> c;
+    c.constant = true;
+    return c;
+  }();
   /* LimitShape: the layer and its shape (ids; shape 0: the layer's first closed shape) to stay
    * inside; what stays inside, and with Whole the layer whose drawing it is (0: the layers that
    * follow this bone); how far that may go past the edge (0-1 of its size); and how soft the edge is

@@ -103,6 +103,10 @@ KEYMAP = (
     ("Viewport", "armature.select_invert", "I", {"ctrl": True}),
     ("Viewport", "armature.bone_delete", "DEL", {}),
     ("Viewport", "anim.keyframe_delete", "I", {"alt": True}),
+    # Blender's Add IK (Shift I) and Clear IK (Ctrl Alt I) on the active bone; U pins or unpins its IK End.
+    ("Viewport", "armature.ik_end_add", "I", {"shift": True}),
+    ("Viewport", "armature.ik_remove", "I", {"ctrl": True, "alt": True}),
+    ("Viewport", "armature.ik_pin_toggle", "U", {}),
     # Shape stacking order, as Blender's Arrange for Grease Pencil strokes.
     ("Viewport", "mesh.shape_raise", "PAGE_UP", {}),
     ("Viewport", "mesh.shape_lower", "PAGE_DOWN", {}),

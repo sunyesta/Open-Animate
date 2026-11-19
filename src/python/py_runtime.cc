@@ -4138,6 +4138,19 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return py::make_tuple(py::make_tuple(lo.x, lo.y), py::make_tuple(hi.x, hi.y));
   });
   /* A bone's constraints, top first: dicts of their settings (target as a bone name). */
+  /* The bones an IK End (type "IK_END") or IK Base ("IK_BASE") on bone `name` bends, its point's bone first, up to the
+   * nearest IK Base. */
+  m.def("layer_bone_ik_chain", [bone_or_raise](uint64_t id, const std::string &name, const std::string &type) {
+    const Layer &layer = *layer_find(*current_context().document, id);
+    const Bone &bone = bone_or_raise(id, name);
+    py::list out;
+    for (const size_t j : armature_ik_chain(layer, size_t(&bone - layer.bones.data()),
+                                            type == "IK_BASE" ? BoneConstraintType::IKBase : BoneConstraintType::IKEnd))
+    {
+      out.append(layer.bones[j].name);
+    }
+    return out;
+  });
   m.def("layer_bone_constraints", [bone_or_raise](uint64_t id, const std::string &name) {
     const Layer &layer = *layer_find(*current_context().document, id);
     const Bone &bone = bone_or_raise(id, name);
@@ -4171,6 +4184,13 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["follow_move"] = c.follow_move;
       d["chain"] = c.chain;
       d["max_stretch"] = c.max_stretch;
+      d["ik_head"] = c.ik_head;
+      d["keep_angle"] = c.keep_angle;
+      d["soft"] = c.soft;
+      {
+        const Bone *pin_bone = c.pin > 0.0f ? bone_find(layer, uint64_t(c.pin)) : nullptr;
+        d["pin"] = c.pin == IK_PIN_SCENE ? std::string("SCENE") : pin_bone ? pin_bone->name : std::string();
+      }
       d["shape_layer"] = c.shape_layer;
       d["shape"] = c.shape_id;
       {
@@ -4313,6 +4333,24 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
       else if (key == "max_stretch") {
         c.max_stretch = std::max(1.0f, value.cast<float>());
+      }
+      else if (key == "ik_head") {
+        c.ik_head = value.cast<bool>();
+      }
+      else if (key == "keep_angle") {
+        c.keep_angle = value.cast<bool>();
+      }
+      else if (key == "soft") {
+        c.soft = value.cast<bool>();
+      }
+      else if (key == "pin") {
+        /* "" unpinned, "SCENE", or a bone's name (an IK End then follows that bone). */
+        const std::string to = value.cast<std::string>();
+        const Bone *t = to.empty() || to == "SCENE" ? nullptr : bone_find_by_name(layer, to);
+        if (!to.empty() && to != "SCENE" && !t) {
+          throw py::key_error("no bone named '" + to + "'");
+        }
+        c.pin = to.empty() ? IK_PIN_NONE : t ? float(t->id) : IK_PIN_SCENE;
       }
       else if (key == "shape_layer" || key == "fit_layer") {
         /* A layer by id or name ("" or 0: none). */

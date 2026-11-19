@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <functional>
 #include <limits>
 #include <map>
 #include <numbers>
@@ -114,6 +115,7 @@ static uint64_t layer_mirror_id(const Document &doc, uint64_t id)
 static void constraint_keys_take(BoneConstraint &to, const BoneConstraint &from)
 {
   to.influence_keys = from.influence_keys;
+  to.pin_keys = from.pin_keys;
   for (int i = 0; i < 3; i++) {
     to.follow_shift_keys_at(i) = const_cast<BoneConstraint &>(from).follow_shift_keys_at(i);
   }
@@ -145,6 +147,27 @@ static void constraint_keys_take(BoneConstraint &to, const BoneConstraint &from)
  * (the box's slant, Limit Angle's limits, its own wind). Its place, sides and spots are set by Symmetrize itself; its
  * name, id, keys, bindings, selection and swap stay its own. One step for a bone made and one already there, so a new
  * setting can't be left out of one. */
+/* An IK End pinned to a bone, copied: its Pinned To (and every key of it, in every action) names the bone `map` gives
+ * for the one it named (0: the bone isn't there, so it is pinned to the scene). */
+template<typename F> static void constraint_pin_map(BoneConstraint &c, F &&map)
+{
+  const auto one = [&](float &pin) {
+    if (pin > 0.0f) {
+      const uint64_t to = map(uint64_t(pin));
+      pin = to ? float(to) : IK_PIN_SCENE;
+    }
+  };
+  one(c.pin);
+  for (auto &k : c.pin_keys.keys) {
+    one(k.value);
+  }
+  for (auto &[name, keys] : c.pin_keys.actions) {
+    for (auto &k : keys) {
+      one(k.value);
+    }
+  }
+}
+
 static void bone_symmetrize_settings(Document &doc, Layer &armature, const Bone &src, Bone &dst)
 {
   dst.connected = src.connected && dst.parent != 0;
@@ -211,6 +234,7 @@ static void bone_symmetrize_settings(Document &doc, Layer &armature, const Bone 
     if (c.target) {
       c.target = bone_mirror_id(armature, c.target);
     }
+    constraint_pin_map(c, [&](uint64_t id) { return bone_mirror_id(armature, id); });
     if (c.type == BoneConstraintType::LimitAngle) {
       /* A mirrored bone turns the other way: its limits swap and change sign. */
       const float lo = c.min_angle, hi = c.max_angle;
@@ -455,6 +479,244 @@ static std::vector<float> curve_values_of(const Layer &armature)
     bone_curve_channels(b, [&](std::string_view, const float &v, const Channel<float> &) { out.push_back(v); });
   }
   return out;
+}
+
+/* --- IK Ends and IK Bases ------------------------------------------------------------------------------------- */
+
+/* Why bone `b` can't take an IK End or IK Base of `type` ("" when it can). Both are set on frame 0; an IK End needs a
+ * bone above its point to turn, and a bone has one or the other. */
+static std::string ik_constraint_refusal(const Context &C, const Layer &armature, const Bone &b, BoneConstraintType type)
+{
+  if (C.document->frame_current != 0) {
+    return std::string(bone_constraint_name(type)) + " is added on frame 0";
+  }
+  if (b.type != BoneType::Regular) {
+    return b.name + ": only a regular bone takes an " + bone_constraint_name(type);
+  }
+  if (type == BoneConstraintType::IKEnd) {
+    if (bone_ik_end(b)) {
+      return b.name + " already has an IK End";
+    }
+    if (bone_ik_base(b)) {
+      return b.name + " has an IK Base";
+    }
+    if (!bone_find(armature, b.parent)) {
+      return b.name + ": needs a parent";
+    }
+  }
+  else {
+    if (bone_ik_base(b)) {
+      return b.name + " already has an IK Base";
+    }
+    if (bone_ik_end(b)) {
+      return b.name + " has an IK End";
+    }
+  }
+  return "";
+}
+
+/* Adds an IK End or IK Base to bone `b`, as it comes: an IK End's point at the tail, or at the head of a bone under
+ * 0.6 of its parent's length (a foot: the ankle); an IK Base at the tail, or a root's head. */
+static void ik_constraint_add(Layer &armature, Bone &b, BoneConstraintType type)
+{
+  BoneConstraint c;
+  c.type = type;
+  c.name = bone_constraint_name(type);
+  const Bone *parent = bone_find(armature, b.parent);
+  if (type == BoneConstraintType::IKEnd) {
+    c.ik_head = parent && bone_find(armature, parent->parent) && b.length < 0.6f * parent->length;
+  }
+  else {
+    c.ik_head = !parent;
+  }
+  const auto dynamics = std::find_if(b.constraints.begin(), b.constraints.end(),
+                                     [](const auto &x) { return x.type == BoneConstraintType::Dynamics; });
+  b.constraints.insert(dynamics, c);
+}
+
+static BoneConstraint *ik_constraint_of(Bone &b, BoneConstraintType type)
+{
+  for (BoneConstraint &c : b.constraints) {
+    if (c.type == type) {
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+/* Why IK End `end` (a bone) can't be pinned to bone `to` ("" when it can): a bone its chain moves would carry its own
+ * goal, and one that already follows this end (through other ends pinned to bones) would chase it round. */
+static std::string ik_pin_refusal(const Layer &armature, const Bone &end, const Bone &to)
+{
+  const auto index_of = [&](const Bone &b) { return size_t(&b - armature.bones.data()); };
+  const auto moved_by = [&](const Bone &e) {
+    std::vector<size_t> out;
+    const BoneConstraint *c = bone_ik_end(e);
+    const std::vector<size_t> chain = armature_ik_chain(armature, index_of(e),
+                                                        c ? BoneConstraintType::IKEnd : BoneConstraintType::IKBase);
+    if (chain.empty()) {
+      return out;
+    }
+    const uint64_t top = armature.bones[chain.back()].id;
+    for (size_t j = 0; j < armature.bones.size(); j++) {
+      if (bone_is_descendant(armature, armature.bones[j].id, top)) {
+        out.push_back(j);
+      }
+    }
+    return out;
+  };
+  const auto moves = [&](const Bone &e, const Bone &b) {
+    const std::vector<size_t> m = moved_by(e);
+    return std::find(m.begin(), m.end(), index_of(b)) != m.end();
+  };
+  if (moves(end, to)) {
+    return to.name + " moves with " + end.name + "'s chain";
+  }
+  std::set<uint64_t> seen;
+  const std::function<bool(const Bone &)> follows = [&](const Bone &x) {
+    for (const Bone &e2 : armature.bones) {
+      const BoneConstraint *c2 = bone_ik_end(e2);
+      if (!c2 || !moves(e2, x)) {
+        continue;
+      }
+      if (&e2 == &end) {
+        return true;
+      }
+      if (c2->pin > 0.0f && seen.insert(e2.id).second) {
+        if (const Bone *t = bone_find(armature, uint64_t(c2->pin)); t && follows(*t)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  return follows(to) ? to.name + " already follows " + end.name : std::string();
+}
+
+static void register_ik_operators()
+{
+  const auto bone_arg = [](Context &C, Layer &armature) -> Bone * {
+    const std::string name = op_arg(C, "bone");
+    Bone *b = name.empty() ? bone_find(armature, armature.active_bone) : const_cast<Bone *>(bone_find_by_name(armature, name));
+    if (!b) {
+      report(ReportType::Warning, name.empty() ? std::string("No active bone") : "No bone named " + name);
+    }
+    return b;
+  };
+  rig_operator("armature.ik_end_add", "Add IK End",
+               "Add an IK End to bone `bone` (default: the active bone), on frame 0: an IK dot at its tip (or, for a "
+               "short end bone such as a foot, its head) that bends the chain up to the nearest IK Base",
+               bone_layer_active, [bone_arg](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 Bone *b = bone_arg(C, armature);
+                 if (!b) {
+                   return OpStatus::Cancelled;
+                 }
+                 if (const std::string why = ik_constraint_refusal(C, armature, *b, BoneConstraintType::IKEnd); !why.empty()) {
+                   report(ReportType::Warning, why);
+                   return OpStatus::Cancelled;
+                 }
+                 ik_constraint_add(armature, *b, BoneConstraintType::IKEnd);
+                 report(ReportType::Info, b->name + ": IK End added");
+                 return OpStatus::Finished;
+               });
+  rig_operator("armature.ik_base_add", "Add IK Base",
+               "Add an IK Base to bone `bone` (default: the active bone), on frame 0: IK chains stop there. At its tail, "
+               "or a root's head",
+               bone_layer_active, [bone_arg](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 Bone *b = bone_arg(C, armature);
+                 if (!b) {
+                   return OpStatus::Cancelled;
+                 }
+                 if (const std::string why = ik_constraint_refusal(C, armature, *b, BoneConstraintType::IKBase); !why.empty()) {
+                   report(ReportType::Warning, why);
+                   return OpStatus::Cancelled;
+                 }
+                 ik_constraint_add(armature, *b, BoneConstraintType::IKBase);
+                 report(ReportType::Info, b->name + ": IK Base added");
+                 return OpStatus::Finished;
+               });
+  rig_operator("armature.ik_remove", "Remove IK End",
+               "Remove bone `bone`'s IK End (default: the active bone's; type=IK_BASE: its IK Base), on frame 0",
+               bone_layer_active, [bone_arg](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 Bone *b = bone_arg(C, armature);
+                 const BoneConstraintType type = op_arg(C, "type", "IK_END") == "IK_BASE" ? BoneConstraintType::IKBase
+                                                                                          : BoneConstraintType::IKEnd;
+                 if (!b) {
+                   return OpStatus::Cancelled;
+                 }
+                 if (C.document->frame_current != 0) {
+                   report(ReportType::Warning, std::string(bone_constraint_name(type)) + " is removed on frame 0");
+                   return OpStatus::Cancelled;
+                 }
+                 const auto it = std::find_if(b->constraints.begin(), b->constraints.end(),
+                                              [&](const BoneConstraint &c) { return c.type == type; });
+                 if (it == b->constraints.end()) {
+                   report(ReportType::Warning, b->name + " has no " + bone_constraint_name(type));
+                   return OpStatus::Cancelled;
+                 }
+                 b->constraints.erase(it);
+                 report(ReportType::Info, b->name + ": " + bone_constraint_name(type) + " removed");
+                 return OpStatus::Finished;
+               });
+  rig_operator("armature.ik_pin_set", "Pin IK End",
+               "Pin bone `bone`'s IK End (default: the active bone's) to=SCENE, to a bone by name (it then follows that "
+               "bone), or to=\"\" to unpin; type=IK_BASE pins its IK Base (to=SCENE or \"\"). Keyed: between keys a "
+               "pinned end goes from where the key before has it to where the key after has it",
+               bone_layer_active, [bone_arg](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 Bone *b = bone_arg(C, armature);
+                 if (!b) {
+                   return OpStatus::Cancelled;
+                 }
+                 const bool base = op_arg(C, "type", "IK_END") == "IK_BASE";
+                 BoneConstraint *c = ik_constraint_of(*b, base ? BoneConstraintType::IKBase : BoneConstraintType::IKEnd);
+                 if (!c) {
+                   report(ReportType::Warning, b->name + (base ? " has no IK Base" : " has no IK End"));
+                   return OpStatus::Cancelled;
+                 }
+                 const std::string to = op_arg(C, "to");
+                 float pin = IK_PIN_NONE;
+                 if (to == "SCENE") {
+                   pin = IK_PIN_SCENE;
+                 }
+                 else if (!to.empty()) {
+                   const Bone *t = bone_find_by_name(armature, to);
+                   if (!t || base) {
+                     report(ReportType::Warning, base ? std::string("An IK Base is pinned to the scene") : "No bone named " + to);
+                     return OpStatus::Cancelled;
+                   }
+                   if (const std::string why = ik_pin_refusal(armature, *b, *t); !why.empty()) {
+                     report(ReportType::Warning, why);
+                     return OpStatus::Cancelled;
+                   }
+                   pin = float(t->id);
+                 }
+                 if (c->pin == pin) {
+                   return OpStatus::Cancelled;
+                 }
+                 c->pin = pin;
+                 return OpStatus::Finished;
+               });
+  rig_operator("armature.ik_pin_toggle", "Pin",
+               "Pin or unpin the active bone's IK End (to the scene), or its IK Base. Keyed",
+               bone_layer_active, [](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 Bone *b = bone_find(armature, armature.active_bone);
+                 BoneConstraint *c = b ? ik_constraint_of(*b, BoneConstraintType::IKEnd) : nullptr;
+                 if (b && !c) {
+                   c = ik_constraint_of(*b, BoneConstraintType::IKBase);
+                 }
+                 if (!c) {
+                   report(ReportType::Warning, "Select an IK End or an IK Base to pin");
+                   return OpStatus::Cancelled;
+                 }
+                 c->pin = c->pin == IK_PIN_NONE ? IK_PIN_SCENE : IK_PIN_NONE;
+                 report(ReportType::Info, b->name + (c->pin == IK_PIN_NONE ? ": unpinned" : ": pinned"));
+                 return OpStatus::Finished;
+               });
 }
 
 static void register_curve_operators()
@@ -945,6 +1207,10 @@ static std::vector<std::string> bone_constraint_driven_fields(BoneConstraintType
     case BoneConstraintType::IK:
       fields.insert(fields.end(), {"chain", "max_stretch"});
       break;
+    case BoneConstraintType::IKEnd:
+      fields.insert(fields.end(), {"keep_angle", "soft"});
+      break;
+    case BoneConstraintType::IKBase:
     case BoneConstraintType::LimitShape:
       fields.insert(fields.end(), {"overlap", "softness"});
       break;
@@ -1208,6 +1474,7 @@ static void bone_clipboard_register()
         }
         for (BoneConstraint &c : copy.constraints) {
           c.target = c.target ? here(c.target) : 0;
+          constraint_pin_map(c, here);
         }
         copy.controller_knob_parent = copy.controller_knob_parent ? here(copy.controller_knob_parent) : 0;
         /* An action has one controller: the copy isn't its sides'. */
@@ -1592,6 +1859,7 @@ static OpStatus move_to_group(Context &C)
       if (ids.count(c.target)) {
         c.target = ids[c.target];
       }
+      constraint_pin_map(c, [&](uint64_t id) { return ids.count(id) ? ids[id] : id; });
     }
     if (ids.count(copy.controller_knob_parent)) {
       copy.controller_knob_parent = ids[copy.controller_knob_parent];
@@ -2944,6 +3212,14 @@ void rig_operators_register()
                                                    "bone, its box what turns one");
                    return OpStatus::Cancelled;
                  }
+                 if (type == BoneConstraintType::IKEnd || type == BoneConstraintType::IKBase) {
+                   if (const std::string why = ik_constraint_refusal(C, *active_armature(C), *bone, type); !why.empty()) {
+                     report(ReportType::Warning, why);
+                     return OpStatus::Cancelled;
+                   }
+                   ik_constraint_add(*active_armature(C), *bone, type);
+                   return OpStatus::Finished;
+                 }
                  BoneConstraint c;
                  c.type = type;
                  c.name = bone_constraint_name(type);
@@ -3465,6 +3741,7 @@ void rig_operators_register()
                });
 
   register_curve_operators();
+  register_ik_operators();
   rig_operator("armature.bone_convert", "Convert Bone",
                "Make the selected bones Regular, 2 Axis Controllers or Pins, in the setup pose (type=REGULAR, "
                "CONTROLLER_2D or PIN). A controller is a box with a knob whose four sides play actions; a pin is one "
