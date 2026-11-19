@@ -3571,67 +3571,58 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
     static const char *const NAMES[] = {"Body", "Head", "Tail"};
     static const char *const TIPS[] = {
         "The layer follows the whole bone: its turn, its move and its squash and stretch (as Deform says)",
-        "The layer follows only the bone's head: it moves as a whole with it and is never squashed or skewed",
-        "The layer follows only the bone's tip: it moves as a whole with it and is never squashed or skewed (a "
-        "joint's round cap)"};
+        "The layer follows only the bone's head: it moves as a whole with it (Rigid), or bends along the curve from "
+        "it (Curve), never squashed or stretched",
+        "The layer follows only the bone's tip: it moves as a whole with it (Rigid: a joint's round cap), or bends "
+        "along the curve back from it (Curve), never squashed or stretched"};
     static const char *const ARGS[] = {"BODY", "HEAD", "TAIL"};
     choice_row("Attached To", "attached_to", int(layer.parent_bone_attach), 3, NAMES, TIPS, usable,
                [&](int k) { operator_call(C, "layer.parent_bone_set", {{"attached_to", ARGS[k]}}); });
-    if (layer.attached_to_end()) {
-      static const char *const TURN_NAMES[] = {"With Bone", "Halfway", "Never"};
-      static const char *const TURN_TIPS[] = {
-          "It turns as the bone turns",
-          "It turns halfway between the bone and the connected bone meeting it there (its parent at the head, its "
-          "child at the tip), as a knee or elbow cap does; with none, as the bone",
-          "It keeps its angle and only moves"};
-      static const char *const TURN_ARGS[] = {"BONE", "HALF", "NONE"};
-      choice_row("Turn", "attach_turn", int(layer.parent_bone_turn), 3, TURN_NAMES, TURN_TIPS, usable,
-                 [&](int k) { operator_call(C, "layer.parent_bone_set", {{"turn", TURN_ARGS[k]}}); });
-    }
   }
-  /* Deform: what the bone moves, the layer as a whole or its points. A group moves as a whole. Attached to an end, the
-   * layer only ever moves as a whole. */
-  if (parent && !binding && !layer.attached_to_end()) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Deform");
-    ImGui::TableSetColumnIndex(1);
-    const bool usable = !same_as_original && !layer.is_group() && doc.frame_current == 0;
-    ImGui::BeginDisabled(!usable);
-    const float w = (ImGui::GetContentRegionAvail().x - 2.0f) / 3.0f;
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, ImGui::GetStyle().ItemSpacing.y));
-    static const char *const NAMES[] = {"Layer", "Points", "Curve"};
-    static const char *const TIPS[] = {
-        "The bone moves the layer as a whole: its squash and stretch squashes the lines and brush stamps too",
-        "The bone moves the points, as if each were weighted all to it: lines keep their width and brush "
-        "stamps their shape",
-        "The points bend along the bone's curve (bendy bones), or a chain of connected bones' (Chain To): each "
-        "goes where its place on the curve goes"};
-    static const char *const ARGS[] = {"LAYER", "POINTS", "CURVE"};
-    const int now = layer.is_group() || !layer.parent_bone_points ? 0 : layer.parent_bone_curve ? 2 : 1;
-    for (int k = 0; k < 3; k++) {
-      if (k > 0) {
-        ImGui::SameLine();
-      }
-      if (k == now) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-      }
-      if (ImGui::Button(NAMES[k], ImVec2(w, 0)) && k != now) {
-        operator_call(C, "layer.parent_bone_set", {{"deform", ARGS[k]}});
-      }
-      if (k == now) {
-        ImGui::PopStyleColor();
-      }
-      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("%s", layer.is_group() ? "A group moves as a whole" : TIPS[k]);
-      }
+  /* Deform: what the bone moves, the layer as a whole or its points (on a group, every drawing's inside). Attached to an
+   * end: moved as a whole there, or bent along the curve from it. */
+  if (parent && !binding) {
+    const bool usable = !same_as_original && doc.frame_current == 0;
+    const bool end = layer.attached_to_end();
+    const bool group = layer.is_group();
+    int now = 0;
+    if (end) {
+      static const char *const NAMES[] = {"Rigid", "Curve"};
+      static const char *const TIPS[] = {
+          "It moves as a whole with the bone's end, never squashed or skewed (a joint's round cap)",
+          "It bends along the bone's curve, or a chain's (Chain To), each point as far along it from this end as it "
+          "was: it bends with the bone but never stretches with it"};
+      static const char *const GROUP_TIPS[] = {
+          "The group moves as a whole with the bone's end, never squashed or skewed",
+          "Every drawing inside bends along the bone's curve, or a chain's (Chain To), each point as far along it from "
+          "this end as it was: they bend with the bone but never stretch with it"};
+      static const char *const ARGS[] = {"RIGID", "CURVE"};
+      now = layer.end_curve() ? 1 : 0;
+      choice_row("Deform", "deform", now, 2, NAMES, group ? GROUP_TIPS : TIPS, usable,
+                 [&](int k) { operator_call(C, "layer.parent_bone_set", {{"deform", ARGS[k]}}); });
     }
-    ImGui::PopStyleVar();
-    ImGui::EndDisabled();
+    else {
+      static const char *const NAMES[] = {"Layer", "Points", "Curve"};
+      static const char *const TIPS[] = {
+          "The bone moves the layer as a whole: its squash and stretch squashes the lines and brush stamps too",
+          "The bone moves the points, as if each were weighted all to it: lines keep their width and brush "
+          "stamps their shape",
+          "The points bend along the bone's curve (bendy bones), or a chain of connected bones' (Chain To): each "
+          "goes where its place on the curve goes"};
+      static const char *const GROUP_TIPS[] = {
+          "The bone moves the group as a whole: its squash and stretch squashes the lines and brush stamps too",
+          "The bone moves the points of every drawing inside, as if each were weighted all to it: lines keep their "
+          "width and brush stamps their shape",
+          "Every drawing inside bends along the bone's curve (bendy bones), or a chain of connected bones' (Chain "
+          "To): each point goes where its place on the curve goes"};
+      static const char *const ARGS[] = {"LAYER", "POINTS", "CURVE"};
+      now = !layer.parent_bone_points ? 0 : layer.parent_bone_curve ? 2 : 1;
+      choice_row("Deform", "deform", now, 3, NAMES, group ? GROUP_TIPS : TIPS, usable,
+                 [&](int k) { operator_call(C, "layer.parent_bone_set", {{"deform", ARGS[k]}}); });
+    }
     /* Chain To (Deform: Curve): the points bend along the curves from the Parent Bone on through its connected
      * children to this bone. */
-    if (now == 2) {
+    if (layer.points_follow_bone() && layer.parent_bone_curve) {
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
       ImGui::AlignTextToFramePadding();
@@ -3657,6 +3648,18 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
                           "bend along all their curves. The Parent Bone: its curve alone");
       }
       ImGui::EndDisabled();
+    }
+    /* Turn (attached rigidly to an end): how it turns there. */
+    if (end && !layer.end_curve()) {
+      static const char *const TURN_NAMES[] = {"With Bone", "Halfway", "Never"};
+      static const char *const TURN_TIPS[] = {
+          "It turns as the bone turns",
+          "It turns halfway between the bone and the connected bone meeting it there (its parent at the head, its "
+          "child at the tip), as a knee or elbow cap does; with none, as the bone",
+          "It keeps its angle and only moves"};
+      static const char *const TURN_ARGS[] = {"BONE", "HALF", "NONE"};
+      choice_row("Turn", "attach_turn", int(layer.parent_bone_turn), 3, TURN_NAMES, TURN_TIPS, usable,
+                 [&](int k) { operator_call(C, "layer.parent_bone_set", {{"turn", TURN_ARGS[k]}}); });
     }
   }
   /* Bone Follows Selection: the parent bone keyed onto the selection on each of its keyed frames. */

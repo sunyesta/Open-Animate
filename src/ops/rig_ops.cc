@@ -2958,11 +2958,13 @@ void rig_operators_register()
                "parenting to a bone in Blender (\"\": Custom Weights, their points following their weights; a "
                "layer inside a group with a Parent Bone follows that group's and is left as it is); `deform`=LAYER moves the layer (a bone's "
                "squash and stretch squashes its lines too), POINTS its points (lines keep their width), CURVE bends "
-               "its points along the bone's curve (bendy bones); `chain_end`=a bone connected on from the Parent Bone "
+               "its points along the bone's curve (bendy bones), on a group every drawing inside (a group given a bone "
+               "starts as LAYER); `chain_end`=a bone connected on from the Parent Bone "
                "bends them along the whole chain to it (\"\": the Parent Bone alone), making Deform Curve; `attached_to`=HEAD or TAIL "
                "(a regular bone) makes the layer follow only that end, moving as a whole there, never squashed (BODY: the "
                "whole bone, as Deform says), and `turn`=BONE, HALF (halfway with the connected bone meeting it there) "
-               "or NONE how it turns there. "
+               "or NONE how it turns there; attached to an end, `deform`=CURVE bends it along the curve from that end, "
+               "never stretched, and RIGID moves it as a whole there. "
                "Either alone, or both. `extend_to`=a bone in line with the active layer's chain (through connected "
                "bones): above its Parent Bone the chain starts there, below its end it ends there (Deform Curve). keep_animation=1: the layer shows where it did on every keyed frame "
                "(its transform keyed again there), as Keep Poses does for setup moves. Setup frame only",
@@ -2977,10 +2979,11 @@ void rig_operators_register()
                  bool set_bone = op_has_arg(C, "bone");
                  std::string name = op_arg(C, "bone");
                  const std::string deform = op_arg(C, "deform");
-                 if (!deform.empty() && deform != "LAYER" && deform != "POINTS" && deform != "CURVE") {
-                   report(ReportType::Error, "deform is LAYER, POINTS or CURVE");
+                 if (!deform.empty() && deform != "LAYER" && deform != "POINTS" && deform != "CURVE" && deform != "RIGID") {
+                   report(ReportType::Error, "deform is LAYER, POINTS, CURVE or RIGID");
                    return OpStatus::Cancelled;
                  }
+                 int not_at_end = 0;
                  const std::string attach_arg = op_arg(C, "attached_to"), turn_arg = op_arg(C, "turn");
                  if (!attach_arg.empty() && attach_arg != "BODY" && attach_arg != "HEAD" && attach_arg != "TAIL") {
                    report(ReportType::Error, "attached_to is BODY, HEAD or TAIL");
@@ -3056,9 +3059,11 @@ void rig_operators_register()
                    std::vector<uint64_t> ids;
                    for (Layer *layer : keyed_layers(C)) {
                      const Layer *armature = layer_armature(doc, layer->id);
+                     /* (A group bending the drawings inside, or about to, leaves where it is: they bend instead.) */
                      if (!armature || layer->is_bone_layer() || (layer->points_follow_bone() && !set_bone) ||
                          (layer->is_reference() && layer->reference.match_original) ||
-                         layer_binding_group(doc, layer->id))
+                         layer_binding_group(doc, layer->id) ||
+                         (layer->is_group() && (layer->points_follow_bone() || (!deform.empty() && deform != "LAYER"))))
                      {
                        continue;
                      }
@@ -3107,6 +3112,11 @@ void rig_operators_register()
                    }
                    const uint64_t id = bone ? bone->id : 0;
                    if (set_bone && layer->parent_bone != id) {
+                     /* A group given a Parent Bone moves as a whole (Layer) until told otherwise. */
+                     if (layer->is_group() && layer->parent_bone == 0) {
+                       layer->parent_bone_points = false;
+                       layer->parent_bone_curve = false;
+                     }
                      layer->parent_bone = id;
                      /* A chain runs from its Parent Bone: a new bone starts it again. */
                      layer->parent_bone_chain_end = 0;
@@ -3139,7 +3149,17 @@ void rig_operators_register()
                        changed++;
                      }
                    }
-                   if (!deform.empty()) {
+                   if (deform == "RIGID") {
+                     /* Attached to an end: moving as a whole there (whatever Deform it keeps for Body). */
+                     if (!layer->attached_to_end()) {
+                       not_at_end++;
+                     }
+                     else if (layer->parent_bone_curve) {
+                       layer->parent_bone_curve = false;
+                       changed++;
+                     }
+                   }
+                   else if (!deform.empty()) {
                      const bool points = deform != "LAYER", curve = deform == "CURVE";
                      if (layer->parent_bone_points != points || layer->parent_bone_curve != curve) {
                        layer->parent_bone_points = points;
@@ -3234,6 +3254,9 @@ void rig_operators_register()
                  if (not_regular > 0 && changed == 0) {
                    report(ReportType::Warning, "Attached To Head or Tail takes a regular Parent Bone (a pin or a "
                                                "controller has no ends apart)");
+                 }
+                 if (not_at_end > 0 && changed == 0) {
+                   report(ReportType::Warning, "Rigid is for a layer attached to its bone's head or tail");
                  }
                  if (bent > 0 && changed == 0) {
                    animation_evaluate(doc, doc.frame_current);
@@ -5113,14 +5136,14 @@ void rig_operators_register()
           const Transform2D armature_world = layer_world_transform(doc, armature_id);
           for (const uint64_t id : drawings) {
             Layer *layer = layer_find(doc, id);
-            if (const uint64_t bone = layer->followed_bone()) {
+            if (const Layer *by = layer_whole_binder(doc, *layer)) {
               /* Moved by its bone as a whole: its transform takes the bone's move, on every key. */
-              const BonePose *p = bone_pose_find(change, bone);
+              const BonePose *p = bone_pose_find(change, by->parent_bone);
               if (!p) {
                 continue;
               }
               const Transform2D above = layer_world_transform(doc, id) * layer->local_transform().inverted();
-              const Transform2D skin = bone_follow_skin(*armature, change, *p, layer->parent_bone_attach, layer->parent_bone_turn);
+              const Transform2D skin = bone_follow_skin(*armature, change, *p, by->parent_bone_attach, by->parent_bone_turn);
               const Transform2D m = above.inverted() * armature_world * skin * armature_world.inverted() * above;
               const float turn = std::atan2(m.b, m.a) * 180.0f / PI;
               layer->position = m.apply(layer->position);
@@ -5457,11 +5480,13 @@ void rig_operators_register()
         }
         for (const uint64_t id : drawings) {
           const Layer *l = layer_find(doc, id);
-          if (l->followed_bone() != 0 || layer_binding_group(doc, id)) {
+          if (layer_moved_whole(doc, *l)) {
             continue;
           }
-          bool bent = l->points_follow_bone() && moving.count(l->parent_bone);
-          for (size_t i = 0; i < l->drawing.points.size() && !bent; i++) {
+          /* A group above with a Parent Bone bends it with its bone, its own weights left out. */
+          const Layer &by = layer_bone_binder(doc, *l);
+          bool bent = by.points_follow_bone() && moving.count(by.parent_bone);
+          for (size_t i = 0; i < l->drawing.points.size() && !bent && &by == l; i++) {
             for (const BoneWeight &w : l->drawing.points[i].weights) {
               bent = bent || (w.weight > 0.0f && moving.count(w.bone));
             }

@@ -4608,6 +4608,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   });
   m.def("layer_parent_bone_deform", [layer_or_raise](uint64_t id) {
     const Layer &l = layer_or_raise(id);
+    if (l.attached_to_end()) {
+      return std::string(l.end_curve() ? "CURVE" : "RIGID");
+    }
     return std::string(!l.parent_bone_points ? "LAYER" : l.parent_bone_curve ? "CURVE" : "POINTS");
   });
   m.def("layer_parent_bone_attach", [layer_or_raise](uint64_t id) {

@@ -556,7 +556,9 @@ class _Layer:
     @property
     def parent_bone_deform(self):
         """What Parent Bone moves: "LAYER" (the layer as a whole, lines and stamps squashing with the
-        bone) or "POINTS" (its points; lines keep their width). Set with layer.parent_bone_set(deform=)."""
+        bone), "POINTS" (its points; lines keep their width) or "CURVE" (its points bent along the bone's curve); on a
+        group, every drawing inside. Attached to the bone's head or tail: "RIGID" (moved as a whole there) or "CURVE"
+        (bent along the curve from that end, never stretched). Set with layer.parent_bone_set(deform=)."""
         return _oanim.layer_parent_bone_deform(self._id)
 
     @property

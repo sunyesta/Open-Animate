@@ -1313,7 +1313,8 @@ struct Layer {
   /* What Parent Bone moves (Deform): false, the layer as a whole (Layer: a bone's squash and
    * stretch squashes its lines and brush stamps too); true, its points, as if each were weighted
    * all to that bone (Points: lines keep their width and stamps their shape). Points for new
-   * drawings; groups move as a whole. */
+   * drawings, Layer for a group given a Parent Bone. On a group, every drawing inside: Points and Curve bend each
+   * one's points, the group itself left where it is. */
   bool parent_bone_points = true;
   /* Deform: Curve (with parent_bone_points): the points bend along the bones' curve (bendy bones, anim/bone_curve.hh)
    * rather than moving all with the one bone. `parent_bone_chain_end`: the chain runs on from the Parent Bone through
@@ -1323,7 +1324,8 @@ struct Layer {
   /* Attached To (a regular Parent Bone): Body, the bone's whole move (its squash and stretch too, as Deform says);
    * Head or Tail, only where that end goes, the layer moving as a whole there and never squashed or skewed (a joint's
    * round cap); `parent_bone_turn` how it turns there: with the bone, halfway with the bone that meets it at that end
-   * (connected), or not at all. */
+   * (connected), or not at all. Attached to an end with Deform Curve (parent_bone_curve), it bends along the curve
+   * instead, each point as far along it from that end as it was, so it never stretches (anim/bone_curve.hh). */
   BoneAttach parent_bone_attach = BoneAttach::Body;
   BoneAttachTurn parent_bone_turn = BoneAttachTurn::Bone;
   /* Bone layers: their bone collections, in list order, and the active one (its id; 0: All). */
@@ -1422,12 +1424,15 @@ struct Layer {
   {
     return (is_reference() && reference.match_original) || points_follow_bone() ? 0 : parent_bone;
   }
-  /* Attached to the Parent Bone's head or tail (moving as a whole there, whatever Deform says). */
+  /* Attached to the Parent Bone's head or tail: moving as a whole there (Rigid), or bending along the curve from it. */
   bool attached_to_end() const { return parent_bone != 0 && parent_bone_attach != BoneAttach::Body; }
-  /* Parent Bone moving its points rather than the layer (parent_bone_points). */
+  /* Attached to an end and bending along the curve from it (Deform: Curve); otherwise an end moves it rigidly. */
+  bool end_curve() const { return attached_to_end() && parent_bone_points && parent_bone_curve; }
+  /* Parent Bone moving its points rather than the layer (parent_bone_points; on a group, the points of every drawing
+   * inside). */
   bool points_follow_bone() const
   {
-    return parent_bone != 0 && parent_bone_points && !attached_to_end() && !is_group() &&
+    return parent_bone != 0 && parent_bone_points && (!attached_to_end() || parent_bone_curve) &&
            !(is_reference() && reference.match_original);
   }
   /* Translate * Rotate * Shear * Scale: the X axis turned by its rotation plus shear.x, the Y axis by its

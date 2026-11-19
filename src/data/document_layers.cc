@@ -294,10 +294,50 @@ static Transform2D layer_follow_skin(const Layer &armature, const std::vector<Bo
   return bone_follow_skin(armature, poses, bone, layer.parent_bone_attach, layer.parent_bone_turn);
 }
 
+/* On the way down to a layer: whose Parent Bone moves it as a whole (null: none does), given the group above whose
+ * Parent Bone overrides those inside (`binder`). A group bending the drawings inside (Deform: Points or Curve) carries
+ * whole what has no points to bend (a picture, a video). */
+static const Layer *whole_binder(const Layer *armature, const Layer *binder, const Layer &layer)
+{
+  if (!armature) {
+    return nullptr;
+  }
+  if (!binder) {
+    return layer.followed_bone() != 0 ? &layer : nullptr;
+  }
+  return binder->points_follow_bone() && !layer.is_group() && !layer.has_drawing() ? binder : nullptr;
+}
+
+/* The group whose Parent Bone overrides those of the layers inside (layer_binding_group), once past `layer`. */
+static const Layer *binder_below(const Layer *armature, const Layer *binder, const Layer &layer)
+{
+  if (layer.is_bone_layer()) {
+    return nullptr;
+  }
+  if (binder) {
+    return binder;
+  }
+  return armature && layer.is_group() && layer.parent_bone != 0 && !(layer.is_reference() && layer.reference.match_original)
+             ? &layer
+             : nullptr;
+}
+
+/* `transform` (the layer's, world) moved by `by`'s Parent Bone as a whole. */
+static Transform2D whole_bone_moved(const Layer &armature, const Transform2D &armature_world, bool setup_frame,
+                                    const Layer &by, const Transform2D &transform)
+{
+  const std::vector<BonePose> poses = armature_pose(armature, setup_frame);
+  if (const BonePose *bone = bone_pose_find(poses, by.parent_bone)) {
+    return armature_world * layer_follow_skin(armature, poses, *bone, by) * armature_world.inverted() * transform;
+  }
+  return transform;
+}
+
 /* `own_local`: the layer's own transform instead of its values' (layer_world_transform_with). */
 static bool world_transform_in(const std::vector<Layer> &list, const Transform2D &parent, const Layer *armature,
                                const Transform2D &armature_world, bool setup_frame, uint64_t id,
-                               Transform2D *r_transform, bool bound = false, const Transform2D *own_local = nullptr)
+                               Transform2D *r_transform, const Layer *binder = nullptr,
+                               const Transform2D *own_local = nullptr)
 {
   for (const Layer &layer : list) {
     /* Only the way down to the layer: the bones' pose is costly to work out. */
@@ -305,14 +345,9 @@ static bool world_transform_in(const std::vector<Layer> &list, const Transform2D
       continue;
     }
     Transform2D transform = parent * (own_local && layer.id == id ? *own_local : layer.local_transform());
-    /* `bound`: a group above already follows a bone, and its bone overrides this layer's. */
-    const bool binds = armature && !bound && layer.followed_bone() != 0;
-    if (binds) {
-      const std::vector<BonePose> poses = armature_pose(*armature, setup_frame);
-      if (const BonePose *bone = bone_pose_find(poses, layer.followed_bone())) {
-        transform = armature_world * layer_follow_skin(*armature, poses, *bone, layer) * armature_world.inverted() *
-                    transform;
-      }
+    /* `binder`: a group above has a Parent Bone, and its bone overrides this layer's. */
+    if (const Layer *by = whole_binder(armature, binder, layer)) {
+      transform = whole_bone_moved(*armature, armature_world, setup_frame, *by, transform);
     }
     if (layer.id == id) {
       *r_transform = transform;
@@ -320,7 +355,7 @@ static bool world_transform_in(const std::vector<Layer> &list, const Transform2D
     }
     const bool bones = layer.is_bone_layer();
     if (world_transform_in(layer.children, transform, bones ? &layer : armature, bones ? transform : armature_world,
-                           setup_frame, id, r_transform, !bones && (bound || (binds && layer.is_group())), own_local))
+                           setup_frame, id, r_transform, binder_below(armature, binder, layer), own_local))
     {
       return true;
     }
@@ -340,25 +375,19 @@ static bool world_transform_indexed(const LayerIndex &index, bool setup_frame, u
     return false;
   }
   Transform2D parent, armature_world;
-  const Layer *armature = nullptr;
-  bool bound = false;
+  const Layer *armature = nullptr, *binder = nullptr;
   for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
     const Layer &layer = **it;
     Transform2D transform = parent * (own_local && layer.id == id ? *own_local : layer.local_transform());
-    const bool binds = armature && !bound && layer.followed_bone() != 0;
-    if (binds) {
-      const std::vector<BonePose> poses = armature_pose(*armature, setup_frame);
-      if (const BonePose *bone = bone_pose_find(poses, layer.followed_bone())) {
-        transform = armature_world * layer_follow_skin(*armature, poses, *bone, layer) * armature_world.inverted() *
-                    transform;
-      }
+    if (const Layer *by = whole_binder(armature, binder, layer)) {
+      transform = whole_bone_moved(*armature, armature_world, setup_frame, *by, transform);
     }
     if (layer.id == id) {
       *r_transform = transform;
       return true;
     }
     const bool bones = layer.is_bone_layer();
-    bound = !bones && (bound || (binds && layer.is_group()));
+    binder = binder_below(armature, binder, layer);
     if (bones) {
       armature = &layer;
       armature_world = transform;
@@ -386,16 +415,14 @@ static std::vector<const Layer *> layer_chain(const Document &doc, uint64_t id)
  * already binds), with the armature's transform, where it is above chain[from], as the way from it down to there. */
 static Transform2D chain_transform_below(const std::vector<const Layer *> &chain, int from, bool setup_frame)
 {
-  const Layer *armature = nullptr;
-  bool bound = false;
+  const Layer *armature = nullptr, *binder = nullptr;
   /* From below the armature down to chain[from]; no group between binds while a layer below still can. */
   Transform2D since_armature;
   for (int k = 0; k <= from; k++) {
     const Layer &layer = *chain[size_t(k)];
-    const bool binds = armature && !bound && layer.followed_bone() != 0;
     since_armature = since_armature * layer.local_transform();
     const bool bones = layer.is_bone_layer();
-    bound = !bones && (bound || (binds && layer.is_group()));
+    binder = binder_below(armature, binder, layer);
     if (bones) {
       armature = &layer;
       since_armature = Transform2D();
@@ -405,16 +432,11 @@ static Transform2D chain_transform_below(const std::vector<const Layer *> &chain
   for (size_t k = size_t(from + 1); k < chain.size(); k++) {
     const Layer &layer = *chain[k];
     Transform2D transform = parent * layer.local_transform();
-    const bool binds = armature && !bound && layer.followed_bone() != 0;
-    if (binds) {
-      const std::vector<BonePose> poses = armature_pose(*armature, setup_frame);
-      if (const BonePose *bone = bone_pose_find(poses, layer.followed_bone())) {
-        transform = armature_world * layer_follow_skin(*armature, poses, *bone, layer) * armature_world.inverted() *
-                    transform;
-      }
+    if (const Layer *by = whole_binder(armature, binder, layer)) {
+      transform = whole_bone_moved(*armature, armature_world, setup_frame, *by, transform);
     }
     const bool bones = layer.is_bone_layer();
-    bound = !bones && (bound || (binds && layer.is_group()));
+    binder = binder_below(armature, binder, layer);
     if (bones) {
       armature = &layer;
       armature_world = transform;
@@ -468,7 +490,7 @@ Transform2D layer_world_transform_with(const Document &doc, uint64_t id, const T
     world_transform_indexed(*index, setup_frame, id, &transform, &local);
     return transform;
   }
-  world_transform_in(doc.layers, Transform2D(), nullptr, Transform2D(), setup_frame, id, &transform, false, &local);
+  world_transform_in(doc.layers, Transform2D(), nullptr, Transform2D(), setup_frame, id, &transform, nullptr, &local);
   return transform;
 }
 

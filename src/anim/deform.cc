@@ -226,8 +226,9 @@ struct Deformer {
    * weights. */
   uint64_t whole_bone = 0;
   /* Deform: Curve (bendy bones): the Parent Bone's curve, or its chain's, as it rests and now (bone layer space); each
-   * point goes where its place on the rest line goes. */
+   * point goes where its place on the rest line goes (`curve_from` Head or Tail: as far from that end). */
   BoneCurveLine curve_rest, curve_now;
+  BoneAttach curve_from = BoneAttach::Body;
 };
 
 }  // namespace
@@ -235,9 +236,11 @@ struct Deformer {
 static bool deformer_init(const Document &doc, const Layer &layer, Deformer &r)
 {
   r.armature = layer_armature(doc, layer.id);
-  if (!r.armature || r.armature->bones.empty() || layer.followed_bone() != 0 || layer_binding_group(doc, layer.id)) {
-    /* A layer bound to one bone (or inside a group that is) moves as a whole (its transform), not
-     * point by point. */
+  /* A group above with a Parent Bone decides for everything inside: its Deform, its bone (the layer's own and its
+   * weights left for when it lets go). */
+  const Layer &by = layer_bone_binder(doc, layer);
+  if (!r.armature || r.armature->bones.empty() || by.followed_bone() != 0) {
+    /* A layer bound to one bone (or inside a group that is) as a whole moves by its transform, not point by point. */
     return false;
   }
   r.poses = armature_pose(*r.armature, doc.frame_current == 0);
@@ -245,8 +248,9 @@ static bool deformer_init(const Document &doc, const Layer &layer, Deformer &r)
    * the bent drawing exactly as it was, and what is kept of it (a deform's build, the drawing's triangles) stays. */
   r.to_armature = layer_relative_transform(doc, r.armature->id, layer.id);
   r.from_armature = r.to_armature.inverted();
-  r.whole_bone = layer.points_follow_bone() ? layer.parent_bone : 0;
-  if (const std::vector<size_t> chain = layer_curve_chain(*r.armature, layer); !chain.empty()) {
+  r.whole_bone = by.points_follow_bone() ? by.parent_bone : 0;
+  r.curve_from = by.end_curve() ? by.parent_bone_attach : BoneAttach::Body;
+  if (const std::vector<size_t> chain = layer_curve_chain(*r.armature, by); !chain.empty()) {
     const bool setup_frame = doc.frame_current == 0;
     r.curve_rest = bone_curve_line(*r.armature, r.poses, chain, true, setup_frame);
     r.curve_now = bone_curve_line(*r.armature, r.poses, chain, false, setup_frame);
@@ -415,7 +419,7 @@ static Transform2D skin_preserve_volume(const Deformer &d, const std::vector<Bon
 static Transform2D point_skin(const Deformer &d, const MeshPoint &p)
 {
   if (!d.curve_rest.empty() && !d.curve_now.empty()) {
-    return d.from_armature * bone_curve_line_skin(d.curve_rest, d.curve_now, d.to_armature.apply(p.pos)) *
+    return d.from_armature * bone_curve_line_skin(d.curve_rest, d.curve_now, d.to_armature.apply(p.pos), d.curve_from) *
            d.to_armature;
   }
   const std::vector<BoneWeight> weights = point_weights(d, p);
@@ -633,7 +637,7 @@ bool layer_has_modifier_effect(const Document &doc, const Layer &layer, bool ren
     {
       return true;
     }
-    if (m.type == ModifierType::Armature && layer.followed_bone() == 0 && !layer_binding_group(doc, layer.id)) {
+    if (m.type == ModifierType::Armature && !layer_moved_whole(doc, layer)) {
       const Layer *armature = layer_armature(doc, layer.id);
       if (armature && !armature->bones.empty()) {
         return true;

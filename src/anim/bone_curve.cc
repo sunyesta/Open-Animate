@@ -342,7 +342,7 @@ static float line_remap(float s, const std::vector<float> &from, const std::vect
   return to[j] + (w > 0.0f ? (s - from[j]) / w : 0.0f) * (to[j + 1] - to[j]);
 }
 
-Transform2D bone_curve_line_skin(const BoneCurveLine &rest, const BoneCurveLine &now, float2 q)
+Transform2D bone_curve_line_skin(const BoneCurveLine &rest, const BoneCurveLine &now, float2 q, BoneAttach from)
 {
   if (rest.empty() || now.empty()) {
     return {};
@@ -369,7 +369,10 @@ Transform2D bone_curve_line_skin(const BoneCurveLine &rest, const BoneCurveLine 
   const LinePlace was = line_place(rest, s);
   const float2 r = q - was.at;
   const float along = dot(r, was.tangent), across = dot(r, perpendicular(was.tangent));
-  const LinePlace is = line_place(now, line_remap(s, rest.bone_starts, now.bone_starts));
+  const float s_now = from == BoneAttach::Head   ? s
+                      : from == BoneAttach::Tail ? now.along.back() - (rest.along.back() - s)
+                                                 : line_remap(s, rest.bone_starts, now.bone_starts);
+  const LinePlace is = line_place(now, s_now);
   const float2 moved = is.at + is.tangent * along + perpendicular(is.tangent) * across;
   const float turn = std::atan2(cross(was.tangent, is.tangent), dot(was.tangent, is.tangent));
   return Transform2D::translate(moved) * Transform2D::rotate(turn) * Transform2D::translate(-q);

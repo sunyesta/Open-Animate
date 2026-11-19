@@ -397,6 +397,14 @@ const Layer *layer_armature(const Document &doc, uint64_t layer_id);
  * several have one, or null. Its bone overrides the layer's own Parent Bone and weights: everything
  * inside moves as a whole with it. */
 const Layer *layer_binding_group(const Document &doc, uint64_t layer_id);
+/* The layer whose Parent Bone settings move `layer`: the binding group above it, else the layer itself. */
+const Layer &layer_bone_binder(const Document &doc, const Layer &layer);
+/* Whether a Parent Bone moves the layer as a whole (its own, or a binding group's, with Deform: Layer or attached rigidly
+ * to an end), not point by point. */
+bool layer_moved_whole(const Document &doc, const Layer &layer);
+/* The layer whose Parent Bone moves `layer` as a whole by its transform: the layer itself (followed_bone), or, inside
+ * a group bending the drawings inside, that group for what has no points to bend (a picture); null for none. */
+const Layer *layer_whole_binder(const Document &doc, const Layer &layer);
 /* Gives every vector layer inside a bone layer its Armature modifier, and takes it from those
  * that left one. Returns true when anything changed. */
 bool document_sync_armature_modifiers(Document &doc);

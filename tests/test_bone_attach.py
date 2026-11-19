@@ -102,17 +102,19 @@ near(top, (-0.2, 2), "round: as wide across as along")
 doc.frame_current = 0
 near(shown((1.2, 0.0)), (1.2, 0.0), "Setup: where it was drawn")
 
-# Deform says Points: attached to an end it still moves as a whole, as round.
+# Deform said Points: attached to an end it is Rigid, moving as a whole, as round; Points again back on Body.
 scene()
 doc.frame_current = 0
 layers.active = cap
 assert ops.layer.parent_bone_set(deform="POINTS") == {'FINISHED'}
 assert attach("TAIL") == {'FINISHED'}
-assert cap.parent_bone_deform == "POINTS", "Deform kept for when it is Body again"
+assert cap.parent_bone_deform == "RIGID"
 pose(upper=math.pi / 2, stretch=2.0)
 mid, right, top = mark()
 near(mid, (0, 2), "Points: on the stretched tip")
 near(top, (-0.2, 2), "Points: as round")
+assert attach("BODY") == {'FINISHED'}
+assert cap.parent_bone_deform == "POINTS", "Deform kept for when it is Body again"
 
 # Apply Pose as Rest (which leaves stretches out of the rest): the cap shows where it did, on Setup and on the frame
 # posed.

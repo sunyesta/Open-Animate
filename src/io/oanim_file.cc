@@ -2886,6 +2886,11 @@ static Layer layer_from_json(const json &j, int depth)
   layer.parent_bone_points = j.contains("parent_bone_deform") ? deform == "POINTS" || deform == "CURVE"
                                                               : !j.contains("parent_bone");
   layer.parent_bone_curve = deform == "CURVE";
+  /* Before format 11 a group moved as a whole whatever Deform said (and new groups said Points). */
+  if (g_loading_version < 11 && layer.is_group()) {
+    layer.parent_bone_points = false;
+    layer.parent_bone_curve = false;
+  }
   layer.parent_bone_chain_end = get_id(j, "parent_bone_chain_end");
   const std::string attach = get_string(j, "parent_bone_attach", "BODY");
   layer.parent_bone_attach = attach == "HEAD" ? BoneAttach::Head : attach == "TAIL" ? BoneAttach::Tail : BoneAttach::Body;

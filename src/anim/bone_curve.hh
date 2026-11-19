@@ -84,8 +84,11 @@ BoneCurveLine bone_curve_line(const Layer &armature, const std::vector<BonePose>
                               const std::vector<size_t> &chain, bool rest, bool setup_frame = false);
 /* What carries a point at `q` (bone layer space) bound to the line as it rests, onto the line now: a turn and a move,
  * the point's nearest place on the rest line going where that place goes (past either end, the line carried straight
- * on), as far along each bone as it was. */
-Transform2D bone_curve_line_skin(const BoneCurveLine &rest, const BoneCurveLine &now, float2 q);
+ * on), as far along each bone as it was. `from` Head or Tail (Attached To): as far from that end of the line as it was,
+ * so the drawing bends with the line but never stretches with it (a line grown longer reaches past it, a shorter one
+ * leaves it carried straight on past its end). */
+Transform2D bone_curve_line_skin(const BoneCurveLine &rest, const BoneCurveLine &now, float2 q,
+                                 BoneAttach from = BoneAttach::Body);
 
 /* The bones a drawing's Parent Bone bends it along (indices, head to tail): the Parent Bone and on through its connected
  * children to the chain's end; the Parent Bone alone if the end isn't reached that way. Empty: no curve (Deform isn't

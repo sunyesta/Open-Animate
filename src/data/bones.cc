@@ -3700,6 +3700,26 @@ const Layer *layer_binding_group(const Document &doc, uint64_t layer_id)
   return binding_group_in(doc.layers, nullptr, layer_id);
 }
 
+const Layer &layer_bone_binder(const Document &doc, const Layer &layer)
+{
+  const Layer *group = layer_binding_group(doc, layer.id);
+  return group ? *group : layer;
+}
+
+bool layer_moved_whole(const Document &doc, const Layer &layer)
+{
+  return layer_bone_binder(doc, layer).followed_bone() != 0;
+}
+
+const Layer *layer_whole_binder(const Document &doc, const Layer &layer)
+{
+  const Layer *group = layer_binding_group(doc, layer.id);
+  if (!group || group == &layer) {
+    return layer.followed_bone() != 0 ? &layer : nullptr;
+  }
+  return group->points_follow_bone() && !layer.is_group() && !layer.has_drawing() ? group : nullptr;
+}
+
 Transform2D bone_outer_frame(const Bone &bone, bool setup_frame)
 {
   return bone.outer_bone == 0 ? Transform2D() : setup_frame ? bone.outer_setup : bone.outer_pose;
