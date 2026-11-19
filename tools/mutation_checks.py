@@ -242,6 +242,9 @@ PENDING = [
     ('src/editors/viewport.cc', '        if (!deformed || fitted) {\n          continue;\n        }\n        if (!own) {\n',
      '        if (true || !deformed || fitted) {\n          continue;\n        }\n        if (!own) {\n',
      'with a Resample first, the handles shown are the drawing\'s own, bent at their points', 'tests/test_deform_handle_drag_corner.py'),
+    ('src/anim/deform.cc', '        for (size_t k = 0; ringed && k < size_t(ring_count); k++) {\n',
+     '        for (size_t k = 0; false && ringed && k < size_t(ring_count); k++) {\n',
+     'a point dragged past a corner the cage folds goes as near the mouse as it can', 'tests/test_deform_handle_drag_corner.py'),
 ]
 
 def build(root):

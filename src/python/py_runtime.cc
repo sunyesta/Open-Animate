@@ -1786,6 +1786,36 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return out;
   });
+  m.def("places_shown", [](uint64_t id, int point, const std::vector<std::pair<float, float>> &at) {
+    Context &C = current_context();
+    animation_sync(*C.document);
+    const Layer *layer = layer_find(*C.document, id);
+    if (!layer) {
+      throw py::value_error("no such layer");
+    }
+    std::vector<StackPlace> places;
+    for (const auto &[x, y] : at) {
+      places.push_back({point, float2(x, y)});
+    }
+    py::list out;
+    for (const float2 &p : layer_places_shown(*C.document, *layer, places)) {
+      out.append(py::make_tuple(p.x, p.y));
+    }
+    return out;
+  });
+  m.def("points_shown", [](uint64_t id) {
+    Context &C = current_context();
+    animation_sync(*C.document);
+    const Layer *layer = layer_find(*C.document, id);
+    if (!layer) {
+      throw py::value_error("no such layer");
+    }
+    py::list out;
+    for (const float2 &p : points_shown_test(C, *layer)) {
+      out.append(py::make_tuple(p.x, p.y));
+    }
+    return out;
+  });
   /* Test hook: what pressing the Select tool at a document point grabs to drag; with drag, the selection after. */
   m.def("select_press_grab", [](float x, float y, float zoom, bool modifier, bool drag) {
     py::list out;

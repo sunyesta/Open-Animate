@@ -691,6 +691,17 @@ def select_click(x, y, zoom=100.0):
     _oanim.select_click(float(x), float(y), float(zoom))
 
 
+def points_shown(layer):
+    """Test hook: where the viewport draws (and picks) each of the layer's points, [(x, y), ...] in layer space as
+    posed (through its bones and deforms)."""
+    return [tuple(p) for p in _oanim.points_shown(layer.id)]
+
+
+def places_shown(layer, point, places):
+    """Test hook: where the layer's stack shows point `point` were it stored at each of `places` (layer space)."""
+    return [tuple(p) for p in _oanim.places_shown(layer.id, int(point), [tuple(p) for p in places])]
+
+
 def points_panel():
     """Test hook: what Properties' Selected Points shows (None when it doesn't): label ("Point" or "Median"), median
     (x, y) where the points show, count, key and width_key (0 not animated, 1 animated, 2 every point keyed here),

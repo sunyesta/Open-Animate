@@ -1109,18 +1109,36 @@ void layer_points_settle(const Document &doc, Layer &layer, const std::vector<Po
   std::vector<float2> best(targets.size());
   std::vector<float> best_off(targets.size(), std::numeric_limits<float>::infinity());
   std::vector<bool> settled(targets.size(), false);
+  /* After a step that showed farther off, a ring of places around the nearest yet is tried too, this far from it (halved
+   * each time the ring finds nothing nearer). Where the deform folds back (outside a cage whose corner is bent past
+   * straight) the stretch at a place points the wrong way past it, so every step goes farther off and halving back alone
+   * leaves the point where it began, however far the mouse goes: the ring finds the way on, as near as the fold lets it. */
+  std::vector<float> ring(targets.size());
+  std::vector<bool> failed(targets.size(), false);
+  for (size_t i = 0; i < targets.size(); i++) {
+    ring[i] = std::max(targets[i].moved, STRETCH_STEP);
+  }
+  constexpr int ring_count = 8;
   std::vector<StackPlace> places;
+  std::vector<size_t> first(targets.size());
   constexpr int passes = 8;
   for (int pass = 0; pass < passes; pass++) {
     places.clear();
     for (size_t i = 0; i < targets.size(); i++) {
       const PointTarget &t = targets[i];
       const float2 at = layer.drawing.points[size_t(t.point)].pos;
+      first[i] = places.size();
       /* The first time, where it was before the move too. */
       for (const float2 p : {at, pass == 0 && t.has_from ? t.from : at}) {
         places.push_back({t.point, p});
         places.push_back({t.point, p + float2(STRETCH_STEP, 0.0f)});
         places.push_back({t.point, p + float2(0.0f, STRETCH_STEP)});
+      }
+      if (failed[i] && !settled[i]) {
+        for (int k = 0; k < ring_count; k++) {
+          const float a = float(k) * (2.0f * PI / float(ring_count));
+          places.push_back({t.point, best[i] + float2(std::cos(a), std::sin(a)) * ring[i]});
+        }
       }
     }
     const std::vector<float2> shown = layer_places_shown(doc, layer, places);
@@ -1131,16 +1149,49 @@ void layer_points_settle(const Document &doc, Layer &layer, const std::vector<Po
         continue;
       }
       float2 &stored = layer.drawing.points[size_t(t.point)].pos;
-      size_t at = i * 6;
-      if (pass == 0 && t.has_from && length(t.at - shown[i * 6 + 3]) < length(t.at - shown[i * 6])) {
+      const size_t base = first[i];
+      size_t at = base;
+      if (pass == 0 && t.has_from && length(t.at - shown[base + 3]) < length(t.at - shown[base])) {
         /* The move's own skin sent it somewhere showing farther off than where it began. */
         stored = t.from;
         from[i] = t.from;
-        at = i * 6 + 3;
+        at = base + 3;
       }
       const float2 off = t.at - shown[at];
+      const bool ringed = failed[i];
+      failed[i] = false;
       if (length(off) >= best_off[i]) {
-        /* Farther off than before: halfway back to the nearest place yet (at the last pass, that place). */
+        const bool reach = t.has_from && t.reach > 0.0f;
+        const float2 origin = reach ? t.from : from[i];
+        const float most = reach ? t.reach : t.moved * 12.0f;
+        size_t nearest = 0;
+        float nearest_off = best_off[i];
+        for (size_t k = 0; ringed && k < size_t(ring_count); k++) {
+          const size_t p = base + 6 + k;
+          const float o = length(t.at - shown[p]);
+          if (o < nearest_off && length(places[p].at - origin) <= most) {
+            nearest = p;
+            nearest_off = o;
+          }
+        }
+        if (nearest != 0) {
+          /* Nearer on the ring: on from there, by the stretch there. */
+          best[i] = places[nearest].at;
+          best_off[i] = nearest_off;
+          stored = best[i];
+          if (nearest_off <= std::max(1e-6f, 1e-5f * length(t.at))) {
+            settled[i] = true;
+            continue;
+          }
+          done = false;
+          continue;
+        }
+        /* Farther off than before: halfway back to the nearest place yet (at the last pass, that place), and the ring
+         * tried round it, smaller each time it found nothing. */
+        if (ringed) {
+          ring[i] *= 0.5f;
+        }
+        failed[i] = true;
         stored = pass + 1 < passes ? best[i] + (stored - best[i]) * 0.5f : best[i];
         done = false;
         continue;

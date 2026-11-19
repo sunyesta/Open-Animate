@@ -8366,6 +8366,16 @@ std::vector<std::pair<float2, float2>> handle_ends_shown_test(Context &C, const 
   return out;
 }
 
+std::vector<float2> points_shown_test(Context &C, const Layer &layer)
+{
+  const Posed shown = posed(*C.document, layer);
+  std::vector<float2> out;
+  for (const MeshPoint &p : shown.drawing->points) {
+    out.push_back(p.pos);
+  }
+  return out;
+}
+
 const char *select_press_takes_test(Context &C, float2 at, float zoom)
 {
   reach_update(C);

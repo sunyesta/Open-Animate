@@ -2,7 +2,8 @@
 and the outline moves about as far as the drag. At a corner the deform bends a handle differently each way it points,
 so a handle settled by the point's one stretch overshot (a 0.006 drag stored a handle turned most of a right angle, the
 outline moving 0.035). With a Resample before the deform the handles shown and dragged are the drawing's own, bent at
-their points, not the point's stretch of them.
+their points, not the point's stretch of them. A point dragged out past a corner the cage folds goes as near the mouse
+as the deform lets it, rather than staying where it began.
 
 Run with:  OpenAnimate --background --python tests/test_deform_handle_drag_corner.py
 """
@@ -87,5 +88,26 @@ drags(False)
 
 # --- A Resample before the Cage Deform: the handles shown are the drawing's own, bent at their points ------------------
 drags(True)
+
+# --- A point dragged out past a corner the cage folds: it goes as near the mouse as the deform lets it ------------------
+# On frame 10 the front's point 1 is a sharp corner whose hem leaves going back up, so what lies outside below it folds
+# up over the corner: no stored place shows the back's point 1 there. Each step toward it showed farther off, and halving
+# back alone left the point where it began whatever way the mouse went.
+for resample in (False, True):
+    front, back = scene(resample)
+    start = wm.points_shown(back)[1]
+    move = (0.02 * math.cos(math.radians(-45)), 0.02 * math.sin(math.radians(-45)))
+    want = (start[0] + move[0], start[1] + move[1])
+    ops.mesh.select_none()
+    back.select_points([1])
+    assert ops.mesh.translate(move_x=repr(move[0]), move_y=repr(move[1])) == {'FINISHED'}
+    now = wm.points_shown(back)[1]
+    assert math.dist(now, want) < 0.95 * math.dist(start, want), ("nearer the mouse than it began", resample, start, now)
+    # Nowhere it could be stored, round about, shows nearer than where it was left.
+    stored = back.points[1][:2]
+    ring = [(stored[0] + r * math.cos(math.radians(a)), stored[1] + r * math.sin(math.radians(a)))
+            for r in (0.002, 0.005) for a in range(0, 360, 30)]
+    nearest = min(math.dist(p, want) for p in wm.places_shown(back, 1, ring))
+    assert math.dist(now, want) < nearest + 0.002, ("as near as the deform lets it", resample, math.dist(now, want), nearest)
 
 print("deform handle drag corner: ok")
