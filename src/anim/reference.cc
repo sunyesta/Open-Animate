@@ -1,6 +1,7 @@
 #include "anim/reference.hh"
 
 #include <algorithm>
+#include <optional>
 #include <cctype>
 #include <cmath>
 #include <map>
@@ -312,10 +313,27 @@ static void capture_one(const Document &doc, Layer &ref)
            "or rearranged here (Break Reference to change its drawing)");
   }
   else {
+    /* What it shows built again from its original now. An edit that moved the original's points too (both picked, or a
+     * group with Edit Descendants moved) has already moved the copy's that way: the offset is only what is left to
+     * where the edit put them, or they would move twice. */
+    std::optional<VectorDrawing> fresh;
+    const auto rebuilt = [&]() -> const VectorDrawing & {
+      if (!fresh) {
+        fresh = reference_build(doc, ref, false);
+      }
+      return *fresh;
+    };
+    const auto moved = [](float2 v) { return std::fabs(v.x) > 1e-7f || std::fabs(v.y) > 1e-7f; };
     for (size_t i = 0; i < d.points.size(); i++) {
       const MeshPoint &p = d.points[i];
-      const float2 delta = p.pos - rs.built_pos[i];
-      if (std::fabs(delta.x) > 1e-7f || std::fabs(delta.y) > 1e-7f) {
+      float2 delta = p.pos - rs.built_pos[i];
+      if (moved(delta)) {
+        const VectorDrawing &again = rebuilt();
+        if (i < again.points.size() && again.points[i].id == p.id) {
+          delta = p.pos - again.points[i].pos;
+        }
+      }
+      if (moved(delta)) {
         if (!rs.edit_points) {
           refuse("its points are locked: unlock them in the Reference tab (or the lock in the viewport header) to move them");
         }
@@ -370,9 +388,17 @@ static void capture_one(const Document &doc, Layer &ref)
         }
         /* Handles turned or lengthened (R or S on its points, or dragged): offsets, as points. */
         for (const bool in : {true, false}) {
-          const float2 delta = (in ? now.handle_in : now.handle_out) - (in ? was.handle_in : was.handle_out);
-          if (std::fabs(delta.x) <= 1e-7f && std::fabs(delta.y) <= 1e-7f) {
+          float2 delta = (in ? now.handle_in : now.handle_out) - (in ? was.handle_in : was.handle_out);
+          if (!moved(delta)) {
             continue;
+          }
+          /* Less what the original's handle did in the same edit, as for points. */
+          if (const VectorDrawing &again = rebuilt(); same_curves(again.curves, d.curves)) {
+            const CurvePoint &fresh_point = again.curves[c].points[i];
+            delta = (in ? now.handle_in : now.handle_out) - (in ? fresh_point.handle_in : fresh_point.handle_out);
+            if (!moved(delta)) {
+              continue;
+            }
           }
           if (!rs.edit_points) {
             refuse("its points are locked: unlock them in the Reference tab (or the lock in the viewport header) to change its handles");

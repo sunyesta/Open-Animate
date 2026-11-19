@@ -376,6 +376,8 @@ add_test(NAME bone_editing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_editing.py)
 add_test(NAME actions
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_actions.py)
+add_test(NAME reference_move_once
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_reference_move_once.py)
 add_test(NAME action_outside_keys
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_action_outside_keys.py)
 add_test(NAME action_bone_actions

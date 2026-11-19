@@ -6998,23 +6998,33 @@ static bool modal_collect(Context &C, Area &area, char kind, float2 mouse_docume
 {
   /* A reference's points move only when unlocked (Points: Editable), and never get new ones (Extrude). */
   std::vector<Layer *> layers;
-  bool held = false, held_picked = false;
+  std::vector<const Layer *> held_picked;
+  bool held = false;
   for (Layer *layer : editable_layers(C)) {
     if (layer->is_reference() && (!layer->reference.edit_points || kind == 'E')) {
       held = true;
       /* Some of its points (or handles) are selected: they can't come along. */
       const VectorDrawing &d = layer->drawing;
-      held_picked |= std::any_of(d.points.begin(), d.points.end(), [](const MeshPoint &p) { return p.selected; });
+      bool picked = std::any_of(d.points.begin(), d.points.end(), [](const MeshPoint &p) { return p.selected; });
       for (const Curve &curve : d.curves) {
-        held_picked |= std::any_of(curve.points.begin(), curve.points.end(),
-                                   [](const CurvePoint &cp) { return cp.select_in || cp.select_out; });
+        picked |= std::any_of(curve.points.begin(), curve.points.end(),
+                              [](const CurvePoint &cp) { return cp.select_in || cp.select_out; });
+      }
+      if (picked) {
+        held_picked.push_back(layer);
       }
       continue;
     }
     layers.push_back(layer);
   }
+  /* A locked copy moved with its original (a group with Edit Descendants moved, both picked) goes with it, once: nothing
+   * to say about it. */
+  std::erase_if(held_picked, [&](const Layer *ref) {
+    return kind != 'E' && std::any_of(layers.begin(), layers.end(),
+                                      [&](const Layer *l) { return l->id == ref->reference_source; });
+  });
   /* Said whenever a copy's selected points stay put, even while other layers' points move. */
-  if (held_picked || (layers.empty() && held)) {
+  if (!held_picked.empty() || (layers.empty() && held)) {
     if (kind == 'E') {
       report_banner(ReportType::Warning, "A copy (reference layer) can't get new points: Break Reference to change its drawing");
     }

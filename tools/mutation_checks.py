@@ -41,6 +41,9 @@ PENDING = [
     ('src/anim/animation.cc', '      keyable[i] = inside.contains(flat[i]);', '      keyable[i] = true;', "In an action, layers outside its bone layer aren't auto-keyed", 'tests/test_action_outside_keys.py'),
     ('src/ops/anim_ops.cc', '      return l == &doc.camera || l == &doc.simulation || !layer_keys_editable(doc, l->id);', '      return l == nullptr;', "In an action, the timeline leaves out layers outside its bone layer", 'tests/test_action_outside_keys.py'),
     ('src/ops/anim_ops.cc', '!layer->locked && layer_keys_editable(doc, layer->id)) {', '!layer->locked) {', "In an action, I and Alt I key nothing outside its bone layer", 'tests/test_action_outside_keys.py'),
+    ('src/anim/reference.cc', '          delta = p.pos - again.points[i].pos;', '          delta = p.pos - rs.built_pos[i];', "A reference's points moved with its original's move once", 'tests/test_reference_move_once.py'),
+    ('src/anim/reference.cc', '          if (const VectorDrawing &again = rebuilt(); same_curves(again.curves, d.curves)) {', '          if (const VectorDrawing &again = rebuilt(); false && same_curves(again.curves, d.curves)) {', "A reference's handles turned with its original's turn once", 'tests/test_reference_move_once.py'),
+    ('src/editors/viewport.cc', "    return kind != 'E' && std::any_of(layers.begin(), layers.end(),", "    return false && kind != 'E' && std::any_of(layers.begin(), layers.end(),", "A locked reference moved with its original isn't reported locked", 'tests/test_reference_move_once.py'),
 ]
 
 def build(root):
