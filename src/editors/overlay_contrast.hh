@@ -112,6 +112,9 @@ bool bone_press_test(Context &C, float2 at, float zoom, bool transform_tool, boo
 bool bone_rotate_drag_begin_test(Context &C, float2 at);
 bool bone_rotate_drag_update_test(Context &C, float degrees);
 bool bone_rotate_drag_end_test(Context &C, float degrees, bool confirm);
+bool bone_drag_begin_test(Context &C, float2 at, float zoom);
+bool bone_drag_update_test(Context &C, float2 to, bool alt);
+bool bone_drag_end_test(Context &C, float2 to, bool confirm);
 /* Properties' Selected Points (properties.cc): what it shows (the Drawing tab's drawings with a bone layer worked in,
  * else the drawings being edited), and a Transform field ("x", "y", "rotation", "scale_x", "scale_y") dragged through
  * `values`, each update shown from the drawings as the drag began, `during` after each but the last, which is let go

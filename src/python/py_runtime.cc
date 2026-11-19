@@ -1760,6 +1760,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
     });
   });
+  m.def("bone_drag_begin", [](float x, float y, float zoom) { return bone_drag_begin_test(current_context(), {x, y}, zoom); });
+  m.def("bone_drag_update", [](float x, float y, bool alt) { return bone_drag_update_test(current_context(), {x, y}, alt); });
+  m.def("bone_drag_end", [](float x, float y, bool confirm) { return bone_drag_end_test(current_context(), {x, y}, confirm); });
   m.def("bone_rotate_drag_begin", [](float x, float y) { return bone_rotate_drag_begin_test(current_context(), {x, y}); });
   m.def("bone_rotate_drag_update", [](float degrees) { return bone_rotate_drag_update_test(current_context(), degrees); });
   m.def("bone_rotate_drag_end", [](float degrees, bool confirm) {

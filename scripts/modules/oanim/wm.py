@@ -721,6 +721,20 @@ def bone_rotate_drag(steps, confirm=True, at=(0.0, 0.0), during=None):
     return _oanim.bone_rotate_drag_end(last, bool(confirm))
 
 
+def bone_drag(at, steps, alt=False, zoom=100.0, confirm=True):
+    """Test hook: on the active bone layer, the Select tool's press at document point `at` dragged through each of
+    `steps` (document points) as G, `alt` held, then let go (or cancelled): the bone pressed on is picked alone first
+    unless it is already. False when the press takes no bone (empty space, or a point over a bone's body: a box or
+    the point's own drag)."""
+    if not _oanim.bone_drag_begin(float(at[0]), float(at[1]), float(zoom)):
+        return False
+    last = at
+    for s in steps:
+        last = s
+        _oanim.bone_drag_update(float(s[0]), float(s[1]), bool(alt))
+    return _oanim.bone_drag_end(float(last[0]), float(last[1]), bool(confirm))
+
+
 def bone_press(x, y, zoom=100.0, transform_tool=False, shift=False):
     """Test hook: on the active bone layer, the Select tool's press at document point (x, y) on a controller's knob
     (True when it was on one; the drag after is left out), or with transform_tool the Transform tool's click on its

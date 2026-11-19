@@ -158,6 +158,17 @@ PENDING = [
      'a straight bone keys no curve', 'tests/test_bendy_bones.py'),
     ('src/anim/bone_curve.cc', '      return true;\n    }\n    x = chain_parent(armature, size_t(x));', '      return true;\n    }\n    x = bone_curve_parent(armature, size_t(x));',
      "a drawing's chain runs on through straight bones", 'tests/test_bendy_bones.py'),
+    # The Select tool drags bones (press on a bone, drag: G; posing, a tip drags the tip).
+    ('src/editors/viewport.cc', '    if (on_tip && !(bone->selected && others)) {\n', '    if (false && on_tip && !(bone->selected && others)) {\n',
+     'posing, a tip pressed drags the tip (Alt stretching it to the mouse)', 'tests/test_bone_drag.py'),
+    ('src/editors/viewport.cc', '    if (on_tip && !(bone->selected && others)) {\n', '    if (on_tip && !(false && others)) {\n',
+     'a tip pressed as one of several bones picked brings them all', 'tests/test_bone_drag.py'),
+    ('src/editors/viewport.cc', '  bone_tip_drag_done(*C.document, bm.tip);\n}\n', '  (void)bm.tip;\n}\n',
+     "a posed bone's tip dragged: the bone picked whole again", 'tests/test_bone_drag.py'),
+    ('src/editors/viewport.cc', '  if (hit.hit.part == BonePart::Body && select_press_grab(C, view, mouse, false).layer) {\n', '  if (false && hit.hit.part == BonePart::Body && select_press_grab(C, view, mouse, false).layer) {\n',
+     "a point over a bone's body takes the press, not the bone", 'tests/test_bone_drag.py'),
+    ('src/editors/viewport.cc', '    bone_click_select(owner, hit.hit, false);\n    if (owner.id != armature.id', '    if (owner.id != armature.id',
+     'an unpicked bone pressed and dragged is picked alone first', 'tests/test_bone_drag.py'),
 ]
 
 def build(root):
