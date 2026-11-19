@@ -251,6 +251,9 @@ PENDING = [
     ('src/anim/deform.cc', '\n      else if (modifier_on(m, render) && m.type == ModifierType::Resample) {\n',
      '\n      else if (false && modifier_on(m, render) && m.type == ModifierType::Resample) {\n',
      'a reference\'s rest shows its own Resample', 'tests/test_cage_reference_resample.py'),
+    ('src/data/bones.cc', 'layer.modifiers.insert(std::find_if(layer.modifiers.begin(), layer.modifiers.end(),',
+     'layer.modifiers.insert(std::find_if(layer.modifiers.end(), layer.modifiers.end(),',
+     'a drawing moved into a bone layer gets its Armature above its deforms', 'tests/test_armature_above_deform.py'),
 ]
 
 def build(root):

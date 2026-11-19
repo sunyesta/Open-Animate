@@ -610,6 +610,8 @@ add_test(NAME deform_handle_drag_corner
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_deform_handle_drag_corner.py)
 add_test(NAME cage_reference_resample
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_cage_reference_resample.py)
+add_test(NAME armature_above_deform
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_armature_above_deform.py)
 add_test(NAME bone_tab_drawing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_tab_drawing.py)
 add_test(NAME controller_step_end

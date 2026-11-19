@@ -3815,7 +3815,12 @@ static bool sync_in(std::vector<Layer> &list, bool inside)
         Modifier armature;
         armature.type = ModifierType::Armature;
         armature.name = "Armature";
-        layer.modifiers.push_back(armature);
+        /* Above the deforms it already has, as if they had been added inside the bone layer: a deform measures from
+         * the drawing as it was before the bones, so the shape's movement counts once. Below them the bones moved
+         * what the shape had already carried along with them a second time. */
+        layer.modifiers.insert(std::find_if(layer.modifiers.begin(), layer.modifiers.end(),
+                                            [](const Modifier &m) { return modifier_is_deform(m.type); }),
+                               armature);
         changed = true;
       }
       else if (!inside && count > 0) {
