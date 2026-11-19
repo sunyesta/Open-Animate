@@ -3014,6 +3014,20 @@ void rig_operators_register()
                    set_chain = true;
                    chain_end = bone_find(*rig, end)->name;
                  }
+                 /* A bone named that a layer's rig hasn't refuses before anything changes (Keep Animation looks
+                  * through every action, which a refusal after it left changed with no undo step). */
+                 if (!name.empty()) {
+                   for (Layer *layer : keyed_layers(C)) {
+                     const Layer *armature = layer_armature(*C.document, layer->id);
+                     if (armature && !layer->is_bone_layer() &&
+                         !(layer->is_reference() && layer->reference.match_original) &&
+                         !bone_find_by_name(*armature, name))
+                     {
+                       report(ReportType::Warning, "No bone named " + name);
+                       return OpStatus::Cancelled;
+                     }
+                   }
+                 }
                  int changed = 0, same_as_original = 0, locked = 0;
                  /* Keep Animation: where each layer showed on the frames that matter, before its bone
                   * changes (worked out frame by frame, then the frame put back). */

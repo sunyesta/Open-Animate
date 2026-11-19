@@ -56,6 +56,11 @@ PENDING = [
     ('src/ops/rig_ops.cc', '            p.head = p.setup_head;\n            p.tail = p.setup_tail;\n            p.setup_head = was.setup_head;\n            p.setup_tail = was.setup_tail;',
      '',
      "Apply Pose as Rest's change poses run from the old rest to the new", 'tests/test_apply_rest_curve.py'),
+    ('src/ops/mask_ops.cc', '        edits.emplace_back(live, *live);\n        LayerMask *card = &edits.back().second;', '        LayerMask *card = live;', 'Change Mask refusing a setting changes none', 'tests/test_cancel_changes_nothing.py'),
+    ('src/ops/mask_ops.cc', '          targets.front()->masks = was;', '          (void)was;', 'Convert Masking Areas refusing a row puts back the rows before it', 'tests/test_cancel_changes_nothing.py'),
+    ('src/ops/mask_ops.cc', '      if (status != OpStatus::Finished) {', '      if (false && status != OpStatus::Finished) {', 'Clip to Below changing nothing puts Exclude Strokes back', 'tests/test_cancel_changes_nothing.py'),
+    ('src/ops/driver_ops.cc', '                            Driver edited = *d;', '                            Driver &edited = *d;', 'Change Driver refusing a setting changes none', 'tests/test_cancel_changes_nothing.py'),
+    ('src/ops/rig_ops.cc', '                 if (!name.empty()) {\n                   for (Layer *layer : keyed_layers(C)) {', '                 if (false && !name.empty()) {\n                   for (Layer *layer : keyed_layers(C)) {', 'Parent Bone refuses a missing bone before Keep Animation looks through the actions', 'tests/test_cancel_changes_nothing.py'),
 ]
 
 def build(root):

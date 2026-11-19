@@ -700,15 +700,20 @@ void mask_operators_register()
       }
       int count = 0;
       std::string undo;
+      /* Each card changed on a copy, put back only once every argument is taken: one refused leaves them all as
+       * they were (a setting before it already written in, with no undo step, was a change Cancel didn't undo). */
+      std::vector<std::pair<LayerMask *, LayerMask>> edits;
       for (Layer *layer : mask_targets(C)) {
-        LayerMask *card = card_at(*layer, index);
-        if (!card || step_index < 0 || step_index >= int(card->steps.size())) {
+        LayerMask *live = card_at(*layer, index);
+        if (!live || step_index < 0 || step_index >= int(live->steps.size())) {
           continue;
         }
+        if (child >= int(live->steps[size_t(step_index)].children.size())) {
+          continue;
+        }
+        edits.emplace_back(live, *live);
+        LayerMask *card = &edits.back().second;
         MaskStep &top = card->steps[size_t(step_index)];
-        if (child >= int(top.children.size())) {
-          continue;
-        }
         MaskStep &step = child >= 0 ? top.children[size_t(child)] : top;
         const MaskMode was = step.mode;
         if (!mask_step_args(C, &step, step_index == 0) || !mask_card_args(C, card) || !mask_step_verb_arg(C, step)) {
@@ -733,6 +738,9 @@ void mask_operators_register()
       }
       if (count == 0) {
         return OpStatus::Cancelled;
+      }
+      for (auto &[live, edited] : edits) {
+        *live = std::move(edited);
       }
       C.undo_name = undo;
       return OpStatus::Finished;
@@ -942,12 +950,21 @@ void mask_operators_register()
         C.undo_name = exclude ? "Clip Excluding Strokes" : "Clip Including Strokes";
         return OpStatus::Finished;
       }
+      /* Exclude Strokes with set=: as part of the clip, put back if the clip changes nothing. */
+      std::vector<std::pair<Layer *, bool>> was;
       if (op_has_arg(C, "exclude_strokes")) {
         for (Layer *layer : mask_targets(C)) {
+          was.emplace_back(layer, layer->clip_exclude_strokes);
           layer->clip_exclude_strokes = op_arg_bool(C, "exclude_strokes");
         }
       }
-      return clip_to_below(C, op_has_arg(C, "set") ? int(op_arg_bool(C, "set")) : -1);
+      const OpStatus status = clip_to_below(C, op_has_arg(C, "set") ? int(op_arg_bool(C, "set")) : -1);
+      if (status != OpStatus::Finished) {
+        for (const auto &[layer, exclude] : was) {
+          layer->clip_exclude_strokes = exclude;
+        }
+      }
+      return status;
     };
     operators().add(std::move(ot));
   }
@@ -1160,6 +1177,8 @@ void mask_operators_register()
       if (rows.empty() || targets.empty()) {
         return OpStatus::Cancelled;
       }
+      /* All the rows or none: one refused puts back those converted before it. */
+      const std::vector<LayerMask> was = targets.front()->masks;
       for (const int row : rows) {
         OpArgs args = {{"layer", std::to_string(targets.front()->id)}, {"index", op_arg(C, "index", "0")},
                        {"step", std::to_string(row >> 8)}, {"verb", op_arg(C, "verb")}};
@@ -1167,6 +1186,7 @@ void mask_operators_register()
           args["child"] = std::to_string((row & 0xff) - 1);
         }
         if (operator_call(C, "mask.set", args) != OpStatus::Finished) {
+          targets.front()->masks = was;
           return OpStatus::Cancelled;
         }
       }

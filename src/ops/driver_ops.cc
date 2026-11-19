@@ -259,18 +259,24 @@ void driver_operators_register()
                       "Change a field's drivers: any of `type`, `expression`, `vars`, `remap` (1/0), `from_min`, "
                       "`from_max`, `to_min`, `to_max`, `clamp`",
                       OPTYPE_REGISTER | OPTYPE_UNDO, [](Context &C) {
-                        int changed = 0;
+                        /* On copies, put back once every setting is taken: one refused (vars not JSON) leaves
+                         * each driver as it was, not with the settings before it written in. */
+                        std::vector<std::pair<Driver *, Driver>> edits;
                         for (const DriverRef &r : op_refs(C)) {
                           if (Driver *d = driver_find(*C.document, r)) {
-                            if (!apply_settings(C, *d)) {
+                            Driver edited = *d;
+                            if (!apply_settings(C, edited)) {
                               return OpStatus::Cancelled;
                             }
-                            changed++;
+                            edits.emplace_back(d, std::move(edited));
                           }
                         }
-                        if (changed == 0) {
+                        if (edits.empty()) {
                           report(ReportType::Warning, "That field has no driver");
                           return OpStatus::Cancelled;
+                        }
+                        for (auto &[d, edited] : edits) {
+                          *d = std::move(edited);
                         }
                         return drivers_changed(C);
                       });
