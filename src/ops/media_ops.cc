@@ -472,7 +472,10 @@ void media_operators_register()
         clip->start = std::max(op_arg_int(C, "start", clip->start), 1);
         clip->length = std::max(op_arg_int(C, "length", clip->length), 1);
         if (op_has_arg(C, "in_point")) {
-          clip->in = std::max(std::strtod(op_arg(C, "in_point").c_str(), nullptr), 0.0);
+          /* (nan or inf, as op_arg_float refuses them: the In as it was.) */
+          if (const double in = std::strtod(op_arg(C, "in_point").c_str(), nullptr); std::isfinite(in)) {
+            clip->in = std::max(in, 0.0);
+          }
         }
         const std::string end = op_arg(C, "end");
         if (!end.empty()) {

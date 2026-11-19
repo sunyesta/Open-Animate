@@ -7888,6 +7888,13 @@ static int clipboard_paste(const KeyClipboard &clipboard, const Document &doc, c
       }
     }
     const auto put = [&](auto &channel, const auto &keys, auto *value) {
+      /* Pasted as the setup pose: the keys after it hold changes from the setup when copied, taken from the setup now
+       * as the setup key is (Keep Poses then carries them on to the new one), so they show as copied, a second paste
+       * the same as the first. */
+      const ChangeSetup setup_now = change && owner && value && found->id == c.layer ? change_setup(*found, ref.path)
+                                                                                     : ChangeSetup{};
+      const bool setup_paste = setup_now.kind != ChangeSetup::None && setup_now.kind == c.setup.kind &&
+                               std::any_of(keys.begin(), keys.end(), [&](const auto &k) { return k.frame + offset == 0; });
       for (const auto &key : keys) {
         const int at = key.frame + offset;
         if (at < 0 || (at == 0 && knob)) {
@@ -7921,6 +7928,9 @@ static int clipboard_paste(const KeyClipboard &clipboard, const Document &doc, c
         placed = key;
         placed.frame = at;
         placed.selected = true;
+        if (setup_paste) {
+          placed.value = change_rebased(c.setup, setup_now, key.value);
+        }
         count++;
       }
     };

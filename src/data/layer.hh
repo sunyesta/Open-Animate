@@ -331,7 +331,11 @@ struct LayerMask {
     return name == o.name && start_shown == o.start_shown && steps == o.steps && enabled == o.enabled &&
            render == o.render &&
            cuts == o.cuts && end_lines == o.end_lines && end_lines_flat == o.end_lines_flat &&
-           line_reach == o.line_reach;
+           line_reach == o.line_reach &&
+           /* Its keys (undo and Move Keys see a change by them), not the channel's bookkeeping, which a card just made
+            * hasn't (Add Mask finds the same mask by this). */
+           line_reach_keys.keys == o.line_reach_keys.keys && line_reach_keys.actions == o.line_reach_keys.actions &&
+           line_reach_keys.action_setup == o.line_reach_keys.action_setup;
   }
 };
 

@@ -118,7 +118,7 @@ while probes keep reporting:
 - The frozen app in `<sweep>/bin/` is the build before the fixes: write the new test as `# --- ` sections that each
   build their own scene (shared helpers in the header), then run each section on its own against both builds (exec
   the header, then the section: `set OA_TEST=<test.py> & set OA_SEC=<n> & <exe> --background --python
-  scripts/section.py` prints `SECTION n PASS`). Every section should fail on the frozen copy and pass on the new build, which proves
+  scripts/section.py` prints `SECTION n PASS`; `__file__` is the test's, for tests that find `tests/data`). Name a new test after what it checks, and look that the name is free first (`ls tests/test_<name>.py`, `add_test(NAME <name>`): an earlier sweep's `test_timeline_sweep_fixes.py` was once written over, and CMake refuses a second test of one name. Every section should fail on the frozen copy and pass on the new build, which proves
   the tests without touching the source.
 - A test that passes with its fix undone tests nothing: undo the fix by hand once (`if (false && ...)`), rebuild and
   see the test fail before relying on it. Build its scene like the repro's (the eye file's Look At had an Eye Shape;

@@ -61,6 +61,9 @@ PENDING = [
     ('src/ops/mask_ops.cc', '      if (status != OpStatus::Finished) {', '      if (false && status != OpStatus::Finished) {', 'Clip to Below changing nothing puts Exclude Strokes back', 'tests/test_cancel_changes_nothing.py'),
     ('src/ops/driver_ops.cc', '                            Driver edited = *d;', '                            Driver &edited = *d;', 'Change Driver refusing a setting changes none', 'tests/test_cancel_changes_nothing.py'),
     ('src/ops/rig_ops.cc', '                 if (!name.empty()) {\n                   for (Layer *layer : keyed_layers(C)) {', '                 if (false && !name.empty()) {\n                   for (Layer *layer : keyed_layers(C)) {', 'Parent Bone refuses a missing bone before Keep Animation looks through the actions', 'tests/test_cancel_changes_nothing.py'),
+    ('src/data/layer.hh', '           line_reach_keys.keys == o.line_reach_keys.keys && line_reach_keys.actions == o.line_reach_keys.actions &&', '           true &&', "a mask's Reach keys count as a change", 'tests/test_reach_paste_clip.py'),
+    ('src/anim/animation.cc', '        if (setup_paste) {\n          placed.value', '        if (false && setup_paste) {\n          placed.value', 'Paste Keys on frame 0 twice changes nothing the second time', 'tests/test_reach_paste_clip.py'),
+    ('src/ops/media_ops.cc', 'nullptr); std::isfinite(in)) {', 'nullptr); true) {', "a clip's In point given nan or inf stays as it was", 'tests/test_reach_paste_clip.py'),
 ]
 
 def build(root):
