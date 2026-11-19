@@ -624,6 +624,8 @@ add_test(NAME cancel_changes_nothing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_cancel_changes_nothing.py)
 add_test(NAME reach_paste_clip
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_reach_paste_clip.py)
+add_test(NAME dynamics_end_frame
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_dynamics_end_frame.py)
 add_test(NAME bone_tab_drawing
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_bone_tab_drawing.py)
 add_test(NAME controller_step_end

@@ -860,14 +860,17 @@ bool simulate(const Document &doc, const Layer &armature, int frame,
     sim.start = start;
   }
   std::map<uint64_t, BoneDynamicsState> unused;
-  while (int(sim.frames.size()) < frame - start) {
+  /* Simulated to the scene's end frame and no further: past it a frame goes on one step from the end, so a far frame
+   * (or a key put on frame 1,000,000) costs what the end does, not a simulation of every frame on the way. */
+  const int upto = std::min(frame, std::max(start, doc.frame_end));
+  while (int(sim.frames.size()) < upto - start) {
     const int f = start + int(sim.frames.size());
     std::map<uint64_t, Motion> next =
         advance(doc, armature, f, false, sim.frames.empty() ? nullptr : &sim.frames.back(), unused);
     sim.frames.push_back(std::move(next));
   }
   /* The frame shown, live, on from the frame just before (the cache may hold later frames too). */
-  const int before = frame - start - 1;
+  const int before = upto - start - 1;
   sim.shown = advance(doc, armature, frame, true, before >= 0 ? &sim.frames[before] : nullptr, r_states);
   return true;
 }
