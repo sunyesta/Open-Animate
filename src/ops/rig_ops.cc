@@ -179,6 +179,7 @@ static void bone_symmetrize_settings(Document &doc, Layer &armature, const Bone 
   dst.inherit_rotation = src.inherit_rotation;
   dst.inherit_scale = src.inherit_scale;
   dst.local_location = src.local_location;
+  dst.keep_end_distance = src.keep_end_distance;
   dst.ik_ignore = src.ik_ignore;
   dst.arc_ik = src.arc_ik;
   dst.shape = src.shape;
@@ -702,6 +703,25 @@ static void register_ik_operators()
                  }
                  return armature_ik_clear_scale(armature, size_t(b - armature.bones.data())) ? OpStatus::Finished
                                                                                             : OpStatus::Cancelled;
+               });
+  rig_operator("armature.limit_angle_end_set", "Limit Angle",
+               "Turn the Min (end=MIN) or Max (end=MAX) of Limit Angle constraint `index` of bone `bone` (default: the "
+               "active bone) to point from the bone's head at x, y (the bone layer's units), as dragging an end of its "
+               "arc does; kept past the other end",
+               bone_layer_active, [](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 const std::string name = op_arg(C, "bone");
+                 const Bone *b = name.empty() ? bone_find(armature, armature.active_bone) : bone_find_by_name(armature, name);
+                 const int index = op_arg_int(C, "index", 0);
+                 if (!b || index < 0) {
+                   return OpStatus::Cancelled;
+                 }
+                 const float2 at(op_arg_float(C, "x", 0.0f), op_arg_float(C, "y", 0.0f));
+                 return armature_limit_end_toward(armature, size_t(b - armature.bones.data()), size_t(index),
+                                                  op_arg(C, "end", "MIN") == "MAX", at,
+                                                  C.document->frame_current == 0)
+                            ? OpStatus::Finished
+                            : OpStatus::Cancelled;
                });
   rig_operator("armature.ik_path_bend", "Bend IK Path",
                "Bend bone `bone`'s IK End's path (default: the active bone's) between the keys around frame `frame` "
@@ -3394,7 +3414,8 @@ void rig_operators_register()
                "only: its head onto the parent's tail), inherit_rotation (1 or 0), "
                "inherit_scale (FULL, UNIFORM or NONE), local_location (1 or 0: its Transform reads along it as it rests, "
                "or along its parent), follow_knob (1 or 0: under a 2 Axis Controller, hanging from its knob or riding the "
-               "box); for a 2 Axis Controller, knob_independent (1 or 0: the knob doesn't ride the box) and knob_parent "
+               "box), keep_end_distance (1 or 0: when its parent stretches, it stays as far from the parent's nearer "
+               "end); for a 2 Axis Controller, knob_independent (1 or 0: the knob doesn't ride the box) and knob_parent "
                "(a bone's name, \"\" for none: what carries an independent knob), setup frame only. keep_animation=1: every keyed frame of every action still shows the bone as it "
                "did (its angle and scale keyed back) after an Inherit change",
                bone_layer_active, [](Context &C) {
@@ -3476,6 +3497,15 @@ void rig_operators_register()
                    }
                    bone->controller_knob_independent = independent;
                    bone->controller_knob_parent = knob_parent;
+                   animation_evaluate(doc, doc.frame_current);
+                   return OpStatus::Finished;
+                 }
+                 if (op_has_arg(C, "keep_end_distance")) {
+                   const bool keep = op_arg_bool(C, "keep_end_distance");
+                   if (keep == bone->keep_end_distance) {
+                     return OpStatus::Cancelled;
+                   }
+                   bone->keep_end_distance = keep;
                    animation_evaluate(doc, doc.frame_current);
                    return OpStatus::Finished;
                  }

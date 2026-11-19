@@ -113,6 +113,28 @@ PENDING = [
      'keying a whole bone keys no bend where there is none', 'tests/test_ik_end.py'),
     ('src/data/bones.cc', '    c->bend_keys.remove_key(k0);\n', '    c->bend_keys.set_key(k0, bend);\n',
      'a straightened IK End path keeps no bend key', 'tests/test_ik_end.py'),
+    # IK Ends and IK Bases, stage 5: stretching, clears, end distance, Limit Angle ends.
+    ('src/data/bones.cc', '        position.x = position.x > 0.5f * l ? l + (position.x - l) / r : position.x / r;\n', '        (void)0;\n',
+     "a stretched bone's children keep their distance from its nearer end", 'tests/test_ik_end.py'),
+    ('src/io/oanim_file.cc', '    b.keep_end_distance = get_bool(bj, "end_distance", false);\n', '    b.keep_end_distance = get_bool(bj, "end_distance", true);\n',
+     "an older file's bones spread with a stretch, as they did", 'tests/test_ik_end.py'),
+    ('src/ops/rig_ops.cc', '                   bone->keep_end_distance = keep;\n', '                   (void)keep;\n',
+     'Keep End Distance turned off: the child spreads with the stretch', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '        b.scale.y *= length(d) / now;\n', '        (void)now;\n',
+     "Alt on a bone's tip stretches it to the mouse", 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '          p->scale.y *= want / now;\n', '          (void)want;\n',
+     "Alt on a connected bone's body: the parent stretches to reach it", 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '    how.stretch = stretch;\n', '    (void)stretch;\n',
+     'Alt moving the root: pinned chains stretch to hold', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '                       [&](size_t j) { return armature.bones[j].scale != original[j].scale; }))\n',
+     '                       [&](size_t) { return false; }))\n',
+     'Alt S on a pinned chain reaches back to the pin', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '  v = max ? std::max(v, c.min_angle + 0.05f) : std::min(v, c.max_angle - 0.05f);\n', '  (void)0;\n',
+     'a Limit Angle end is kept short of the other', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '  float v = end + wrap_pi(std::atan2(d.y, d.x) - armature_limit_zero(armature, poses, i, setup_frame) - end);\n', '  float v = wrap_pi(std::atan2(d.y, d.x) - armature_limit_zero(armature, poses, i, setup_frame));\n',
+     'a Limit Angle end turns the nearest way round from where it is', 'tests/test_ik_end.py'),
+    ('src/data/bones.cc', '  return bone_parent_axes_angle(bone, parent, setup_frame) + bone.setup_angle;\n', '  (void)parent;\n  return bone.setup_angle;\n',
+     "a Limit Angle's arc is measured from its parent's axes", 'tests/test_ik_end.py'),
 ]
 
 def build(root):

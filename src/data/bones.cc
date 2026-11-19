@@ -712,6 +712,13 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
         position = setup_position;
       }
     }
+    /* On a parent stretched along its length: as far from its nearer end as it rests, not spread with the stretch. */
+    if (!setup_frame && pi >= 0 && pi != i && bone.keep_end_distance && !bone_is_controller(bones[pi]) && !rests) {
+      const float r = poses[pi].stretch, l = bones[pi].length;
+      if (std::abs(r - 1.0f) > 1e-7f && std::abs(r) > 1e-6f && l > 1e-9f) {
+        position.x = position.x > 0.5f * l ? l + (position.x - l) / r : position.x / r;
+      }
+    }
     p.pose = bone_on_parent(bone, parent_pose, parent_setup, bone_local_xy(position, angle, scale.y * sx, scale.x * sy), setup_frame);
     if (!setup_frame) {
       /* Pointing at another bone: after the rest, from where this bone has ended up. */
@@ -780,6 +787,7 @@ static std::vector<BonePose> bones_pose(const std::vector<Bone> &bones, bool set
     p.setup_tail = p.setup.apply({bone.length, 0});
     p.head = p.pose.apply({0, 0});
     p.tail = p.pose.apply({bone.length, 0});
+    p.stretch = !setup_frame && !rests && std::abs(setup_scale.y) > 1e-6f ? scale.y * sx / setup_scale.y : 1.0f;
     if (rests) {
       /* The knob moves and turns what hangs from it, as a pin would: the box stays. */
       float2 frames = bone.controller_knob_editing ? bone.controller_knob_edit_at :
@@ -1736,7 +1744,8 @@ bool armature_ik_reach(Layer &armature, size_t i, BoneConstraintType type, float
   return true;
 }
 
-void armature_ik_hold(Layer &armature, const std::vector<Bone> &original, size_t skip, BoneConstraintType skip_type)
+void armature_ik_hold(Layer &armature, const std::vector<Bone> &original, size_t skip, BoneConstraintType skip_type,
+                      bool stretch)
 {
   if (armature.pose_frame == 0 || original.size() != armature.bones.size()) {
     return;
@@ -1800,8 +1809,36 @@ void armature_ik_hold(Layer &armature, const std::vector<Bone> &original, size_t
     }
     IKReach how;
     how.soft = false;
+    how.stretch = stretch;
     armature_ik_reach(armature, h.bone, h.type, goal, how);
   }
+}
+
+void armature_ik_clear_hold(Layer &armature, const std::vector<Bone> &original, bool scale)
+{
+  if (armature.pose_frame == 0 || original.size() != armature.bones.size()) {
+    return;
+  }
+  if (scale) {
+    const std::vector<BonePose> was = bones_full_pose(original, false, armature.pose_frame, nullptr);
+    for (size_t i = 0; i < armature.bones.size(); i++) {
+      const BoneConstraint *c = bone_ik_end(armature.bones[i]);
+      if (!c || !c->enabled || c->pin == IK_PIN_NONE) {
+        continue;
+      }
+      const std::vector<size_t> chain = armature_ik_chain(armature, i, BoneConstraintType::IKEnd);
+      if (std::none_of(chain.begin(), chain.end(),
+                       [&](size_t j) { return armature.bones[j].scale != original[j].scale; }))
+      {
+        continue;
+      }
+      IKReach how;
+      how.soft = false;
+      armature_ik_reach(armature, i, BoneConstraintType::IKEnd, armature_ik_point(armature, was, i, BoneConstraintType::IKEnd),
+                        how);
+    }
+  }
+  armature_ik_hold(armature, original, armature.bones.size(), BoneConstraintType::IKEnd);
 }
 
 /* Why IK End `end` (a bone) can't be pinned to bone `to` ("" when it can): a bone its chain moves would carry its own
@@ -1944,6 +1981,41 @@ float2 armature_ik_point_at(const Layer &armature, size_t i, int frame)
   copy.bones = std::move(at);
   const std::vector<BonePose> poses = bones_full_pose(copy.bones, frame == 0, frame, nullptr);
   return armature_ik_point(copy, poses, i, BoneConstraintType::IKEnd);
+}
+
+float armature_limit_zero(const Layer &armature, const std::vector<BonePose> &poses, size_t i, bool setup_frame)
+{
+  const Bone &bone = armature.bones[i];
+  const BonePose *parent = bone_pose_find(poses, bone.parent);
+  BonePose outer;
+  outer.setup = bone.outer_setup;
+  outer.pose = bone.outer_pose;
+  parent = !parent && bone.outer_bone != 0 ? &outer : parent;
+  return bone_parent_axes_angle(bone, parent, setup_frame) + bone.setup_angle;
+}
+
+bool armature_limit_end_toward(Layer &armature, size_t i, size_t index, bool max, float2 at, bool setup_frame)
+{
+  if (i >= armature.bones.size() || index >= armature.bones[i].constraints.size() ||
+      armature.bones[i].constraints[index].type != BoneConstraintType::LimitAngle)
+  {
+    return false;
+  }
+  const std::vector<BonePose> poses = armature_pose(armature, setup_frame);
+  const float2 d = at - poses[i].head;
+  if (!(length(d) > 1e-9f)) {
+    return false;
+  }
+  BoneConstraint &c = armature.bones[i].constraints[index];
+  float &end = max ? c.max_angle : c.min_angle;
+  float v = end + wrap_pi(std::atan2(d.y, d.x) - armature_limit_zero(armature, poses, i, setup_frame) - end);
+  v = max ? std::max(v, c.min_angle + 0.05f) : std::min(v, c.max_angle - 0.05f);
+  v = std::clamp(v, -2.0f * PI, 2.0f * PI);
+  if (v == end) {
+    return false;
+  }
+  end = v;
+  return true;
 }
 
 bool armature_ik_clear_scale(Layer &armature, size_t i)
@@ -2322,8 +2394,9 @@ static std::vector<float> turned_angles(const Layer &armature, const std::vector
 }
 
 void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, float2 delta, bool setup_frame,
-                            bool auto_ik)
+                            bool auto_ik, bool stretch)
 {
+  stretch = stretch && !setup_frame;
   const std::vector<float> was_turned = turned_angles(armature, original);
   armature.bones = original;
   const std::vector<BonePose> poses = armature_keyed_pose(armature, setup_frame);
@@ -2342,6 +2415,34 @@ void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, 
     Bone &b = armature.bones[i];
     const BonePose *parent = bone_pose_find(poses, b.parent);
     const Transform2D to_parent = parent ? parent->pose.inverted() : bone_outer_frame(b, setup_frame).inverted();
+    /* Alt on a connected bone's body: it moves whole, its parent turning and stretching to reach its new base, the
+     * bone keeping its angle in the scene. */
+    if (stretch && b.connected && (b.selected || b.select_head) && parent && !bone_is_controller(b)) {
+      Bone *p = bone_find(armature, b.parent);
+      if (p && !p->outer_carried && !bone_is_controller(*p)) {
+        const size_t pi = size_t(p - armature.bones.data());
+        const BonePose *grand = bone_pose_find(poses, p->parent);
+        const Transform2D to_grand = grand ? grand->pose.inverted() : bone_outer_frame(*p, false).inverted();
+        const float2 head = to_grand.apply(poses[pi].head), tail = to_grand.apply(poses[pi].tail);
+        const float2 goal = to_grand.apply(poses[i].head + delta);
+        const float now = distance(tail, head), want = distance(goal, head);
+        if (now > 1e-7f && want > 1e-7f) {
+          p->angle += wrap_pi(direction_angle(goal - head) - direction_angle(tail - head));
+          p->scale.y *= want / now;
+          /* Its way in the scene as it was (the parent's stretch skews what it carries, so tried and corrected). */
+          const float way = direction_angle(poses[i].tail - poses[i].head);
+          for (int pass = 0; pass < 4; pass++) {
+            const std::vector<BonePose> now_poses = armature_keyed_pose(armature, false);
+            const float off = wrap_pi(way - direction_angle(now_poses[i].tail - now_poses[i].head));
+            if (std::abs(off) < 1e-7f) {
+              break;
+            }
+            b.angle += off;
+          }
+        }
+        continue;
+      }
+    }
     if (whole && bone_is_controller(b) && !setup_frame) {
       controller_knob_move(b, poses[i], delta);
       continue;
@@ -2352,7 +2453,9 @@ void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, 
     }
     /* Posing by the tip with Auto IK: the chain above turns too, so the tip reaches the mouse
      * (Moho's IK). A connected bone grabbed by its body only turns itself. */
-    if (!setup_frame && auto_ik && b.select_tail && !b.selected && armature_reach(armature, b.id, poses[i].tail + delta)) {
+    if (!setup_frame && !stretch && auto_ik && b.select_tail && !b.selected &&
+        armature_reach(armature, b.id, poses[i].tail + delta))
+    {
       continue;
     }
     /* The tip follows the mouse: the bone turns about its base, and on the setup frame it also
@@ -2367,6 +2470,13 @@ void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, 
     if (setup_frame) {
       b.length = length(d) / std::max(std::abs(b.scale.y), 1e-6f);
     }
+    else if (stretch) {
+      /* Alt: the tip goes exactly to the mouse, the bone stretching. */
+      const float now = length(to_parent.apply(poses[i].tail) - b.position);
+      if (now > 1e-7f && length(d) > 1e-7f) {
+        b.scale.y *= length(d) / now;
+      }
+    }
   }
   /* Auto IK turns its chains by the shortest way from the start: the same whole turns as before. */
   for (size_t i = 0; i < armature.bones.size() && i < was_turned.size(); i++) {
@@ -2379,7 +2489,7 @@ void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, 
   }
   else {
     /* Pinned ends and bases the move left alone stay where they were. */
-    armature_ik_hold(armature, original, armature.bones.size(), BoneConstraintType::IKEnd);
+    armature_ik_hold(armature, original, armature.bones.size(), BoneConstraintType::IKEnd, stretch);
   }
 }
 

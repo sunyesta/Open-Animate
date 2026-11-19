@@ -43,6 +43,8 @@ struct BonePose {
   /* Where the bone runs in the setup pose and now (bone layer space). */
   float2 setup_head, setup_tail;
   float2 head, tail;
+  /* How far it is stretched along its length against its setup (posing; 1 unstretched). */
+  float stretch = 1.0f;
 };
 
 /* Every bone of a bone layer, in the order of `layer.bones`. `setup_frame`: the document is on
@@ -113,8 +115,12 @@ int armature_ik_chain_size(const Layer &armature, size_t i, BoneConstraintType t
 bool armature_ik_reach(Layer &armature, size_t i, BoneConstraintType type, float2 goal, const IKReach &how);
 /* After an edit off the setup frame: every pinned IK End and IK Base whose chain the edit left alone (not moved from
  * `original`) back where `original` showed it (an end pinned to a bone where that bone took it), bases first. The
- * point `skip` of `skip_type` is the one being moved. */
-void armature_ik_hold(Layer &armature, const std::vector<Bone> &original, size_t skip, BoneConstraintType skip_type);
+ * point `skip` of `skip_type` is the one being moved. `stretch` (Alt): a chain stretches to hold a point out of reach. */
+void armature_ik_hold(Layer &armature, const std::vector<Bone> &original, size_t skip, BoneConstraintType skip_type,
+                      bool stretch = false);
+/* After clearing the pose off the setup frame (Alt G / Alt R / Alt S) from `original`: a pinned IK End whose chain lost
+ * its scale (`scale`) reaches back to where it was; the pinned ends and bases left alone hold. */
+void armature_ik_clear_hold(Layer &armature, const std::vector<Bone> &original, bool scale);
 /* Why IK End `end` can't be pinned to bone `to` ("" when it can). */
 std::string armature_ik_pin_refusal(const Layer &armature, const Bone &end, const Bone &to);
 /* The frames bone `i`'s IK End's path runs between (its stretches): the setup frame, its keys and its chain's. */
@@ -133,6 +139,13 @@ bool armature_ik_bend_set(Layer &armature, size_t i, int frame, float2 bend, int
 float2 armature_ik_point_at(const Layer &armature, size_t i, int frame);
 /* Bone `i`'s IK End chain back to its setup size. */
 bool armature_ik_clear_scale(Layer &armature, size_t i);
+/* The angle (bone layer space) a Limit Angle on bone `i` measures its turn from: its parent's axes, as `poses` have
+ * them, plus its setup angle. Its Min and Max are this plus each. */
+float armature_limit_zero(const Layer &armature, const std::vector<BonePose> &poses, size_t i, bool setup_frame);
+/* Turn one end (Max, or Min) of Limit Angle `index` on bone `i` to point at `at` (bone layer space) from the bone's
+ * head, the nearest way round from where it is; kept 0.05 rad past the other end and within a turn either way. False:
+ * nothing changed (no such limit, `at` on the head). */
+bool armature_limit_end_toward(Layer &armature, size_t i, size_t index, bool max, float2 at, bool setup_frame);
 /* A bone's IK End or IK Base (enabled; null: none). */
 const BoneConstraint *bone_ik_end(const Bone &bone);
 const BoneConstraint *bone_ik_base(const Bone &bone);
@@ -199,8 +212,11 @@ float2 bone_position_at(const Bone &bone, int frame, bool without_action_bones);
 float bone_angle_at(const Bone &bone, int frame, bool without_action_bones);
 /* The bases of the picked bones (bone layer space), for the pivot shown while turning. */
 std::vector<float2> armature_picked_heads(const Layer &armature, bool setup_frame);
+/* `stretch` (Alt, posing): a grabbed tip goes exactly to the mouse, the bone stretching; a connected bone grabbed by
+ * its body moves whole, its parent turning and stretching to stay connected; pinned points out of reach stretch their
+ * chains to hold. */
 void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, float2 delta, bool setup_frame,
-                            bool auto_ik = false);
+                            bool auto_ik = false, bool stretch = false);
 void armature_rotate_selected(Layer &armature, const std::vector<Bone> &original, float angle,
                               bool setup_frame = false);
 /* S. On the setup frame it resizes the picked bones (their joints spread about the middle of

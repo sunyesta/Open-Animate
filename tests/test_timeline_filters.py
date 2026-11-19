@@ -61,8 +61,9 @@ assert ops.anim.timeline_filter(kinds="ALL", show="CHANGED") == {'FINISHED'}
 listed = names()
 assert "Position" in listed and "Opacity" not in listed and "arm" in listed, listed
 
-# Search: the letters in order, whatever their case; a bone's name finds its rows.
-assert ops.anim.timeline_filter(show="ANIMATED", search="lg") == {'FINISHED'}
+# Search: the letters in order, whatever their case; a bone's name finds its rows. ("lg" would also find a bone's
+# Curve Tail Angle.)
+assert ops.anim.timeline_filter(show="ANIMATED", search="lEg") == {'FINISHED'}
 listed = names()
 assert "leg" in listed and "arm" not in listed and "Position" not in listed, listed
 leg_at = listed.index("leg")

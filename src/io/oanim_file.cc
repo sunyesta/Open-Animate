@@ -952,6 +952,7 @@ static json layer_to_json(const Layer &layer)
       if (b.arc_ik) {
         bj["arc_ik"] = true;
       }
+      bj["end_distance"] = b.keep_end_distance;
       if (b.shape != BoneShape::None) {
         bj["shape"] = "CUSTOM";
       }
@@ -3173,6 +3174,7 @@ static Layer layer_from_json(const json &j, int depth)
     });
     b.ik_ignore = get_bool(bj, "ik_ignore", false);
     b.arc_ik = get_bool(bj, "arc_ik", false);
+    b.keep_end_distance = get_bool(bj, "end_distance", false);
     const std::string shape = bj.value("shape", std::string());
     b.shape = shape == "CUSTOM" ? BoneShape::Custom : BoneShape::None;
     /* Files from before keep pins as a shape: they are the Pin type now, drawn the same. */

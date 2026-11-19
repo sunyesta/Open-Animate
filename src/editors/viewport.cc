@@ -10461,6 +10461,8 @@ struct BoneModal {
   bool tweak = false;
   /* Ctrl on a controller's knob, as it stood when the drag ended. */
   bool knob_snap = false;
+  /* Alt held while moving (posing): bones and pinned chains stretch. */
+  bool stretch = false;
   /* Following Duplicate Bones (Shift D): it ends as that operator with the move, its Keyframes as given. */
   bool duplicate = false;
   std::string duplicate_keyframes = "0";
@@ -10903,6 +10905,11 @@ static void draw_controller(ImDrawList *dl, const Document &doc, const Layer &ar
   dl->AddText(corners[3] + ImVec2(2.0f, -ImGui::GetFontSize() - 2.0f), IM_COL32(0xff, 0xff, 0xff, 170), bone.name.c_str());
 }
 
+/* Limit Angle arcs (drawn with the bones; worked out with the IK points, further down). */
+static std::vector<size_t> limit_arc_bones(const Document &doc, const Layer &armature);
+static void draw_limit_arcs(ImDrawList *dl, const Document &doc, const Layer &armature, const ViewMapping &view,
+                            const std::vector<BonePose> &poses);
+
 static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armature, const ViewMapping &view,
                        bool ghost = false, bool highlight_selected = false)
 {
@@ -10970,9 +10977,7 @@ static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armatur
                   1.0f);
     }
   }
-  /* Limit Angle, as Moho shows it: a red line from the base at the smallest angle the bone may
-   * turn to and one at the largest, for the selected bones (relative to the parent as it is
-   * posed). */
+  /* Look At and Limit to Shape for the selected bones; Limit Angle's arcs for the bones limit_arc_bones picks. */
   if (!ghost) {
     const Transform2D to_document = layer_world_transform(doc, armature.id);
     const std::vector<BonePose> poses = g_keyed_bones ? armature_keyed_pose(armature, doc.frame_current == 0)
@@ -11007,26 +11012,9 @@ static void draw_bones(ImDrawList *dl, const Document &doc, const Layer &armatur
           }
           dl->AddPolyline(line.data(), int(line.size()), IM_COL32(0xe8, 0x20, 0x20, 200), ImDrawFlags_Closed, 1.5f);
         }
-        if (c.type != BoneConstraintType::LimitAngle || !c.enabled) {
-          continue;
-        }
-        const BonePose *parent = bone_pose_find(poses, bone.parent);
-        BonePose outer;
-        outer.setup = bone.outer_setup;
-        outer.pose = bone.outer_pose;
-        parent = !parent && bone.outer_bone != 0 ? &outer : parent;
-        /* From the axes its angle is measured in: its parent's, as they rest if it doesn't inherit
-         * their turn (Relations). */
-        const float base = bone_parent_axes_angle(bone, parent, doc.frame_current == 0);
-        const float reach = std::max(distance(poses[i].head, poses[i].tail), 1e-4f);
-        for (const float limit : {c.min_angle, c.max_angle}) {
-          const float a = base + bone.setup_angle + limit;
-          const float2 end = poses[i].head + float2(std::cos(a), std::sin(a)) * reach;
-          dl->AddLine(view.to_screen(to_document.apply(poses[i].head)), view.to_screen(to_document.apply(end)),
-                      IM_COL32(0xe8, 0x20, 0x20, 230), 1.5f);
-        }
       }
     }
+    draw_limit_arcs(dl, doc, armature, view, poses);
   }
   for (int pass = 0; pass < 2; pass++) {
     for (size_t i = 0; i < armature.bones.size(); i++) {
@@ -12234,6 +12222,9 @@ static void bone_modal_confirm(Context &C, float2 delta, float degrees, float fa
     args["move_x"] = num_arg(delta.x);
     args["move_y"] = num_arg(delta.y);
     args["knob_snap"] = bm.knob_snap ? "1" : "0";
+    if (bm.stretch) {
+      args["stretch"] = "1";
+    }
     operator_call(C, "armature.translate", args);
   }
   else if (bm.kind == 'R') {
@@ -12400,10 +12391,13 @@ static std::string bone_modal_update(Context &C, const ViewMapping &view)
     else if (bm.axis == 2) {
       delta.x = 0.0f;
     }
+    /* Alt: bones stretch (a tip goes to the mouse, a connected bone moves whole), pinned chains too. */
+    bm.stretch = io.KeyAlt && !bm.setup_frame;
     armature_grab_selected(*armature, g_bone_modal.bones, g_bone_modal.to_armature.apply_vector(delta),
-                           g_bone_modal.setup_frame, C.wm->tool_settings.auto_ik);
+                           g_bone_modal.setup_frame, C.wm->tool_settings.auto_ik, bm.stretch);
     for_also([&](Layer &l, BoneModal::Also &also) {
-      armature_grab_selected(l, also.bones, also.to_armature.apply_vector(delta), bm.setup_frame, C.wm->tool_settings.auto_ik);
+      armature_grab_selected(l, also.bones, also.to_armature.apply_vector(delta), bm.setup_frame,
+                             C.wm->tool_settings.auto_ik, bm.stretch);
     });
     bm.knob_snap = snap && !bm.setup_frame;
     if (bm.knob_snap) {
@@ -14546,7 +14540,8 @@ static OpStatus bones_transform_exec(Context &C, char kind)
     Layer *armature = m.armature;
     const std::vector<Bone> &start = m.start;
     if (kind == 'G') {
-      armature_grab_selected(*armature, start, m.to_armature.apply_vector(move), setup, C.wm->tool_settings.auto_ik);
+      armature_grab_selected(*armature, start, m.to_armature.apply_vector(move), setup, C.wm->tool_settings.auto_ik,
+                             op_arg_bool(C, "stretch"));
       if (op_arg_bool(C, "knob_snap")) {
         armature_snap_knobs(*armature);
       }
@@ -14701,6 +14696,8 @@ static OpStatus bones_clear_exec(Context &C, int kind)
     if (without_children) {
       armature_keep_children(*armature, start, false);
     }
+    /* Pinned points: a chain cleared of its scale reaches back to its pin; those left alone hold. */
+    armature_ik_clear_hold(*armature, start, kind == 2);
   }
   if (!any) {
     return OpStatus::Cancelled;
@@ -15371,8 +15368,12 @@ static void transform_operators_register()
   add("armature.translate", "Move Bones",
       "Move the selected bones by move_x, move_y (document space; as G does). Posing, only_bones=1 keeps the "
       "drawings where they are (posing=1 shows it in the panel)",
-      {move_x, move_y, only_bones_option(), without_children_option(), keep_bones}, bones_poll,
-      [](Context &C) { return bones_transform_exec(C, 'G'); });
+      {move_x, move_y, only_bones_option(), without_children_option(), keep_bones,
+       op_bool_property("stretch", "Stretch",
+                        "Posing (Alt while moving): a grabbed tip goes exactly there, the bone stretching; a connected "
+                        "bone moves whole, its parent turning and stretching; pinned chains stretch to hold",
+                        "0")},
+      bones_poll, [](Context &C) { return bones_transform_exec(C, 'G'); });
   add("armature.rotate", "Rotate Bones", "Turn the selected bones by angle= degrees (as R does); only_bones= as Move Bones",
       {angle, only_bones_option(), without_children_option(), keep_bones}, bones_poll,
       [](Context &C) { return bones_transform_exec(C, 'R'); });
@@ -16647,6 +16648,253 @@ static std::vector<IKPoint> ik_points(const Layer &armature)
   return out;
 }
 
+/* Limit Angle as an arc at the bone's head, green between its Min and Max, with a line where the bone turns now (red at
+ * an end). Its ends are dragged on the setup frame. */
+static constexpr ImU32 COL_LIMIT = IM_COL32(0x6f, 0xbf, 0x73, 255), COL_LIMIT_FILL = IM_COL32(0x6f, 0xbf, 0x73, 41);
+static constexpr float LIMIT_ARC_RADIUS = 24.0f, LIMIT_END_RADIUS = 4.0f;
+
+/* Dragging an end of a Limit Angle's arc: the limits as it began (Esc puts them back). */
+static struct {
+  bool active = false, moved = false, max = false;
+  uint64_t layer = 0;
+  size_t bone = 0, index = 0;
+  float was_min = 0.0f, was_max = 0.0f;
+  ImVec2 press;
+} g_limit_drag;
+
+/* The bones whose Limit Angle arcs show: the one dragged; while an IK dot is dragged, its chain and the bones hanging
+ * from its end; while bones are moved, turned or scaled, those and their children; else on the setup frame the active
+ * bone, picked alone. */
+static std::vector<size_t> limit_arc_bones(const Document &doc, const Layer &armature)
+{
+  std::vector<size_t> out;
+  const std::vector<Bone> &bones = armature.bones;
+  const auto add = [&](size_t i) {
+    if (i < bones.size() && std::find(out.begin(), out.end(), i) == out.end()) {
+      out.push_back(i);
+    }
+  };
+  const auto add_children = [&](size_t i) {
+    for (size_t j = 0; j < bones.size(); j++) {
+      if (bones[j].parent == bones[i].id) {
+        add(j);
+      }
+    }
+  };
+  if (g_limit_drag.active && g_limit_drag.layer == armature.id) {
+    add(g_limit_drag.bone);
+    return out;
+  }
+  if (g_ik_drag.active && g_ik_drag.layer == armature.id) {
+    if (g_ik_drag.point.type == BoneConstraintType::IKEnd) {
+      const std::vector<size_t> chain = armature_ik_chain(armature, g_ik_drag.point.bone, BoneConstraintType::IKEnd);
+      for (const size_t b : chain) {
+        add(b);
+      }
+      if (!chain.empty()) {
+        add_children(chain.front());
+      }
+    }
+    return out;
+  }
+  if (g_bone_modal.active && g_bone_modal.armature == armature.id) {
+    for (size_t i = 0; i < bones.size(); i++) {
+      if (bone_picked(bones[i])) {
+        add(i);
+        add_children(i);
+      }
+    }
+    return out;
+  }
+  if (doc.frame_current != 0 || doc.active_layer != armature.id || ik_picked_end(doc, armature)) {
+    return out;
+  }
+  size_t picked = 0, at = 0;
+  for (size_t i = 0; i < bones.size(); i++) {
+    if (bone_picked(bones[i])) {
+      picked++;
+      at = i;
+    }
+  }
+  if (picked == 1 && bones[at].id == armature.active_bone) {
+    add(at);
+  }
+  return out;
+}
+
+/* On screen, `r` pixels from the head (at `head_screen`) the way angle `a` (bone layer space) points. */
+static ImVec2 limit_arc_at(const Transform2D &to_document, const ViewMapping &view, float2 head, ImVec2 head_screen,
+                           float a, float r)
+{
+  const ImVec2 s = view.to_screen(to_document.apply(head + float2(std::cos(a), std::sin(a))));
+  const float dx = s.x - head_screen.x, dy = s.y - head_screen.y, l = std::hypot(dx, dy);
+  return l > 1e-6f ? ImVec2(head_screen.x + dx / l * r, head_screen.y + dy / l * r) : head_screen;
+}
+
+/* Where the ends of Limit Angle `k` on bone `i` are drawn: Min, then Max. */
+static std::pair<ImVec2, ImVec2> limit_arc_ends(const Document &doc, const Layer &armature, const ViewMapping &view,
+                                                const std::vector<BonePose> &poses, size_t i, size_t k)
+{
+  const Transform2D to_document = layer_world_transform(doc, armature.id);
+  const float zero = armature_limit_zero(armature, poses, i, doc.frame_current == 0);
+  const float2 head = poses[i].head;
+  const ImVec2 hs = view.to_screen(to_document.apply(head));
+  const BoneConstraint &c = armature.bones[i].constraints[k];
+  return {limit_arc_at(to_document, view, head, hs, zero + c.min_angle, LIMIT_ARC_RADIUS),
+          limit_arc_at(to_document, view, head, hs, zero + c.max_angle, LIMIT_ARC_RADIUS)};
+}
+
+/* The ends are dragged on the setup frame, while nothing else is. */
+static bool limit_ends_shown(const Document &doc)
+{
+  return doc.frame_current == 0 && !g_ik_drag.active && !g_bone_modal.active;
+}
+
+static void draw_limit_arcs(ImDrawList *dl, const Document &doc, const Layer &armature, const ViewMapping &view,
+                            const std::vector<BonePose> &poses)
+{
+  const std::vector<size_t> shown = limit_arc_bones(doc, armature);
+  const bool setup = doc.frame_current == 0;
+  const Transform2D to_document = layer_world_transform(doc, armature.id);
+  for (const size_t i : shown) {
+    if (i >= poses.size()) {
+      continue;
+    }
+    const Bone &bone = armature.bones[i];
+    for (size_t k = 0; k < bone.constraints.size(); k++) {
+      const BoneConstraint &c = bone.constraints[k];
+      if (c.type != BoneConstraintType::LimitAngle || !c.enabled) {
+        continue;
+      }
+      const float zero = armature_limit_zero(armature, poses, i, setup);
+      const float lo = std::min(c.min_angle, c.max_angle), hi = std::max(c.min_angle, c.max_angle);
+      const float2 head = poses[i].head;
+      const ImVec2 hs = view.to_screen(to_document.apply(head));
+      const int n = std::clamp(int((hi - lo) / 0.08f) + 1, 2, 160);
+      std::vector<ImVec2> line{hs};
+      for (int s = 0; s <= n; s++) {
+        line.push_back(limit_arc_at(to_document, view, head, hs, zero + lo + (hi - lo) * float(s) / float(n),
+                                    LIMIT_ARC_RADIUS));
+      }
+      for (size_t s = 1; s + 1 < line.size(); s++) {
+        dl->AddTriangleFilled(hs, line[s], line[s + 1], COL_LIMIT_FILL);
+      }
+      dl->AddPolyline(line.data(), int(line.size()), COL_LIMIT, ImDrawFlags_Closed, 1.0f);
+      /* Where it turns now, measured the nearest way round from the arc's middle. */
+      const float2 d = poses[i].tail - head;
+      if (length(d) > 1e-9f) {
+        const float mid = 0.5f * (lo + hi), raw = std::atan2(d.y, d.x) - zero;
+        const float turn = mid + (raw - mid) - 2.0f * PI * std::round((raw - mid) / (2.0f * PI));
+        const bool at_end = std::abs(turn - lo) < 0.02f || std::abs(turn - hi) < 0.02f;
+        dl->AddLine(hs, limit_arc_at(to_document, view, head, hs, zero + turn, LIMIT_ARC_RADIUS + 5.0f),
+                    at_end ? IM_COL32(0xe0, 0x6c, 0x6c, 255) : IM_COL32(0xff, 0xff, 0xff, 255), 1.5f);
+      }
+      const bool dragged = g_limit_drag.active && g_limit_drag.bone == i && g_limit_drag.index == k;
+      if (limit_ends_shown(doc) && (!g_limit_drag.active || dragged)) {
+        const auto [e0, e1] = limit_arc_ends(doc, armature, view, poses, i, k);
+        for (const ImVec2 e : {e0, e1}) {
+          dl->AddCircleFilled(e, LIMIT_END_RADIUS, COL_LIMIT);
+          dl->AddCircle(e, LIMIT_END_RADIUS, IM_COL32(0x1d, 0x1d, 0x1d, 255), 0, 1.0f);
+        }
+      }
+    }
+  }
+}
+
+struct LimitEnd {
+  size_t bone = 0, index = 0;
+  bool max = false;
+};
+
+static std::optional<LimitEnd> limit_end_under(const Document &doc, const Layer &armature, const ViewMapping &view,
+                                               ImVec2 mouse)
+{
+  if (!limit_ends_shown(doc)) {
+    return std::nullopt;
+  }
+  const std::vector<BonePose> poses = armature_pose(armature, doc.frame_current == 0);
+  std::optional<LimitEnd> best;
+  float nearest = LIMIT_END_RADIUS + 2.0f;
+  for (const size_t i : limit_arc_bones(doc, armature)) {
+    for (size_t k = 0; i < poses.size() && k < armature.bones[i].constraints.size(); k++) {
+      const BoneConstraint &c = armature.bones[i].constraints[k];
+      if (c.type != BoneConstraintType::LimitAngle || !c.enabled) {
+        continue;
+      }
+      const auto [e0, e1] = limit_arc_ends(doc, armature, view, poses, i, k);
+      for (const bool max : {false, true}) {
+        const ImVec2 e = max ? e1 : e0;
+        const float d = std::hypot(e.x - mouse.x, e.y - mouse.y);
+        if (d <= nearest) {
+          nearest = d;
+          best = LimitEnd{i, k, max};
+        }
+      }
+    }
+  }
+  return best;
+}
+
+/* Dragging an end of a Limit Angle's arc (setup frame): one undo step as it ends; Esc or a right-click puts it back. */
+static bool limit_arc_input(Context &C, Layer &armature, const ViewMapping &view, bool hovered)
+{
+  Document &doc = *C.document;
+  const ImGuiIO &io = ImGui::GetIO();
+  if (g_limit_drag.active) {
+    BoneConstraint *c = nullptr;
+    if (g_limit_drag.layer == armature.id && g_limit_drag.bone < armature.bones.size() &&
+        g_limit_drag.index < armature.bones[g_limit_drag.bone].constraints.size())
+    {
+      c = &armature.bones[g_limit_drag.bone].constraints[g_limit_drag.index];
+    }
+    if (!c || c->type != BoneConstraintType::LimitAngle || doc.frame_current != 0) {
+      g_limit_drag.active = false;
+      return false;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+      c->min_angle = g_limit_drag.was_min;
+      c->max_angle = g_limit_drag.was_max;
+      g_limit_drag.active = false;
+      return true;
+    }
+    const float dx = io.MousePos.x - g_limit_drag.press.x, dy = io.MousePos.y - g_limit_drag.press.y;
+    g_limit_drag.moved |= dx * dx + dy * dy > 9.0f;
+    if (g_limit_drag.moved) {
+      const float2 mouse = layer_world_transform(doc, armature.id).inverted().apply(view.to_document(io.MousePos));
+      armature_limit_end_toward(armature, g_limit_drag.bone, g_limit_drag.index, g_limit_drag.max, mouse, true);
+    }
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      g_limit_drag.active = false;
+      if (c->min_angle != g_limit_drag.was_min || c->max_angle != g_limit_drag.was_max) {
+        push_undo(C, "Limit Angle");
+      }
+    }
+    return true;
+  }
+  if (!hovered || io.KeyShift || io.KeyCtrl || ik_armature(C) != &armature) {
+    return false;
+  }
+  const std::optional<LimitEnd> end = limit_end_under(doc, armature, view, io.MousePos);
+  if (!end) {
+    return false;
+  }
+  if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    ImGui::SetTooltip("%s: %s", armature.bones[end->bone].name.c_str(), end->max ? "upper limit" : "lower limit");
+    return false;
+  }
+  const BoneConstraint &c = armature.bones[end->bone].constraints[end->index];
+  g_limit_drag = {};
+  g_limit_drag.active = true;
+  g_limit_drag.layer = armature.id;
+  g_limit_drag.bone = end->bone;
+  g_limit_drag.index = end->index;
+  g_limit_drag.max = end->max;
+  g_limit_drag.was_min = c.min_angle;
+  g_limit_drag.was_max = c.max_angle;
+  g_limit_drag.press = io.MousePos;
+  return true;
+}
+
 /* The picked IK End's path: each stretch between its frames, its point's place on every frame of it, worked out again
  * only when the bones change. */
 struct IKPathStretch {
@@ -17084,7 +17332,7 @@ static bool ik_point_input(Context &C, Layer &armature, const ViewMapping &view,
     how.flip = g_ik_drag.flip;
     how.stretch = io.KeyAlt;
     armature_ik_reach(armature, g_ik_drag.point.bone, g_ik_drag.point.type, goal, how);
-    armature_ik_hold(armature, g_ik_drag.was, g_ik_drag.point.bone, g_ik_drag.point.type);
+    armature_ik_hold(armature, g_ik_drag.was, g_ik_drag.point.bone, g_ik_drag.point.type, io.KeyAlt);
     return true;
   }
   if (!hovered || !ImGui::IsMouseClicked(ImGuiMouseButton_Left) || io.KeyShift || io.KeyCtrl ||
@@ -17131,7 +17379,9 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
     return;
   }
   /* An IK path's diamond, dot or ring pressed or dragged. */
-  if (ik_path_input(C, armature, view, hovered) || ik_point_input(C, armature, view, hovered)) {
+  if (limit_arc_input(C, armature, view, hovered) || ik_path_input(C, armature, view, hovered) ||
+      ik_point_input(C, armature, view, hovered))
+  {
     return;
   }
   /* Dragging a controller's corner on the setup frame: how far a frame is, so the corner stays under the mouse. */

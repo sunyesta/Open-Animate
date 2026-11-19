@@ -1052,6 +1052,20 @@ static void bone_relations_panel(Context &C, Layer &armature)
     }
   }
 
+  /* Its parent stretched (Alt, or scaled along its length): it keeps its distance from the parent's nearer end. */
+  active = bone_find(armature, own);
+  if (parent && !bone_is_controller(*parent)) {
+    label("");
+    bool keep_end = active->keep_end_distance;
+    if (ImGui::Checkbox("Keep End Distance", &keep_end)) {
+      relations_set("keep_end_distance", keep_end ? "1" : "0");
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("When its parent stretches, it stays as far from the parent's nearer end as it rests; off, "
+                        "it moves along with the stretch");
+    }
+  }
+
   active = bone_find(armature, own);
   label("");
   bool local_location = active->local_location;

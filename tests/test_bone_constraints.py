@@ -120,6 +120,8 @@ rig.bone_constraint_set("follower", 0, delay=0)
 doc.frame_current = 10
 # --- Maintain Volume: however it gets longer, it thins (in place of its own X scale) ---------------
 constrain("squash", "MAINTAIN_VOLUME", amount=1.0)
+# Its child moves along with the stretch (it doesn't keep its distance from the nearer end).
+assert oanim.ops.armature.bone_relations_set(bone="perp", keep_end_distance="0") == {'FINISHED'}
 rig.bone_set("squash", scale=2.0)
 b = bones()
 assert close(b["squash"]["tail"], (6, 0)), "twice as long"

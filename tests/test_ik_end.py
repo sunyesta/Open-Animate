@@ -408,4 +408,177 @@ for f in (12, 15, 18):
     got = bones()["Calf_R"]["tail"]
     assert dist(got, want) < 1e-3, (f, "pinned, bent off the straight way", got, want)
 
+# --- Alt while moving (posing): a tip goes exactly where it is moved, the bone stretching; a connected bone moves whole,
+# its parent turning and stretching; pinned chains stretch to hold. Alt S on a pinned chain: its end reaches back.
+def legs():
+    global doc, layers, rig
+    ops.wm.read_homefile(confirmed="1")
+    doc, layers = oanim.data.document, oanim.data.layers
+    doc.auto_freeze_keys = False
+    doc.frame_current = 0
+    ops.layer.new_bone()
+    rig = layers.active
+    add("Root", (0, -2.5), (0, -2.3))
+    add("Pelvis", (0, 0), (0, 0.4), "Root")
+    for tag, s in (("_R", -1), ("_L", 1)):
+        add("Thigh" + tag, (0.15 * s, 0), (0.25 * s, -1.0), "Pelvis")
+        add("Calf" + tag, (0.25 * s, -1.0), (0.2 * s, -2.0), "Thigh" + tag)
+        add("Foot" + tag, (0.2 * s, -2.0), (0.5 * s, -2.05), "Calf" + tag)
+    assert ops.armature.ik_base_add(bone="Pelvis") == {'FINISHED'}
+    for tag in ("_R", "_L"):
+        assert ops.armature.ik_end_add(bone="Foot" + tag) == {'FINISHED'}
+    doc.auto_key = True
+    doc.frame_current = 10
+
+
+legs()
+b0 = bones()
+rig.select_bone("Calf_R", part="TAIL")
+assert ops.armature.translate(move_x="0.1", move_y="-0.5", posing="1", stretch="1") == {'FINISHED'}
+b = bones()
+want = (b0["Calf_R"]["tail"][0] + 0.1, b0["Calf_R"]["tail"][1] - 0.5)
+assert dist(b["Calf_R"]["tail"], want) < 1e-4, ("Alt: the tip goes exactly there", b["Calf_R"]["tail"], want)
+assert b["Calf_R"]["scale"][1] > 1.2, ("the bone stretching", b["Calf_R"]["scale"])
+legs()
+doc.frame_current = 0
+assert ops.armature.bone_relations_set(bone="Calf_R", connected="1") == {'FINISHED'}
+doc.frame_current = 10
+b0 = bones()
+rig.select_bone("Calf_R")
+assert ops.armature.translate(move_x="0.2", move_y="0.1", posing="1", stretch="1") == {'FINISHED'}
+b = bones()
+want = (b0["Calf_R"]["head"][0] + 0.2, b0["Calf_R"]["head"][1] + 0.1)
+assert dist(b["Calf_R"]["head"], want) < 1e-4, ("Alt on a connected bone: it moves whole", b["Calf_R"]["head"], want)
+assert dist(b["Thigh_R"]["tail"], want) < 1e-4, ("its parent reaching it", b["Thigh_R"]["tail"])
+assert turn(way(b["Calf_R"]), way(b0["Calf_R"])) < 1e-4, "keeping its angle"
+assert abs(b["Thigh_R"]["scale"][1] - 1.0) > 0.02, "the parent stretching"
+# Moving the root up out of the pinned left ankle's reach: with Alt its chain stretches to hold it.
+for alt in ("0", "1"):
+    legs()
+    rig.select_bone("Foot_L")
+    assert ops.armature.ik_pin_toggle() == {'FINISHED'}
+    b0 = bones()
+    rig.select_bone("Root")
+    assert ops.armature.translate(move_x="0", move_y="0.8", posing="1", stretch=alt) == {'FINISHED'}
+    miss = dist(bones()["Calf_L"]["tail"], b0["Calf_L"]["tail"])
+    assert (miss < 1e-3) == (alt == "1"), (alt, "a pinned ankle out of reach is held by stretching with Alt", miss)
+# Alt S on a pinned chain: the scale goes and the end reaches back to where it was.
+legs()
+rig.select_bone("Foot_L")
+assert ops.armature.ik_pin_toggle() == {'FINISHED'}
+rig.select_bone("Thigh_L")
+assert ops.armature.resize(scale="0.85", posing="1") == {'FINISHED'}
+before = bones()["Calf_L"]["tail"]
+assert ops.armature.clear_scale() == {'FINISHED'}
+b = bones()
+assert all(abs(v - 1.0) < 1e-6 for v in b["Thigh_L"]["scale"]), b["Thigh_L"]["scale"]
+assert dist(b["Calf_L"]["tail"], before) < 1e-3, ("a pinned chain cleared of its scale reaches back", b["Calf_L"]["tail"], before)
+
+# --- A stretched bone's children keep their distance from its nearer end (bones made now; older files' are as they were).
+ops.wm.read_homefile(confirmed="1")
+doc, layers = oanim.data.document, oanim.data.layers
+doc.auto_freeze_keys = False
+doc.frame_current = 0
+ops.layer.new_bone()
+rig = layers.active
+add("Arm", (0, 0), (1, 0))
+add("Near", (0.2, 0), (0.2, 0.3), "Arm")
+add("Far", (0.8, 0), (0.8, 0.3), "Arm")
+doc.auto_key = True
+doc.frame_current = 10
+rig.select_bone("Arm")
+assert ops.armature.resize(scale="2", axis="2", posing="1") == {'FINISHED'}
+b = bones()
+assert dist(b["Arm"]["tail"], (2, 0)) < 1e-4, b["Arm"]["tail"]
+assert dist(b["Near"]["head"], (0.2, 0)) < 1e-4, ("near the base: as far from it as it rests", b["Near"]["head"])
+assert dist(b["Far"]["head"], (1.8, 0)) < 1e-4, ("near the tip: as far from it as it rests", b["Far"]["head"])
+with tempfile.TemporaryDirectory() as tmp:
+    path = pathlib.Path(tmp) / "ends.oanim"
+    assert ops.wm.save_as_mainfile(filepath=str(path)) == {'FINISHED'}
+    assert ops.wm.open_mainfile(filepath=str(path)) == {'FINISHED'}
+    doc, layers = oanim.data.document, oanim.data.layers
+    rig = layers.active
+    doc.frame_current = 10
+    assert dist(bones()["Far"]["head"], (1.8, 0)) < 1e-4, "saved"
+    # A file from before: its bones spread with the stretch, as they always did.
+    import json, zipfile
+    old = pathlib.Path(tmp) / "old.oanim"
+    with zipfile.ZipFile(path) as z, zipfile.ZipFile(old, "w") as out:
+        for item in z.infolist():
+            data = z.read(item.filename)
+            if item.filename.endswith(".json"):
+                data = data.replace(b'"end_distance":true', b'').replace(b'"end_distance": true', b'')
+                data = data.replace(b',}', b'}').replace(b'{,', b'{').replace(b',,', b',')
+            out.writestr(item, data)
+    assert ops.wm.open_mainfile(filepath=str(old)) == {'FINISHED'}
+    doc, layers = oanim.data.document, oanim.data.layers
+    rig = layers.active
+    doc.frame_current = 10
+    assert dist(bones()["Far"]["head"], (1.6, 0)) < 1e-4, ("an older file's bones spread", bones()["Far"]["head"])
+
+# --- Keep End Distance turned off: the child moves along with the stretch (one undo step brings it back).
+ops.wm.read_homefile(confirmed="1")
+doc, layers = oanim.data.document, oanim.data.layers
+doc.auto_freeze_keys = False
+doc.frame_current = 0
+ops.layer.new_bone()
+rig = layers.active
+add("Arm", (0, 0), (1, 0))
+add("Far", (0.8, 0), (0.8, 0.3), "Arm")
+assert bones()["Far"]["keep_end_distance"]
+doc.auto_key = True
+doc.frame_current = 10
+rig.select_bone("Arm")
+assert ops.armature.resize(scale="2", axis="2", posing="1") == {'FINISHED'}
+assert dist(bones()["Far"]["head"], (1.8, 0)) < 1e-4
+assert ops.armature.bone_relations_set(bone="Far", keep_end_distance="0") == {'FINISHED'}
+assert ops.armature.bone_relations_set(bone="Far", keep_end_distance="0") == {'CANCELLED'}, "already off"
+assert dist(bones()["Far"]["head"], (1.6, 0)) < 1e-4, ("off: it spreads with the stretch", bones()["Far"]["head"])
+assert ops.ed.undo() == {'FINISHED'}
+assert bones()["Far"]["keep_end_distance"] and dist(bones()["Far"]["head"], (1.8, 0)) < 1e-4
+
+# --- Limit Angle's arc ends, dragged on the setup frame: each points from the bone's head at the mouse, measured from
+# its parent's axes and its setup angle, the nearest way round, kept past the other end.
+ops.wm.read_homefile(confirmed="1")
+doc, layers = oanim.data.document, oanim.data.layers
+doc.auto_freeze_keys = False
+doc.frame_current = 0
+ops.layer.new_bone()
+rig = layers.active
+add("Up", (0, 0), (0, 1))
+add("Hand", (0, 1), (1, 1), "Up")
+rig.select_bone("Hand")
+assert ops.armature.constraint_add(type="LIMIT_ANGLE", bone="Hand") == {'FINISHED'}
+rig.bone_constraint_set("Hand", 0, min_angle=-0.2, max_angle=0.2)
+
+
+def limits():
+    c = rig.bone_constraints("Hand")[0]
+    return c["min_angle"], c["max_angle"]
+
+
+def end_set(end, x, y):
+    return ops.armature.limit_angle_end_set(bone="Hand", index="0", end=end, x=repr(x), y=repr(y))
+
+
+assert end_set("MAX", 0, 2) == {'FINISHED'}
+assert abs(limits()[1] - math.pi / 2) < 1e-5, ("straight up from the head: a quarter turn from its setup angle", limits())
+assert end_set("MIN", math.cos(-0.7), 1 + math.sin(-0.7)) == {'FINISHED'}
+assert abs(limits()[0] + 0.7) < 1e-5, limits()
+assert end_set("MAX", -1, 1.01) == {'FINISHED'}
+assert end_set("MAX", -1, 0.99) == {'FINISHED'}
+assert abs(limits()[1] - (math.pi + 0.01)) < 1e-4, ("on round past a half turn, not back the short way", limits())
+assert end_set("MIN", math.cos(1.0), 1 + math.sin(1.0)) == {'FINISHED'}
+assert end_set("MIN", math.cos(3.3), 1 + math.sin(3.3)) == {'FINISHED'}
+assert abs(limits()[0] - (limits()[1] - 0.05)) < 1e-5, ("kept short of the other end", limits())
+assert end_set("MIN", 0, 1) == {'CANCELLED'}, "on the head: no way to point"
+assert ops.armature.limit_angle_end_set(bone="Up", index="0", end="MAX", x="1", y="1") == {'CANCELLED'}, "no limit"
+# Measured from the parent as it turns: the parent turned a quarter, Max points a quarter further.
+rig.bone_constraint_set("Hand", 0, min_angle=-0.2, max_angle=0.2)
+doc.frame_current = 10
+rig.bone_set("Up", angle=math.pi)
+# Up now points left, so Hand's head is at (-1, 0) and its setup way is straight up: a quarter on is to the left.
+assert end_set("MAX", -2, 0) == {'FINISHED'}
+assert abs(limits()[1] - math.pi / 2) < 1e-4, ("from the turned parent's axes", limits())
+
 print("test_ik_end: OK")

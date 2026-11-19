@@ -786,6 +786,10 @@ struct Bone {
   bool ik_ignore = false;
   /* Moho's Arc IK solver: a chain ending at this bone bends evenly, as an arc. */
   bool arc_ik = false;
+  /* Posed on a parent stretched along its length, it keeps its distance from the parent's nearer end (a hand on a
+   * stretched arm stays at the wrist) rather than spreading with the stretch. On for bones made now; bones from files
+   * made before it are off, so they pose as they always did. */
+  bool keep_end_distance = true;
   BoneShape shape = BoneShape::None;
   /* A pin's size against the standard pin (it stays that size on screen, whatever the zoom). */
   float pin_size = 1.0f;
