@@ -1,3 +1,4 @@
+#include "anim/gradient_shown.hh"
 #include "anim/bone_curve.hh"
 #include "python/py_runtime.hh"
 
@@ -1435,7 +1436,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return d;
   });
   m.def("properties_tab", [](int tab) {
- current_context().wm->properties_tab_request = std::clamp(tab, 0, 11); });
+ current_context().wm->properties_tab_request = std::clamp(tab, 0, 12); });
   /* How long frames take (ms, ImGui's running average), for checking the app's speed. */
   /* The left/right name rule bone Symmetrize and mirror editing pair by (bone_mirror_name). */
   m.def("flip_name", [](const std::string &name) { return bone_mirror_name(name); });
@@ -2688,6 +2689,90 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     return parent ? parent->id : uint64_t(0);
   });
   m.def("layer_reference_source", [layer_or_raise](uint64_t id) { return layer_or_raise(id).reference_source; });
+  /* A gradient layer's settings: {on, type, ends, mix, squash, stops: [{point, color, midpoint, falloff}],
+   * active_stop, active_span}. */
+  m.def("layer_gradient", [layer_or_raise](uint64_t id) {
+    const GradientSettings &g = layer_or_raise(id).gradient;
+    py::dict d;
+    d["on"] = g.on;
+    d["type"] = gradient_type_identifier(g.type);
+    d["ends"] = gradient_ends_identifier(g.ends);
+    d["mix"] = gradient_mix_identifier(g.mix);
+    d["squash"] = g.squash;
+    py::list stops;
+    for (const GradientStop &s : g.stops) {
+      py::dict sd;
+      sd["point"] = s.point;
+      sd["color"] = py::make_tuple(s.color.r, s.color.g, s.color.b, s.color.a);
+      sd["midpoint"] = s.midpoint;
+      sd["falloff"] = gradient_falloff_identifier(s.falloff);
+      stops.append(sd);
+    }
+    d["stops"] = stops;
+    d["active_stop"] = g.active_stop;
+    d["active_span"] = g.active_span;
+    return d;
+  });
+  /* A gradient's colour at document point (x, y), straight RGBA, as renders work it out; and how far along its path
+   * that is (its length is {"length"}), with each stop's place along it and each tick's in document space. */
+  m.def("gradient_sample", [layer_or_raise](uint64_t id, float x, float y) {
+    const Layer &layer = layer_or_raise(id);
+    const GradientShown shown = gradient_shown(*current_context().document, layer, true);
+    const float2 p = shown.to_document.inverted().apply({x, y});
+    const Color c = gradient_color_at(shown.field, p);
+    py::dict d;
+    d["color"] = py::make_tuple(c.r, c.g, c.b, c.a);
+    d["along"] = gradient_along(shown.field, p);
+    d["length"] = shown.field.total;
+    return d;
+  });
+  /* A tick (span >= 0) or the Squash handle (span -1) dragged to document point (x, y) and let go, as in the
+   * viewport (one undo step when it changed). */
+  m.def("gradient_handle_drag", [layer_or_raise](uint64_t id, int span, float x, float y) {
+    Layer &layer = layer_or_raise(id);
+    GradientSettings &g = layer.gradient;
+    if (!layer.is_gradient() || span < -1 || span + 1 >= int(g.stops.size())) {
+      throw py::value_error("No such tick on that layer");
+    }
+    Context &C = current_context();
+    const float value = gradient_handle_value(*C.document, layer, span, {x, y});
+    float &field = span >= 0 ? g.stops[size_t(span)].midpoint : g.squash;
+    if (field != value) {
+      field = value;
+      C.undo->push(span >= 0 ? "Gradient Midpoint" : "Gradient Squash", *C.document);
+    }
+    return value;
+  });
+  m.def("gradient_places", [layer_or_raise](uint64_t id) {
+    const Layer &layer = layer_or_raise(id);
+    const GradientShown shown = gradient_shown(*current_context().document, layer, false);
+    py::list stops, ticks;
+    const GradientField &f = shown.field;
+    for (size_t i = 0; f.valid && i < f.stop_arc.size(); i++) {
+      const float2 p = shown.to_document.apply(gradient_place_along(f, f.stop_arc[i]));
+      stops.append(py::make_tuple(f.stop_arc[i], p.x, p.y));
+      if (i + 1 < f.stop_arc.size()) {
+        const float m = std::clamp(layer.gradient.stops[i].midpoint, 0.02f, 0.98f);
+        const float a = f.stop_arc[i] + (f.stop_arc[i + 1] - f.stop_arc[i]) * m;
+        const float2 t = shown.to_document.apply(gradient_place_along(f, a));
+        ticks.append(py::make_tuple(a, t.x, t.y));
+      }
+    }
+    py::dict d;
+    d["stops"] = stops;
+    d["ticks"] = ticks;
+    d["length"] = f.total;
+    return d;
+  });
+  /* The picture a render lays over the camera frame, `width` by `height`, rows from the top: premultiplied RGBA
+   * bytes. */
+  m.def("gradient_image", [layer_or_raise](uint64_t id, int width, int height) {
+    const Layer &layer = layer_or_raise(id);
+    const GradientShown shown = gradient_shown(*current_context().document, layer, true);
+    std::vector<uint8_t> rgba;
+    gradient_image(shown.field, shown.frame, std::clamp(width, 1, 4096), std::clamp(height, 1, 4096), rgba);
+    return py::bytes(reinterpret_cast<const char *>(rgba.data()), rgba.size());
+  });
   /* A reference's settings: {edit_points, follow_animation, match_original}. */
   m.def("layer_reference", [layer_or_raise](uint64_t id) {
     const ReferenceSettings &rs = layer_or_raise(id).reference;

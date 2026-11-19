@@ -759,6 +759,29 @@ const rna::StructRNA &Layer::rna()
             "text_body", "Text", "The whole text (new lines as \\n); set, it keeps the runs' styles where unchanged",
             [](const Layer &l) { return text_string(l.text); },
             [](Layer &l, const std::string &v) { text_set_string(l.text, v); }),
+        /* Gradient layers (data/gradient.hh): the stops through layer.gradient and the gradient.* operators. */
+        def_enum_fn<Layer>(
+            "gradient_type", "Type",
+            "A gradient's shape: bands across its path (Linear) or rings round its first stop (Radial)",
+            {{"LINEAR", "Linear"}, {"RADIAL", "Radial"}}, [](const Layer &l) { return int(l.gradient.type); },
+            [](Layer &l, int v) { l.gradient.type = GradientType(std::clamp(v, 0, 1)); }),
+        def_enum_fn<Layer>(
+            "gradient_ends", "Ends",
+            "Past a gradient's last stop: its colour carries on (Extend), the stops repeat (Repeat) or they run back "
+            "and forth (Reflect)",
+            {{"EXTEND", "Extend"}, {"REPEAT", "Repeat"}, {"REFLECT", "Reflect"}},
+            [](const Layer &l) { return int(l.gradient.ends); },
+            [](Layer &l, int v) { l.gradient.ends = GradientEnds(std::clamp(v, 0, 2)); }),
+        def_enum_fn<Layer>(
+            "gradient_mix", "Mix",
+            "How a gradient's colours mix between stops: evenly in lightness, as the eye sees it (Perceptual, OKLab), "
+            "or by their plain RGB values (RGB, which can grey or darken half way)",
+            {{"PERCEPTUAL", "Perceptual"}, {"RGB", "RGB"}}, [](const Layer &l) { return int(l.gradient.mix); },
+            [](Layer &l, int v) { l.gradient.mix = GradientMix(std::clamp(v, 0, 1)); }),
+        def_float_fn<Layer>(
+            "gradient_squash", "Squash",
+            "A radial gradient's rings: how far they reach across its path, as a share of along it", 0.01f, 100.0f,
+            [](const Layer &l) { return l.gradient.squash; }, [](Layer &l, float v) { l.gradient.squash = v; }),
     };
     return s;
   }();

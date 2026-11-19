@@ -43,6 +43,7 @@
 #include "editors/controller_thumbnails.hh"
 #include "editors/overlay_contrast.hh"
 #include "editors/ui.hh"
+#include "editors/gradient_panel.hh"
 #include "editors/text_panel.hh"
 #include "ops/edit_ops.hh"
 #include "ops/media_ops.hh"
@@ -65,7 +66,8 @@ enum PropertiesTab {
   TAB_MEDIA = 8,
   TAB_TEXT = 9,
   TAB_SHAPE = 10,
-  TAB_BONE = 11
+  TAB_BONE = 11,
+  TAB_GRADIENT = 12
 };
 
 static void key_next(Context &C, Layer &layer, std::vector<std::string> paths);
@@ -10965,7 +10967,11 @@ std::vector<PropertiesTabEntry> properties_tabs(Document &doc)
     if (text) {
       tabs.push_back({"Text", TAB_TEXT});
     }
-    if (vector) {
+    if (active_layer && active_layer->is_gradient()) {
+      /* A gradient has no shapes: its stops instead. */
+      tabs.push_back({"Gradient", TAB_GRADIENT});
+    }
+    else if (vector) {
       tabs.push_back({"Shape", TAB_SHAPE});
     }
     if (bones) {
@@ -11060,6 +11066,9 @@ void properties_draw(Area &area, Context &C)
         break;
       case TAB_TEXT:
         properties_text_tab(C);
+        break;
+      case TAB_GRADIENT:
+        properties_gradient_tab(C);
         break;
       case TAB_CONSTRAINTS:
         constraints_panel(C, *armature_worked_on(*C.document, C.document->active_layer));

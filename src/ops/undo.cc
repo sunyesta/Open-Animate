@@ -1,5 +1,7 @@
 #include "ops/undo.hh"
 
+#include "ops/gradient_ops.hh"
+
 #include <algorithm>
 #include <thread>
 #include <unordered_map>
@@ -205,6 +207,10 @@ void UndoStack::push(const std::string &name, Document &doc)
     }
     return *previous;
   };
+  /* The last guard of gradients' points (an edit outside the operators that added or took one away). */
+  if (!steps_.empty()) {
+    gradients_check(doc, was);
+  }
   if (before_push && !steps_.empty()) {
     before_push(doc, was, before_push_data);
   }

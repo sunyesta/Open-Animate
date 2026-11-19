@@ -249,13 +249,13 @@ def properties_tab(tab):
     "MODIFIERS", "VECTOR" (a drawing's data: point groups, the selected points and edges) or
     "ARMATURE" (a bone layer's collections, bones and fixes; "DRAWING" is either), "SHAPE" (a drawing's
     shapes and their looks), "BONE" (the active bone), "CONSTRAINTS" (Bone Constraints), "REFERENCE"
-    (a reference's), "CAMERA" (the picked camera's), "MEDIA" (a Media layer's) or "TEXT" (a text
-    layer's). A tab the active layer doesn't have is kept, and shows when a layer that has it is."""
+    (a reference's), "CAMERA" (the picked camera's), "MEDIA" (a Media layer's), "TEXT" (a text
+    layer's) or "GRADIENT" (a gradient layer's stops and spans). A tab the active layer doesn't have is kept, and shows when a layer that has it is."""
     name = tab.upper()
     if name in ("VECTOR", "ARMATURE"):
         name = "DRAWING"
     _oanim.properties_tab(["DOCUMENT", "LAYER", "DRAWING", "MODIFIERS", "CONSTRAINTS", "REFERENCE",
-                         "MASKING", "CAMERA", "MEDIA", "TEXT", "SHAPE", "BONE"].index(name))
+                         "MASKING", "CAMERA", "MEDIA", "TEXT", "SHAPE", "BONE", "GRADIENT"].index(name))
 
 
 def layer_bone_group_panel():

@@ -44,6 +44,12 @@ PENDING = [
     ('src/anim/reference.cc', '          delta = p.pos - again.points[i].pos;', '          delta = p.pos - rs.built_pos[i];', "A reference's points moved with its original's move once", 'tests/test_reference_move_once.py'),
     ('src/anim/reference.cc', '          if (const VectorDrawing &again = rebuilt(); same_curves(again.curves, d.curves)) {', '          if (const VectorDrawing &again = rebuilt(); false && same_curves(again.curves, d.curves)) {', "A reference's handles turned with its original's turn once", 'tests/test_reference_move_once.py'),
     ('src/editors/viewport.cc', "    return kind != 'E' && std::any_of(layers.begin(), layers.end(),", "    return false && kind != 'E' && std::any_of(layers.begin(), layers.end(),", "A locked reference moved with its original isn't reported locked", 'tests/test_reference_move_once.py'),
+    ('src/ops/operator.cc', '    if (guard && !gradients.items.empty()) {', '    if (false && guard && !gradients.items.empty()) {', "An operator can't add or take away a gradient's points", 'tests/test_gradient_layer.py'),
+    ('src/ops/undo.cc', '    gradients_check(doc, was);', '    (void)was;', "A script's change to a gradient's points is put back at the next undo step", 'tests/test_gradient_layer.py'),
+    ('src/ops/gradient_ops.cc', '      layer.gradient.stops = stops_merged(had->gradient.stops, layer.gradient.stops);', '      layer.gradient.stops = had->gradient.stops;', "Putting a gradient's points back keeps the rest of the step's edit", 'tests/test_gradient_layer.py'),
+    ('src/data/gradient.cc', '  piece(f.path.back(), end_dir, inf, f.total, 1.0f);', '  (void)end_dir;', "A gradient's path carries on past its end", 'tests/test_gradient_layer.py'),
+    ('src/data/gradient.cc', '  const float q = (2.0f * m - 1.0f) / (1.0f - m);', '  const float q = 0.0f * m;', "A span's tick is where its colours meet half way", 'tests/test_gradient_layer.py'),
+    ('src/data/gradient.cc', 'slopes[k][i] = a * b <= 0.0f ? 0.0f :', 'slopes[k][i] = true ? 0.0f :', 'A Smooth gradient has no kink at a stop', 'tests/test_gradient_layer.py'),
 ]
 
 def build(root):

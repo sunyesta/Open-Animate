@@ -28,6 +28,7 @@
 #include <unordered_set>
 
 #include "core/log.hh"
+#include "anim/gradient_shown.hh"
 #include "anim/controller.hh"
 #include "anim/controller_preview.hh"
 #include "anim/bone_family.hh"
@@ -8820,6 +8821,188 @@ static void pen_click(Context &C, Layer &layer, float2 mouse, float radius)
   deselect_all(drawing);
   drawing.points[point].selected = true;
   g_drag.pen_point = snap >= 0 ? -1 : point;
+}
+
+/* ---------------------------------------------------------------------------------
+ * Gradient layers (data/gradient.hh): their stops drawn in their colours, a tick between each two where the colours
+ * meet half way (dragged along the path), and a radial one's ring and Squash handle. The stops themselves are the
+ * drawing's points, picked and moved as any.
+ */
+
+struct GradientDrag {
+  bool active = false;
+  int area = 0;
+  uint64_t layer = 0;
+  /* A tick's span, or -1 for the Squash handle. */
+  int span = -1;
+  float start = 0.0f;
+};
+static GradientDrag g_gradient_drag;
+
+/* The active layer when it is a gradient shown and editable. */
+static Layer *gradient_active(Context &C)
+{
+  Layer *layer = C.document ? document_active_layer(*C.document) : nullptr;
+  return layer && layer->is_gradient() && layer->shown() && !layer->locked ? layer : nullptr;
+}
+
+/* Where a gradient's ticks and Squash handle show (screen). */
+struct GradientHandles {
+  GradientShown shown;
+  std::vector<ImVec2> ticks;
+  ImVec2 squash;
+};
+static GradientHandles gradient_handles(const Document &doc, const Layer &layer, const ViewMapping &view)
+{
+  GradientHandles h;
+  h.shown = gradient_shown(doc, layer, false);
+  const GradientField &f = h.shown.field;
+  if (!f.valid) {
+    return h;
+  }
+  for (size_t k = 0; k + 1 < f.stop_arc.size(); k++) {
+    const float m = std::clamp(layer.gradient.stops[k].midpoint, 0.02f, 0.98f);
+    const float a = f.stop_arc[k] + (f.stop_arc[k + 1] - f.stop_arc[k]) * m;
+    h.ticks.push_back(view.to_screen(h.shown.to_document.apply(gradient_place_along(f, a))));
+  }
+  const float2 across(-f.start_dir.y, f.start_dir.x);
+  h.squash = view.to_screen(h.shown.to_document.apply(f.start + across * (f.total * f.squash)));
+  return h;
+}
+
+static bool near_screen(ImVec2 a, ImVec2 b, float r)
+{
+  const ImVec2 d = a - b;
+  return d.x * d.x + d.y * d.y <= r * r;
+}
+
+/* A press on a tick or the Squash handle (the Select and Transform Points tools): starts dragging it. */
+static bool gradient_press(Context &C, Area &area, const ViewMapping &view)
+{
+  const Tool tool = C.wm->tool_settings.tool;
+  Layer *layer = gradient_active(C);
+  if (!layer || (tool != Tool::Select && tool != Tool::TransformPoints) || !C.document->overlays.show) {
+    return false;
+  }
+  const GradientHandles h = gradient_handles(*C.document, *layer, view);
+  if (!h.shown.field.valid) {
+    return false;
+  }
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  GradientDrag drag;
+  drag.active = true;
+  drag.area = area.id;
+  drag.layer = layer->id;
+  if (layer->gradient.type == GradientType::Radial && near_screen(h.squash, mouse, 8.0f)) {
+    drag.span = -1;
+    drag.start = layer->gradient.squash;
+  }
+  else {
+    int hit = -1;
+    float best = 7.0f * 7.0f;
+    for (int k = 0; k < int(h.ticks.size()); k++) {
+      const ImVec2 d = h.ticks[size_t(k)] - mouse;
+      if (d.x * d.x + d.y * d.y <= best) {
+        best = d.x * d.x + d.y * d.y;
+        hit = k;
+      }
+    }
+    if (hit < 0) {
+      return false;
+    }
+    drag.span = hit;
+    drag.start = layer->gradient.stops[size_t(hit)].midpoint;
+    operator_call(C, "gradient.pick", {{"layer", std::to_string(layer->id)}, {"span", std::to_string(hit)}});
+  }
+  g_gradient_drag = drag;
+  return true;
+}
+
+/* While a tick or the Squash handle is held: it follows the mouse; let go, one undo step (right-click puts it back). */
+static void gradient_drag_update(Context &C, Area &area, const ViewMapping &view)
+{
+  GradientDrag &drag = g_gradient_drag;
+  if (!drag.active || drag.area != area.id) {
+    return;
+  }
+  Layer *layer = layer_find(*C.document, drag.layer);
+  if (!layer || !layer->is_gradient() || drag.span >= int(layer->gradient.stops.size()) - 1) {
+    drag = {};
+    return;
+  }
+  GradientSettings &g = layer->gradient;
+  float &value = drag.span >= 0 ? g.stops[size_t(drag.span)].midpoint : g.squash;
+  if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    value = drag.start;
+    drag = {};
+    return;
+  }
+  value = gradient_handle_value(*C.document, *layer, drag.span, view.to_document(ImGui::GetIO().MousePos));
+  ImGui::SetMouseCursor(drag.span >= 0 ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeAll);
+  if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+    const bool changed = value != drag.start;
+    const bool tick = drag.span >= 0;
+    drag = {};
+    if (changed) {
+      push_undo(C, tick ? "Gradient Midpoint" : "Gradient Squash");
+    }
+  }
+}
+
+static void draw_gradient_overlay(ImDrawList *dl, Context &C, const ViewMapping &view, bool hovered)
+{
+  const Layer *layer = C.document ? document_active_layer(*C.document) : nullptr;
+  if (!layer || !layer->is_gradient() || !layer->shown()) {
+    return;
+  }
+  const GradientHandles h = gradient_handles(*C.document, *layer, view);
+  const GradientField &f = h.shown.field;
+  if (!f.valid) {
+    return;
+  }
+  const GradientSettings &g = layer->gradient;
+  const ImU32 dark = IM_COL32(0, 0, 0, 170), light = IM_COL32(0xff, 0xff, 0xff, 235), picked = IM_COL32(0xff, 0xa1, 0x33, 255);
+  const auto at = [&](float2 p) { return view.to_screen(h.shown.to_document.apply(p)); };
+  if (g.type == GradientType::Radial) {
+    /* The outer ring (where the last stop is), dashed, and the Squash handle across from the path. */
+    const float2 across(-f.start_dir.y, f.start_dir.x);
+    std::vector<ImVec2> ring;
+    for (int i = 0; i <= 96; i++) {
+      const float a = float(i) / 96.0f * 2.0f * PI;
+      ring.push_back(at(f.start + f.start_dir * (std::cos(a) * f.total) + across * (std::sin(a) * f.total * f.squash)));
+    }
+    for (size_t i = 0; i + 1 < ring.size(); i += 2) {
+      dl->AddLine(ring[i], ring[i + 1], dark, 2.5f);
+      dl->AddLine(ring[i], ring[i + 1], light, 1.0f);
+    }
+    dl->AddLine(at(f.start), h.squash, IM_COL32(0xff, 0xff, 0xff, 110), 1.0f);
+    const bool on = g_gradient_drag.active && g_gradient_drag.span < 0;
+    dl->AddRectFilled(h.squash - ImVec2(4, 4), h.squash + ImVec2(4, 4), on ? picked : light);
+    dl->AddRect(h.squash - ImVec2(4, 4), h.squash + ImVec2(4, 4), dark, 0.0f, 0, 1.2f);
+  }
+  /* Ticks: a diamond on the path, the picked span's orange. */
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  for (int k = 0; k < int(h.ticks.size()); k++) {
+    const ImVec2 c = h.ticks[size_t(k)];
+    const bool on = k == g.active_span || (g_gradient_drag.active && g_gradient_drag.span == k);
+    const float r = 5.0f;
+    const ImVec2 q[4] = {c + ImVec2(0, -r), c + ImVec2(r, 0), c + ImVec2(0, r), c + ImVec2(-r, 0)};
+    dl->AddConvexPolyFilled(q, 4, on ? picked : light);
+    dl->AddPolyline(q, 4, dark, ImDrawFlags_Closed, 1.2f);
+    if (hovered && !g_gradient_drag.active && near_screen(c, mouse, 7.0f)) {
+      ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+    }
+  }
+  /* The stops in their colours, ringed white, orange when picked. */
+  for (int i = 0; i < int(g.stops.size()) && i < int(f.stop_arc.size()); i++) {
+    const ImVec2 c = at(gradient_place_along(f, f.stop_arc[size_t(i)]));
+    const Color &col = g.stops[size_t(i)].color;
+    const int p = drawing_point_index(layer->drawing, g.stops[size_t(i)].point);
+    const bool selected = p >= 0 && layer->drawing.points[size_t(p)].selected;
+    dl->AddCircleFilled(c, 7.0f, ImGui::ColorConvertFloat4ToU32(ImVec4(col.r, col.g, col.b, 1.0f)), 20);
+    dl->AddCircle(c, 7.5f, dark, 20, 3.0f);
+    dl->AddCircle(c, 7.5f, selected ? picked : light, 20, 1.6f);
+  }
 }
 
 /* ---------------------------------------------------------------------------------
@@ -20477,6 +20660,7 @@ static void viewport_draw_contents(Area &area, Context &C)
   }
 
   /* --- Editing. --- */
+  gradient_drag_update(C, area, view);
   Layer *layer = nullptr;
   VectorDrawing *drawing = editable_drawing(C, &layer);
   /* Tools that work on every edited layer's points, not the active layer's drawing: they work with a
@@ -20687,10 +20871,18 @@ static void viewport_draw_contents(Area &area, Context &C)
     else if (draws && doc.frame_current != 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       report_banner(ReportType::Warning, "Switch to Setup (frame 0) to draw");
     }
+    else if (draws && layer && layer->is_gradient() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      report_banner(ReportType::Warning, "A gradient's points are its stops: add or remove them in its Gradient tab");
+    }
     else if (ts.tool == Tool::Draw && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
              quick_edit_press(C, area, view, to_document))
     {
       /* A press on the last shape's handles or switch edits it. */
+    }
+    else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !io.KeyShift && !io.KeyCtrl && !io.KeyAlt &&
+             gradient_press(C, area, view))
+    {
+      /* A press on a gradient's tick or Squash handle drags it. */
     }
     else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       g_drag = {};
@@ -21164,6 +21356,7 @@ static void viewport_draw_contents(Area &area, Context &C)
     C.wm->path_under = false;
   }
   if (ov.show) {
+    draw_gradient_overlay(dl, C, view, hovered);
     draw_motion_paths(C, area, view, dl, hovered);
     /* Edit Layer: the Transform Layer box round the layer, taking the presses the paths left (Edit's; the other
      * brushes paint wherever pressed). */

@@ -790,6 +790,42 @@ class _Layer:
         return list(_oanim.layer_shape_ids(self._id))
 
     @property
+    def is_gradient(self):
+        """A gradient layer (oanim.ops.layer.new_gradient): a vector layer whose one curve is a path of colour stops."""
+        return bool(_oanim.layer_gradient(self._id)["on"])
+
+    @property
+    def gradient(self):
+        """A gradient layer's settings: {on, type, ends, mix, squash, stops: [{point (its point's id), color (r, g, b,
+        a), midpoint, falloff}], active_stop, active_span}. Change them with layer.gradient_type, gradient_ends,
+        gradient_mix, gradient_squash and the oanim.ops.gradient operators."""
+        d = dict(_oanim.layer_gradient(self._id))
+        d["stops"] = [dict(s) for s in d["stops"]]
+        return d
+
+    def gradient_sample(self, x, y):
+        """A gradient's colour at document point (x, y) as renders work it out: {color (r, g, b, a, straight),
+        along (how far along its path that is), length (the path's)}."""
+        return dict(_oanim.gradient_sample(self._id, float(x), float(y)))
+
+    def gradient_places(self):
+        """Where a gradient's stops and ticks are: {stops: [(along, x, y)], ticks: [(along, x, y)], length},
+        document space, as the viewport shows them."""
+        d = dict(_oanim.gradient_places(self._id))
+        return {"stops": [tuple(s) for s in d["stops"]], "ticks": [tuple(t) for t in d["ticks"]],
+                "length": d["length"]}
+
+    def gradient_handle_drag(self, span, x, y):
+        """Drag a gradient's tick (`span`: the span it is on) or, with span -1, its Squash handle to document point
+        (x, y) and let go, as in the viewport: the midpoint or squash it took."""
+        return _oanim.gradient_handle_drag(self._id, int(span), float(x), float(y))
+
+    def gradient_image(self, width, height):
+        """The picture a render lays over the camera frame, `width` x `height`, rows from the top: premultiplied
+        RGBA bytes."""
+        return _oanim.gradient_image(self._id, int(width), int(height))
+
+    @property
     def reference(self):
         """A reference's settings: {edit_points, follow_animation, match_original} (change them with
         oanim.ops.layer.reference_set)."""

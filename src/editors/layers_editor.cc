@@ -181,6 +181,17 @@ static void icon_layer_type(ImDrawList *dl, ImVec2 c, float s, const Layer &laye
     }
     return;
   }
+  if (layer.is_gradient()) {
+    /* A square shaded from dark to light, as a gradient's swatch. */
+    const ImVec2 lo = c + ImVec2(-s * 0.8f, -s * 0.65f), hi = c + ImVec2(s * 0.8f, s * 0.65f);
+    const ImU32 clear = (col & 0x00ffffffu) | (0x30u << 24);
+    dl->AddRectFilledMultiColor(lo, hi, clear, col, col, clear);
+    dl->AddRect(lo, hi, col, 1.5f, 0, 1.2f);
+    if (layer.is_reference()) {
+      ui_link_icon(dl, c + ImVec2(s * 0.7f, s * 0.6f), s * 0.42f, COL_REFERENCE);
+    }
+    return;
+  }
   if (layer.is_text()) {
     /* A serif T, as Blender's text object icon. */
     dl->AddLine(c + ImVec2(-s * 0.7f, -s * 0.65f), c + ImVec2(s * 0.7f, -s * 0.65f), col, 1.8f);
@@ -1166,6 +1177,7 @@ void layers_draw(Area &area, Context &C)
     menu_op(C, "Switch", "layer.new_switch");
     menu_op(C, "Bone Layer", "layer.new_bone");
     menu_op(C, "Text", "layer.new_text");
+    menu_op(C, "Gradient", "layer.new_gradient");
     menu_op(C, "Media...", "media.import");
     ImGui::Separator();
     menu_op(C, "Reference of Active Layer", "layer.make_reference");

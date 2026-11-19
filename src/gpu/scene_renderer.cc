@@ -8,6 +8,7 @@
 #include <functional>
 #include <string>
 
+#include "anim/gradient_shown.hh"
 #include "anim/deform.hh"
 #include "anim/draw_order.hh"
 #include "anim/dynamics.hh"
@@ -18,6 +19,7 @@
 #include "data/document.hh"
 #include "data/media_layer.hh"
 #include "core/parallel.hh"
+#include "core/profile.hh"
 #include "gpu/brush_stroke.hh"
 #include "gpu/tessellate.hh"
 #include "media/media.hh"
@@ -617,6 +619,11 @@ void SceneRenderer::draw_layer(const Document &doc, const Layer &layer, const Tr
       use_color_stencil();
       draw_media(doc, layer, transform, full_opacity(layer) ? 1.0f : layer_opacity);
     }
+    return;
+  }
+  if (layer.is_gradient()) {
+    use_color_stencil();
+    draw_gradient(doc, layer, layer_opacity);
     return;
   }
   if (!layer.is_group()) {
@@ -2644,6 +2651,66 @@ void SceneRenderer::draw_media(const Document &doc, const Layer &layer, const Tr
   device_->draw(draw);
 }
 
+void SceneRenderer::draw_gradient(const Document &doc, const Layer &layer, float opacity)
+{
+  flush_batch();
+  if (opacity <= 0.0f) {
+    return;
+  }
+  const GradientShown shown = gradient_shown(doc, layer, final_render_);
+  if (!shown.field.valid) {
+    return;
+  }
+  /* As many pixels as the frame takes on screen (a render's, all of them; the viewport's, up to a limit, as the
+   * colours change slowly and the picture is made again while a stop is dragged). */
+  const Transform2D to_pixels = document_to_pixels_ * shown.to_document;
+  const float w_px = distance(to_pixels.apply(shown.frame[0]), to_pixels.apply(shown.frame[1]));
+  const float h_px = distance(to_pixels.apply(shown.frame[0]), to_pixels.apply(shown.frame[3]));
+  const float most = final_render_ ? 8192.0f : 1600.0f;
+  const float fit = std::min(1.0f, most / std::max({w_px, h_px, 1.0f}));
+  const int w = std::clamp(int(std::ceil(w_px * fit)), 2, 8192), h = std::clamp(int(std::ceil(h_px * fit)), 2, 8192);
+  uint64_t made = hash_mix(hash_mix(0x6a7d1e5ull, uint64_t(w)), uint64_t(h));
+  for (const float2 &p : shown.field.path) {
+    made = hash_float(hash_float(made, p.x), p.y);
+  }
+  for (int i = 0; i < 4; i++) {
+    made = hash_float(hash_float(made, shown.frame[i].x), shown.frame[i].y);
+  }
+  const GradientSettings &g = layer.gradient;
+  made = hash_mix(hash_mix(hash_mix(made, uint64_t(g.type)), uint64_t(g.ends)), uint64_t(g.mix));
+  made = hash_float(made, g.squash);
+  for (const GradientStop &s : g.stops) {
+    made = hash_float(hash_mix(hash_color(made, s.color), uint64_t(s.falloff)), s.midpoint);
+  }
+  GradientTexture &tex = gradient_textures_[layer.id];
+  if (!tex.texture) {
+    tex.texture = device_->make_texture();
+  }
+  if (tex.made != made) {
+    OANIM_PROFILE("gradient_image");
+    std::vector<uint8_t> rgba;
+    gradient_image(shown.field, shown.frame, w, h, rgba);
+    device_->upload_texture(tex.texture, w, h, rgba.data());
+    tex.made = made;
+  }
+  const float2 *q = shown.frame;
+  /* Texture rows run top first: v 0 is the top edge. */
+  const BrushVertex v[6] = {{q[0].x, q[0].y, 0, 1, 1, 1, 1, 1}, {q[1].x, q[1].y, 1, 1, 1, 1, 1, 1},
+                            {q[2].x, q[2].y, 1, 0, 1, 1, 1, 1}, {q[0].x, q[0].y, 0, 1, 1, 1, 1, 1},
+                            {q[2].x, q[2].y, 1, 0, 1, 1, 1, 1}, {q[3].x, q[3].y, 0, 0, 1, 1, 1, 1}};
+  gpu::Draw draw;
+  draw.state = paint_;
+  draw.state.program = gpu::Program::Media;
+  draw.to_clip = to_clip(shown.to_document);
+  draw.opacity = opacity;
+  draw.texture = tex.texture;
+  draw.stream = v;
+  draw.stream_bytes = sizeof(v);
+  draw.stream_layout = gpu::Layout::Brush;
+  draw.count = 6;
+  device_->draw(draw);
+}
+
 void SceneRenderer::draw_vertices(const std::vector<Vertex> &vertices, const Transform2D &transform)
 {
   flush_batch();
@@ -2744,6 +2811,21 @@ uint64_t SceneRenderer::layer_signature(const Document &doc, const Layer &layer)
   if (layer.is_group()) {
     for (const Layer &child : layer.children) {
       h = hash_mix(h, layer_signature(doc, child));
+    }
+  }
+  else if (layer.is_gradient()) {
+    /* What its picture is made from (draw_gradient): the path as it shows, the stops and the camera frame. */
+    const GradientShown shown = gradient_shown(doc, layer, final_render_);
+    for (const float2 &p : shown.field.path) {
+      h = hash_float(hash_float(h, p.x), p.y);
+    }
+    for (int i = 0; i < 4; i++) {
+      h = hash_float(hash_float(h, shown.frame[i].x), shown.frame[i].y);
+    }
+    const GradientSettings &g = layer.gradient;
+    h = hash_float(hash_mix(hash_mix(hash_mix(h, uint64_t(g.type)), uint64_t(g.ends)), uint64_t(g.mix)), g.squash);
+    for (const GradientStop &s : g.stops) {
+      h = hash_float(hash_mix(hash_color(h, s.color), uint64_t(s.falloff)), s.midpoint);
     }
   }
   else if (layer.is_media()) {

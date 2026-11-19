@@ -13,6 +13,7 @@
 #include "data/document.hh"
 #include "ops/edit_ops.hh"
 #include "ops/stretch_sync.hh"
+#include "ops/gradient_ops.hh"
 #include "ops/undo.hh"
 #include "wm/context.hh"
 #include "core/profile.hh"
@@ -305,7 +306,14 @@ OpStatus operator_call(Context &C, std::string_view idname, const OpArgs &args)
     if (syncs) {
       stretch_sync.start(C);
     }
+    /* Gradients' points are their stops: an operator that adds or takes one away (or draws on one) leaves them as
+     * they were (the gradient.* operators keep them right). */
+    const bool guard = C.document && !outer_args;
+    const GradientsKept gradients = guard ? gradients_keep(*C.document) : GradientsKept();
     status = ot.exec(C);
+    if (guard && !gradients.items.empty()) {
+      gradients_restore(*C.document, gradients);
+    }
     if (syncs && status == OpStatus::Finished) {
       stretch_sync.finish(C);
     }

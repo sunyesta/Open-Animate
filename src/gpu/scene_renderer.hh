@@ -335,6 +335,14 @@ class SceneRenderer {
   };
   /* One texture per Media layer, refilled when its frame changes. */
   std::map<uint64_t, MediaTexture> media_textures_;
+  /* A gradient layer's picture over the camera frame (anim/gradient_shown.hh): made again when what it shows changes
+   * (its path, stops, the frame or how many pixels the frame takes). */
+  struct GradientTexture {
+    gpu::Texture texture;
+    uint64_t made = 0;
+  };
+  std::map<uint64_t, GradientTexture> gradient_textures_;
+  void draw_gradient(const Document &doc, const Layer &layer, float opacity);
 
   bool final_render_ = false;
   /* The viewport shows guides (layers not rendered): its overlays are on, Guides among them. */

@@ -564,6 +564,23 @@ static const char *const MEDIA_FIT_IDS[] = {"FIT", "FILL", "STRETCH", "ORIGINAL"
 static const char *const MEDIA_TIMING_IDS[] = {"REAL_TIME", "FRAME_BY_FRAME"};
 static const char *const MEDIA_END_IDS[] = {"HOLD", "LOOP", "HIDE"};
 
+/* A gradient layer's settings and its stops (by point id, in path order). */
+static json gradient_to_json(const GradientSettings &g)
+{
+  json stops = json::array();
+  for (const GradientStop &s : g.stops) {
+    stops.push_back({{"point", s.point},
+                     {"color", color_to_json(s.color)},
+                     {"midpoint", num(s.midpoint)},
+                     {"falloff", gradient_falloff_identifier(s.falloff)}});
+  }
+  return {{"type", gradient_type_identifier(g.type)},
+          {"ends", gradient_ends_identifier(g.ends)},
+          {"mix", gradient_mix_identifier(g.mix)},
+          {"squash", num(g.squash)},
+          {"stops", std::move(stops)}};
+}
+
 static json text_to_json(const TextSettings &t)
 {
   static const char *const ALIGN[] = {"LEFT", "CENTER", "RIGHT", "JUSTIFY"};
@@ -1191,6 +1208,9 @@ static json layer_to_json(const Layer &layer)
   }
   else if (!layer.is_group()) {
     j["drawing"] = layer_drawing_json(layer.drawing);
+    if (layer.is_gradient()) {
+      j["gradient"] = gradient_to_json(layer.gradient);
+    }
   }
   if (layer.is_group()) {
     json children = json::array();
@@ -3610,6 +3630,31 @@ static Layer layer_from_json(const json &j, int depth)
     else {
       layer.drawing = drawing_from_json(*it);
     }
+  }
+  if (auto it = j.find("gradient"); it != j.end() && it->is_object() && layer.type == LayerType::Vector &&
+                                    !layer.is_reference())
+  {
+    GradientSettings &g = layer.gradient;
+    g.on = true;
+    gradient_type_from_identifier(get_string(*it, "type").c_str(), &g.type);
+    gradient_ends_from_identifier(get_string(*it, "ends").c_str(), &g.ends);
+    gradient_mix_from_identifier(get_string(*it, "mix").c_str(), &g.mix);
+    g.squash = std::max(get_float(*it, "squash", 1.0f), 0.01f);
+    if (auto stops = it->find("stops"); stops != it->end() && stops->is_array()) {
+      for (const json &sj : *stops) {
+        if (!sj.is_object()) {
+          continue;
+        }
+        GradientStop stop;
+        stop.point = get_id(sj, "point");
+        stop.color = get_color(sj, "color", stop.color);
+        stop.midpoint = std::clamp(get_float(sj, "midpoint", 0.5f), 0.02f, 0.98f);
+        gradient_falloff_from_identifier(get_string(sj, "falloff").c_str(), &stop.falloff);
+        g.stops.push_back(stop);
+      }
+    }
+    /* A file edited by hand or by a script that broke it opens as a working gradient. */
+    gradient_layer_repair(layer);
   }
   if (auto it = j.find("text"); it != j.end() && it->is_object() && layer.is_text()) {
     layer.text = text_from_json(*it);

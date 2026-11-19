@@ -70,6 +70,10 @@ set(OANIM_SOURCES
   src/text/text_outline.cc
   src/data/vector.cc
   src/data/grid.cc
+  src/data/gradient.cc
+  src/anim/gradient_shown.cc
+  src/ops/gradient_ops.cc
+  src/editors/gradient_panel.cc
   src/data/ink_stroke.cc
   src/data/quick_shape.cc
   src/editors/brush_editor.cc
@@ -462,6 +466,8 @@ add_test(NAME cage_transform
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_cage_transform.py)
 add_test(NAME grid
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_grid.py)
+add_test(NAME gradient_layer
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_gradient_layer.py)
 add_test(NAME extrude_branch
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_extrude_branch.py)
 add_test(NAME statistics

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "core/math.hh"
+#include "data/gradient.hh"
 #include "data/text.hh"
 #include "data/vector.hh"
 #include "rna/rna.hh"
@@ -1305,6 +1306,8 @@ struct Layer {
    * longer matching has its letters made again, see text/text_layer.hh). */
   TextSettings text;
   TextSettings text_built;
+  /* Gradient layers (a vector layer with gradient.on): the colour stops along its one curve (data/gradient.hh). */
+  GradientSettings gradient;
   /* Group children, top of the stack first, as the Layers editor lists them. */
   std::vector<Layer> children;
 
@@ -1414,6 +1417,8 @@ struct Layer {
   bool is_bone_layer() const { return type == LayerType::Bone; }
   bool is_media() const { return type == LayerType::Media; }
   bool is_text() const { return type == LayerType::Text; }
+  /* A vector layer whose one curve is a path of colour stops, filling the camera frame (data/gradient.hh). */
+  bool is_gradient() const { return type == LayerType::Vector && gradient.on; }
   /* Field by field, children too (undo steps compare a layer with its last copy). */
   bool operator==(const Layer &) const = default;
   /* Has a drawing of its own to show and edit (vector layers and references of them). */
