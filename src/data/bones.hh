@@ -117,6 +117,20 @@ bool armature_ik_reach(Layer &armature, size_t i, BoneConstraintType type, float
 void armature_ik_hold(Layer &armature, const std::vector<Bone> &original, size_t skip, BoneConstraintType skip_type);
 /* Why IK End `end` can't be pinned to bone `to` ("" when it can). */
 std::string armature_ik_pin_refusal(const Layer &armature, const Bone &end, const Bone &to);
+/* The frames bone `i`'s IK End's path runs between (its stretches): the setup frame, its keys and its chain's. */
+std::vector<int> armature_ik_frames(const Layer &armature, size_t i);
+/* The bend an IK End's path has on the stretch leaving frame `k0` (kept on a key there; none is straight). */
+float2 ik_bend_on(const BoneConstraint &c, int k0);
+/* The stretch of bone `i`'s IK End's path `frame` is in: the frames it runs between (false past the last). */
+bool armature_ik_stretch_at(const Layer &armature, size_t i, int frame, int &k0, int &k1);
+/* How much of its stretch's bend bone `i`'s IK End's point is off its way on `frame`: 2e(1-e), e how far along. */
+float armature_ik_bend_weight(const Layer &armature, size_t i, int frame);
+/* Bends bone `i`'s IK End's path out by `bend` on the stretch `frame` is in (kept on the key it leaves, the next keeping
+ * its own); `frame_shown` the frame the bones are on. False where there is no stretch or it is bent so already. */
+bool armature_ik_bend_set(Layer &armature, size_t i, int frame, float2 bend, int frame_shown);
+/* Where bone `i`'s IK End's point is on `frame`, as the bones' keys and its pins have it (the bones alone: no action
+ * bones or other layers). */
+float2 armature_ik_point_at(const Layer &armature, size_t i, int frame);
 /* Bone `i`'s IK End chain back to its setup size. */
 bool armature_ik_clear_scale(Layer &armature, size_t i);
 /* A bone's IK End or IK Base (enabled; null: none). */

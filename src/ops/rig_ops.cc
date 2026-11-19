@@ -116,6 +116,7 @@ static void constraint_keys_take(BoneConstraint &to, const BoneConstraint &from)
 {
   to.influence_keys = from.influence_keys;
   to.pin_keys = from.pin_keys;
+  to.bend_keys = from.bend_keys;
   for (int i = 0; i < 3; i++) {
     to.follow_shift_keys_at(i) = const_cast<BoneConstraint &>(from).follow_shift_keys_at(i);
   }
@@ -701,6 +702,31 @@ static void register_ik_operators()
                  }
                  return armature_ik_clear_scale(armature, size_t(b - armature.bones.data())) ? OpStatus::Finished
                                                                                             : OpStatus::Cancelled;
+               });
+  rig_operator("armature.ik_path_bend", "Bend IK Path",
+               "Bend bone `bone`'s IK End's path (default: the active bone's) between the keys around frame `frame` "
+               "(default: the frame shown): out by x, y at its middle (the bone layer's units; 0, 0 straightens it). "
+               "Kept on the key the stretch leaves",
+               bone_layer_active, [](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 const std::string name = op_arg(C, "bone");
+                 Bone *b = name.empty() ? bone_find(armature, armature.active_bone)
+                                        : const_cast<Bone *>(bone_find_by_name(armature, name));
+                 BoneConstraint *c = b ? ik_constraint_of(*b, BoneConstraintType::IKEnd) : nullptr;
+                 if (!c) {
+                   report(ReportType::Warning, "Bend the path of a bone with an IK End");
+                   return OpStatus::Cancelled;
+                 }
+                 const int frame = int(op_arg_float(C, "frame", float(C.document->frame_current)));
+                 const size_t i = size_t(b - armature.bones.data());
+                 int k0, k1;
+                 if (!armature_ik_stretch_at(armature, i, frame, k0, k1)) {
+                   report(ReportType::Warning, "No stretch between keys there to bend");
+                   return OpStatus::Cancelled;
+                 }
+                 const float2 bend(op_arg_float(C, "x", 0.0f), op_arg_float(C, "y", 0.0f));
+                 return armature_ik_bend_set(armature, i, frame, bend, C.document->frame_current) ? OpStatus::Finished
+                                                                                                   : OpStatus::Cancelled;
                });
   rig_operator("armature.ik_pin_toggle", "Pin",
                "Pin or unpin the active bone's IK End (to the scene), or its IK Base. Keyed",

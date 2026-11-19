@@ -285,6 +285,9 @@ template<typename T> struct Channel {
   bool keyed_by_hand = false;
   /* A yes/no property (visibility): its keys only hold, as Blender's Constant interpolation. */
   bool constant = false;
+  /* Read on a key's own frame only, nothing (T{}) elsewhere: an IK End's path bend, each stretch's own, which the
+   * frames after its key never take on (keying a whole bone there keys none). */
+  bool on_key_only = false;
   /* Pinned to the timeline: listed under Pinned whatever is selected, even with no keys left
    * (the pin button beside its key button in Properties). */
   bool pinned = false;

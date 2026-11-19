@@ -4757,7 +4757,85 @@ static void timeline_body(Area &area, Context &C)
         }
       }
     }
-    for (const auto &[a, b] : order_row || switch_row ? std::vector<std::pair<int, int>>() : hold_spans(r)) {
+    /* An IK End's or IK Base's Pinned row: a bar between keys where pinned (orange, lighter where pinned to a bone;
+     * violet for a base); on it and on an IK End's Bend row, an outline over the stretches its path is bent on. */
+    const std::string &row_path = rows[r].filter.path;
+    const Bone *pin_bone = nullptr;
+    const BoneConstraint *pin_c = nullptr;
+    if (rows[r].layers.size() == 1 && rows[r].layers[0]->is_bone_layer() && row_path.rfind("bones[\"", 0) == 0 &&
+        ((row_path.size() > 4 && row_path.compare(row_path.size() - 4, 4, ".pin") == 0) ||
+         (row_path.size() > 5 && row_path.compare(row_path.size() - 5, 5, ".bend") == 0)))
+    {
+      const size_t end = row_path.find("\"].constraints[", 7);
+      if (end != std::string::npos) {
+        pin_bone = bone_find_by_name(*rows[r].layers[0], row_path.substr(7, end - 7));
+        const size_t ci = size_t(std::strtoull(row_path.c_str() + end + 15, nullptr, 10));
+        if (pin_bone && ci < pin_bone->constraints.size() &&
+            (pin_bone->constraints[ci].type == BoneConstraintType::IKEnd ||
+             pin_bone->constraints[ci].type == BoneConstraintType::IKBase))
+        {
+          pin_c = &pin_bone->constraints[ci];
+        }
+      }
+    }
+    if (pin_c) {
+      const Layer &rig = *rows[r].layers[0];
+      const bool base = pin_c->type == BoneConstraintType::IKBase;
+      std::vector<std::pair<int, float>> spans;
+      const bool bars = row_path.back() == 'n';
+      for (const Key<float> &k : pin_c->pin_keys.keys) {
+        spans.emplace_back(k.frame, k.value);
+      }
+      if (!bars) {
+        spans.clear();
+      }
+      else if (spans.empty()) {
+        spans.emplace_back(0, pin_c->pin);
+      }
+      for (size_t i = 0; i < spans.size(); i++) {
+        const float v = spans[i].second;
+        const float xa = frame_x(float(spans[i].first)) + key_r * 0.6f;
+        const float xb = i + 1 < spans.size() ? frame_x(float(spans[i + 1].first)) - key_r * 0.6f : p1.x;
+        if (v == IK_PIN_NONE || xb <= xa || xb < k0.x || xa > p1.x) {
+          continue;
+        }
+        const Bone *to = v > 0.0f ? bone_find(rig, uint64_t(v)) : nullptr;
+        const ImU32 fill = base ? IM_COL32(0x7F, 0x77, 0xDD, 200)
+                           : to ? IM_COL32(0xFA, 0xC7, 0x75, 200)
+                                : IM_COL32(0xEF, 0x9F, 0x27, 200);
+        const std::string label = base ? "Pinned" : to ? "Pinned to " + to->name : "Pinned to the scene";
+        const ImVec2 bmin(xa, ky - row_h * 0.32f), bmax(xb, ky + row_h * 0.32f);
+        dl->AddRectFilled(bmin, bmax, fill, 3.0f);
+        dl->PushClipRect(bmin, bmax, true);
+        dl->AddText(ImVec2(std::max(xa, k0.x) + 5.0f, ky - font_size * 0.5f), IM_COL32(0x1d, 0x1d, 0x1d, 255), label.c_str());
+        dl->PopClipRect();
+        if (hovered && io.MousePos.x >= bmin.x && io.MousePos.x < bmax.x && io.MousePos.y >= bmin.y &&
+            io.MousePos.y < bmax.y && !g_press.active)
+        {
+          const int last = i + 1 < spans.size() ? spans[i + 1].first - 1 : -1;
+          ImGui::SetTooltip("%s %s: %s, frame %d%s", pin_bone->name.c_str(), base ? "IK Base" : "IK End", label.c_str(),
+                            spans[i].first, last >= 0 ? (" to " + std::to_string(last)).c_str() : " on");
+        }
+      }
+      if (!base && pin_c->bend_keys.animated()) {
+        const std::vector<int> frames = armature_ik_frames(rig, size_t(pin_bone - rig.bones.data()));
+        for (size_t s = 0; s + 1 < frames.size(); s++) {
+          const float2 bend = ik_bend_on(*pin_c, frames[s]);
+          const float xa = frame_x(float(frames[s])) + key_r * 0.6f, xb = frame_x(float(frames[s + 1])) - key_r * 0.6f;
+          if ((bend.x == 0.0f && bend.y == 0.0f) || xb <= xa || xb < k0.x || xa > p1.x) {
+            continue;
+          }
+          const ImVec2 bmin(xa, ky - row_h * 0.38f), bmax(xb, ky + row_h * 0.38f);
+          dl->AddRect(bmin, bmax, IM_COL32(0xFA, 0xC7, 0x75, 255), 3.0f, 0, 1.5f);
+          if (hovered && io.MousePos.x >= bmin.x && io.MousePos.x < bmax.x && io.MousePos.y >= bmin.y &&
+              io.MousePos.y < bmax.y && !g_press.active)
+          {
+            ImGui::SetTooltip("%s IK End: its path bent, frames %d to %d", pin_bone->name.c_str(), frames[s], frames[s + 1]);
+          }
+        }
+      }
+    }
+    for (const auto &[a, b] : order_row || switch_row || pin_c ? std::vector<std::pair<int, int>>() : hold_spans(r)) {
       const float xa = frame_x(float(a)), xb = frame_x(float(b));
       if (xb < k0.x || xa > p1.x) {
         continue;

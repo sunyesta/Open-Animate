@@ -16647,6 +16647,207 @@ static std::vector<IKPoint> ik_points(const Layer &armature)
   return out;
 }
 
+/* The picked IK End's path: each stretch between its frames, its point's place on every frame of it, worked out again
+ * only when the bones change. */
+struct IKPathStretch {
+  int k0 = 0, k1 = 0, mid = 0;
+  float weight = 0.0f;
+  float2 bend;
+  bool pinned = false;
+  std::vector<float2> places;
+};
+static struct {
+  uint64_t layer = 0;
+  size_t bone = 0;
+  std::vector<Bone> bones;
+  std::vector<IKPathStretch> stretches;
+} g_ik_path;
+
+/* Dragging a path's diamond: the stretch's bend as it began, moved by the mouse over its weight at the middle. */
+static struct {
+  bool active = false, moved = false;
+  uint64_t layer = 0;
+  size_t bone = 0;
+  int k0 = 0;
+  float weight = 1.0f;
+  float2 was, start;
+  ImVec2 press;
+} g_ik_bend;
+
+static const std::vector<IKPathStretch> &ik_path(const Layer &armature, size_t i)
+{
+  if (g_ik_path.layer == armature.id && g_ik_path.bone == i && g_ik_path.bones == armature.bones) {
+    return g_ik_path.stretches;
+  }
+  g_ik_path.layer = armature.id;
+  g_ik_path.bone = i;
+  g_ik_path.bones = armature.bones;
+  g_ik_path.stretches.clear();
+  const BoneConstraint *c = i < armature.bones.size() ? bone_ik_end(armature.bones[i]) : nullptr;
+  if (!c) {
+    return g_ik_path.stretches;
+  }
+  const std::vector<int> frames = armature_ik_frames(armature, i);
+  int budget = 2000;
+  for (size_t s = 0; s + 1 < frames.size() && budget > 0; s++) {
+    IKPathStretch st;
+    st.k0 = frames[s];
+    st.k1 = frames[s + 1];
+    st.mid = (st.k0 + st.k1) / 2;
+    st.weight = armature_ik_bend_weight(armature, i, st.mid);
+    st.bend = ik_bend_on(*c, st.k0);
+    st.pinned = (c->pin_keys.animated() ? c->pin_keys.evaluate(st.k0) : c->pin) != IK_PIN_NONE;
+    for (int f = st.k0; f <= st.k1 && budget > 0; f++, budget--) {
+      st.places.push_back(armature_ik_point_at(armature, i, f));
+    }
+    g_ik_path.stretches.push_back(std::move(st));
+  }
+  return g_ik_path.stretches;
+}
+
+/* A stretch's diamond: on its path at the middle frame (none where the stretch is too short to bend). */
+static bool ik_path_diamond(const IKPathStretch &st, float2 &at)
+{
+  const size_t m = size_t(st.mid - st.k0);
+  if (st.weight < 1e-3f || m >= st.places.size()) {
+    return false;
+  }
+  at = st.places[m];
+  return true;
+}
+
+/* The picked IK End's stretch whose diamond is under the mouse. */
+static const IKPathStretch *ik_path_diamond_under(const Document &doc, const Layer &armature, const ViewMapping &view,
+                                                  ImVec2 mouse)
+{
+  const Bone *picked = ik_picked_end(doc, armature);
+  if (!picked || doc.frame_current == 0) {
+    return nullptr;
+  }
+  const Transform2D to_document = layer_world_transform(doc, armature.id);
+  for (const IKPathStretch &st : ik_path(armature, size_t(picked - armature.bones.data()))) {
+    float2 p;
+    if (ik_path_diamond(st, p)) {
+      const ImVec2 at = view.to_screen(to_document.apply(p));
+      if (std::abs(at.x - mouse.x) + std::abs(at.y - mouse.y) <= 7.0f) {
+        return &st;
+      }
+    }
+  }
+  return nullptr;
+}
+
+/* The picked IK End's path, dashed, a dot on each frame between its keys (the frame shown white), a diamond at each
+ * stretch's middle with a thin line to where it would be unbent. Orange where pinned or bent, grey elsewhere. */
+static void draw_ik_path(ImDrawList *dl, const Document &doc, const Layer &armature, const ViewMapping &view)
+{
+  const Bone *picked = g_ik_bend.active && g_ik_bend.layer == armature.id && g_ik_bend.bone < armature.bones.size()
+                           ? &armature.bones[g_ik_bend.bone]
+                           : ik_picked_end(doc, armature);
+  if (!picked || doc.frame_current == 0 || g_ik_drag.active) {
+    return;
+  }
+  const Transform2D to_document = layer_world_transform(doc, armature.id);
+  const auto screen = [&](float2 p) { return view.to_screen(to_document.apply(p)); };
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  const IKPathStretch *hover = g_ik_bend.active ? nullptr : ik_path_diamond_under(doc, armature, view, mouse);
+  for (const IKPathStretch &st : ik_path(armature, size_t(picked - armature.bones.data()))) {
+    const bool lit = st.pinned || st.bend.x != 0.0f || st.bend.y != 0.0f;
+    const ImU32 col = lit ? COL_IK_END : IM_COL32(0x8a, 0x8a, 0x8a, 230);
+    /* Dashed: 4 on, 3 off, along the polyline. */
+    float run = 0.0f;
+    for (size_t k = 1; k < st.places.size(); k++) {
+      const ImVec2 a = screen(st.places[k - 1]), b = screen(st.places[k]);
+      const float l = std::hypot(b.x - a.x, b.y - a.y);
+      for (float s = 0.0f; s < l;) {
+        const float phase = std::fmod(run + s, 7.0f);
+        const float step = std::min(l - s, phase < 4.0f ? 4.0f - phase : 7.0f - phase);
+        if (phase < 4.0f) {
+          const float u0 = s / l, u1 = (s + step) / l;
+          dl->AddLine(ImVec2(a.x + (b.x - a.x) * u0, a.y + (b.y - a.y) * u0),
+                      ImVec2(a.x + (b.x - a.x) * u1, a.y + (b.y - a.y) * u1), col, 1.2f);
+        }
+        s += std::max(step, 0.01f);
+      }
+      run += l;
+    }
+    for (int f = st.k0 + 1; f < st.k1 && size_t(f - st.k0) < st.places.size(); f++) {
+      const bool now = f == doc.frame_current;
+      dl->AddCircleFilled(screen(st.places[size_t(f - st.k0)]), now ? 3.2f : 2.0f, now ? IM_COL32(255, 255, 255, 255) : col);
+    }
+    float2 mid;
+    if (!ik_path_diamond(st, mid)) {
+      continue;
+    }
+    const ImVec2 d = screen(mid), bare = screen(mid - st.bend * st.weight);
+    dl->AddLine(d, bare, col, 0.8f);
+    const bool on = (g_ik_bend.active && g_ik_bend.k0 == st.k0) || hover == &st;
+    const ImVec2 q[4] = {{d.x, d.y - 6.0f}, {d.x + 6.0f, d.y}, {d.x, d.y + 6.0f}, {d.x - 6.0f, d.y}};
+    dl->AddConvexPolyFilled(q, 4, on ? IM_COL32(255, 255, 255, 255) : IM_COL32(0x2a, 0x2a, 0x2a, 255));
+    dl->AddPolyline(q, 4, col, ImDrawFlags_Closed, 1.6f);
+  }
+  if (hover && ImGui::IsWindowHovered()) {
+    ImGui::SetTooltip("%s path: drag to bend it, double-click to straighten", picked->name.c_str());
+  }
+}
+
+/* A press on the picked IK End's path diamond bends that stretch while it is dragged; a double-click straightens it. */
+static bool ik_path_input(Context &C, Layer &armature, const ViewMapping &view, bool hovered)
+{
+  Document &doc = *C.document;
+  const ImGuiIO &io = ImGui::GetIO();
+  const float2 mouse = layer_world_transform(doc, armature.id).inverted().apply(view.to_document(io.MousePos));
+  if (g_ik_bend.active) {
+    if (g_ik_bend.layer != armature.id || g_ik_bend.bone >= armature.bones.size()) {
+      g_ik_bend.active = false;
+      return false;
+    }
+    const float dx = io.MousePos.x - g_ik_bend.press.x, dy = io.MousePos.y - g_ik_bend.press.y;
+    g_ik_bend.moved |= dx * dx + dy * dy > 9.0f;
+    if (g_ik_bend.moved) {
+      armature_ik_bend_set(armature, g_ik_bend.bone, g_ik_bend.k0,
+                           g_ik_bend.was + (mouse - g_ik_bend.start) / g_ik_bend.weight, doc.frame_current);
+    }
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      g_ik_bend.active = false;
+      const BoneConstraint *c = bone_ik_end(armature.bones[g_ik_bend.bone]);
+      const float2 now = c ? ik_bend_on(*c, g_ik_bend.k0) : float2();
+      if (g_ik_bend.moved && now != g_ik_bend.was) {
+        push_undo(C, "Bend IK Path");
+      }
+    }
+    return true;
+  }
+  if (!hovered || io.KeyShift || io.KeyCtrl || ik_armature(C) != &armature) {
+    return false;
+  }
+  const bool twice = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+  if (!twice && !ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    return false;
+  }
+  const IKPathStretch *st = ik_path_diamond_under(doc, armature, view, io.MousePos);
+  if (!st) {
+    return false;
+  }
+  const size_t i = g_ik_path.bone;
+  if (twice) {
+    if (armature_ik_bend_set(armature, i, st->k0, float2(), doc.frame_current)) {
+      push_undo(C, "Straighten IK Path");
+    }
+    return true;
+  }
+  g_ik_bend = {};
+  g_ik_bend.active = true;
+  g_ik_bend.layer = armature.id;
+  g_ik_bend.bone = i;
+  g_ik_bend.k0 = st->k0;
+  g_ik_bend.weight = st->weight;
+  g_ik_bend.was = st->bend;
+  g_ik_bend.start = mouse;
+  g_ik_bend.press = io.MousePos;
+  return true;
+}
+
 /* Where an IK point is drawn: a base's ring on its point; an end's dot a little past it, along the bone it ends. */
 static ImVec2 ik_point_screen(const Document &doc, const Layer &armature, const std::vector<BonePose> &poses,
                               const ViewMapping &view, const IKPoint &p)
@@ -16712,6 +16913,7 @@ static void draw_ik_points(ImDrawList *dl, Context &C, const ViewMapping &view)
   const Transform2D to_document = layer_world_transform(doc, armature->id);
   const std::vector<BonePose> poses = armature_pose(*armature, doc.frame_current == 0);
   const auto screen = [&](float2 p) { return view.to_screen(to_document.apply(p)); };
+  draw_ik_path(dl, doc, *armature, view);
   const Bone *picked = ik_picked_end(doc, *armature);
   if (picked || g_ik_drag.active) {
     const size_t i = g_ik_drag.active ? g_ik_drag.point.bone : size_t(picked - armature->bones.data());
@@ -16928,8 +17130,8 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
   if (curve_handle_input(C, armature, view, hovered)) {
     return;
   }
-  /* An IK dot or ring pressed or dragged. */
-  if (ik_point_input(C, armature, view, hovered)) {
+  /* An IK path's diamond, dot or ring pressed or dragged. */
+  if (ik_path_input(C, armature, view, hovered) || ik_point_input(C, armature, view, hovered)) {
     return;
   }
   /* Dragging a controller's corner on the setup frame: how far a frame is, so the corner stays under the mouse. */

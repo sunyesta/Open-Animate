@@ -546,6 +546,10 @@ void mirror_bone_keys(Layer &target, const Layer &source_layer, const Transform2
                     [](float2 v) { return float2(-v.x, v.y); });
         mirror_keys(mine.follow_shift3_keys, bone.constraints[i].follow_shift3_keys, from, to,
                     [](float2 v) { return float2(-v.x, v.y); });
+        /* An IK End's path bends out the other way. */
+        mirror_keys(mine.bend_keys, bone.constraints[i].bend_keys, from, to, [&](float2 v) {
+          return flip.apply_vector(v);
+        });
         /* An IK End pinned to a bone is pinned to that bone's other side. */
         mirror_keys(mine.pin_keys, bone.constraints[i].pin_keys, from, to, [&](float v) {
           const Bone *was = v > 0.0f ? bone_find(source_layer, uint64_t(v)) : nullptr;

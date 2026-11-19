@@ -4187,6 +4187,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       d["ik_head"] = c.ik_head;
       d["keep_angle"] = c.keep_angle;
       d["soft"] = c.soft;
+      d["bend"] = py::make_tuple(c.bend.x, c.bend.y);
       {
         const Bone *pin_bone = c.pin > 0.0f ? bone_find(layer, uint64_t(c.pin)) : nullptr;
         d["pin"] = c.pin == IK_PIN_SCENE ? std::string("SCENE") : pin_bone ? pin_bone->name : std::string();

@@ -1227,6 +1227,16 @@ static float ik_pin_progress(const Bone &end, int k0, int k1, int f)
   return u * u * (3.0f - 2.0f * u);
 }
 
+float2 ik_bend_on(const BoneConstraint &c, int k0)
+{
+  for (const Key<float2> &k : c.bend_keys.keys) {
+    if (k.frame == k0) {
+      return k.value;
+    }
+  }
+  return {};
+}
+
 /* The whole pose of some bones: constraints, dynamics and IK targets included. */
 static std::vector<BonePose> bones_full_pose(const std::vector<Bone> &bones, bool setup_frame, int frame,
                                              const std::map<uint64_t, BoneDynamicsState> *dynamics, bool with_pins = true)
@@ -1321,7 +1331,7 @@ static std::vector<BonePose> bones_full_pose(const std::vector<Bone> &bones, boo
   for (int i = 0; i < int(n); i++) {
     for (const BoneConstraint &c : armature.bones[i].constraints) {
       if ((c.type != BoneConstraintType::IKEnd && c.type != BoneConstraintType::IKBase) || !c.enabled ||
-          (!c.pin_keys.animated() && c.pin == IK_PIN_NONE))
+          (!c.pin_keys.animated() && c.pin == IK_PIN_NONE && !c.bend_keys.animated()))
       {
         continue;
       }
@@ -1376,14 +1386,22 @@ static std::vector<BonePose> bones_full_pose(const std::vector<Bone> &bones, boo
       continue;
     }
     const float pin = c.pin_keys.animated() ? c.pin_keys.evaluate(k0) : c.pin;
-    if (pin == IK_PIN_NONE) {
+    /* A bent path: off the straight way by the bend kept on the key before, most at the middle. */
+    const float2 bend = k1 >= 0 ? ik_bend_on(c, k0) : float2();
+    const bool bent = bend.x != 0.0f || bend.y != 0.0f;
+    if (pin == IK_PIN_NONE && !bent) {
       continue;
     }
     const float e = k1 >= 0 ? ik_pin_progress(armature.bones[pp.end], k0, k1, frame) : 0.0f;
+    const float2 bump = bend * (2.0f * e * (1.0f - e));
     const std::vector<BonePose> &p0 = keyed_pose(k0);
     const std::vector<BonePose> &p1 = keyed_pose(k1 >= 0 ? k1 : k0);
     float2 goal = p0[pp.end].tail + (p1[pp.end].tail - p0[pp.end].tail) * e;
-    if (pin > 0.0f) {
+    if (pin == IK_PIN_NONE) {
+      /* Unpinned: where the keys put it, bent. */
+      goal = poses[pp.end].tail;
+    }
+    else if (pin > 0.0f) {
       const auto to = index.find(uint64_t(pin));
       const bool moved = to != index.end() &&
                          std::any_of(chain.begin(), chain.end(),
@@ -1395,6 +1413,7 @@ static std::vector<BonePose> bones_full_pose(const std::vector<Bone> &bones, boo
         goal = poses[b].pose.apply(l0 + (l1 - l0) * e);
       }
     }
+    goal += bump;
     if (distance(goal, poses[pp.end].tail) < 1e-7f) {
       continue;
     }
@@ -1832,6 +1851,99 @@ std::string armature_ik_pin_refusal(const Layer &armature, const Bone &end, cons
     return false;
   };
   return follows(to) ? to.name + " already follows " + end.name : std::string();
+}
+
+std::vector<int> armature_ik_frames(const Layer &armature, size_t i)
+{
+  const BoneConstraint *c = i < armature.bones.size() ? bone_ik_end(armature.bones[i]) : nullptr;
+  if (!c) {
+    return {};
+  }
+  const std::map<uint64_t, int> index = bones_index(armature.bones);
+  const int e = ik_point_bone(armature.bones, index, int(i), c->ik_head);
+  if (e < 0) {
+    return {};
+  }
+  return ik_pin_frames(armature.bones, ik_point_chain(armature.bones, index, e), *c);
+}
+
+bool armature_ik_stretch_at(const Layer &armature, size_t i, int frame, int &k0, int &k1)
+{
+  k0 = k1 = -1;
+  for (const int k : armature_ik_frames(armature, i)) {
+    if (k <= frame) {
+      k0 = k;
+    }
+    else if (k1 < 0) {
+      k1 = k;
+    }
+  }
+  return k0 >= 0 && k1 >= 0;
+}
+
+float armature_ik_bend_weight(const Layer &armature, size_t i, int frame)
+{
+  int k0, k1;
+  const BoneConstraint *c = i < armature.bones.size() ? bone_ik_end(armature.bones[i]) : nullptr;
+  if (!c || !armature_ik_stretch_at(armature, i, frame, k0, k1)) {
+    return 0.0f;
+  }
+  const int e = armature_ik_point_bone(armature, i, c->ik_head);
+  const float u = ik_pin_progress(armature.bones[size_t(e < 0 ? int(i) : e)], k0, k1, frame);
+  return 2.0f * u * (1.0f - u);
+}
+
+bool armature_ik_bend_set(Layer &armature, size_t i, int frame, float2 bend, int frame_shown)
+{
+  BoneConstraint *c = nullptr;
+  if (i < armature.bones.size()) {
+    for (BoneConstraint &x : armature.bones[i].constraints) {
+      if (x.type == BoneConstraintType::IKEnd && !c) {
+        c = &x;
+      }
+    }
+  }
+  int k0, k1;
+  if (!c || !armature_ik_stretch_at(armature, i, frame, k0, k1)) {
+    return false;
+  }
+  if (bend == ik_bend_on(*c, k0)) {
+    return false;
+  }
+  /* Each stretch keeps its own on the key it leaves (a key put inside it later starts one unbent); straightened, it
+   * has none. */
+  if (bend == float2()) {
+    c->bend_keys.remove_key(k0);
+  }
+  else {
+    c->bend_keys.set_key(k0, bend);
+  }
+  /* As the keys have it now, so auto-key sees no edit to key on the frame shown. */
+  c->bend = ik_bend_on(*c, frame_shown);
+  c->bend_keys.last = c->bend;
+  c->bend_keys.has_last = true;
+  return true;
+}
+
+float2 armature_ik_point_at(const Layer &armature, size_t i, int frame)
+{
+  std::vector<Bone> at = armature.bones;
+  for (Bone &b : at) {
+    b.position = bone_position_at(b, frame, false);
+    b.angle = bone_angle_at(b, frame, false);
+    if (b.scale_keys.animated()) {
+      b.scale = b.scale_keys.evaluate(frame);
+    }
+    for (BoneConstraint &c : b.constraints) {
+      if (c.pin_keys.animated()) {
+        c.pin = c.pin_keys.evaluate(frame);
+      }
+    }
+  }
+  Layer copy;
+  copy.bones = std::move(at);
+  const std::vector<BonePose> poses = bones_full_pose(copy.bones, frame == 0, frame, nullptr);
+  return armature_ik_point(copy, poses, i, BoneConstraintType::IKEnd);
 }
 
 bool armature_ik_clear_scale(Layer &armature, size_t i)

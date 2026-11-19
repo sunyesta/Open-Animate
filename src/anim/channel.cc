@@ -1614,6 +1614,14 @@ template<typename T> T Channel<T>::evaluate(int frame) const
   if (keys.empty()) {
     return last;
   }
+  if (on_key_only) {
+    for (const Key<T> &k : keys) {
+      if (k.frame == frame) {
+        return k.value;
+      }
+    }
+    return T{};
+  }
   {
     /* Worked out without the fillers that shape nothing: the curve through the rest is as it was. */
     bool own_after = false, quiet = false;

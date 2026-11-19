@@ -318,4 +318,94 @@ doc.frame_current = 10
 assert rig.bone_constraints("Shin_R")[0]["pin"] == "Pad_R", "the mirrored action pins the other side's pad"
 assert rig.bone_constraints("Shin_L")[0]["pin"] == "Pad_L"
 
+# --- A bent path: between two keys the ankle goes off its way by the bend kept on the key before, most at the middle
+# (2e(1-e) of it, e how far along, eased); 0, 0 straightens it. Unpinned it bends the keys' way; pinned, the straight one.
+ops.wm.read_homefile(confirmed="1")
+doc, layers = oanim.data.document, oanim.data.layers
+doc.auto_freeze_keys = False
+doc.frame_current = 0
+ops.layer.new_bone()
+rig = layers.active
+add("Root", (0, -2.5), (0, -2.3))
+add("Pelvis", (0, 0), (0, 0.4), "Root")
+add("Thigh_R", (-0.15, 0), (-0.25, -1.0), "Pelvis")
+add("Calf_R", (-0.25, -1.0), (-0.2, -2.0), "Thigh_R")
+add("Foot_R", (-0.2, -2.0), (-0.5, -2.05), "Calf_R")
+assert ops.armature.ik_base_add(bone="Pelvis") == {'FINISHED'}
+assert ops.armature.ik_end_add(bone="Foot_R") == {'FINISHED'}
+rest = bones()
+doc.auto_key = True
+doc.frame_current = 20
+rig.bone_set("Thigh_R", angle=rest["Thigh_R"]["angle"] + 0.4)
+doc.frame_current = 0
+plain = {}
+for f in (5, 10, 15, 20, 26):
+    doc.frame_current = f
+    plain[f] = bones()["Calf_R"]["tail"]
+doc.frame_current = 0
+assert ops.armature.ik_path_bend(bone="Foot_R", frame="25", x="0.3", y="0.1") == {'CANCELLED'},     "past the last key there is no stretch to bend"
+assert ops.armature.ik_path_bend(bone="Foot_R", frame="10", x="0.3", y="0.1") == {'FINISHED'}
+assert ops.armature.ik_path_bend(bone="Foot_R", frame="10", x="0.3", y="0.1") == {'CANCELLED'}, "bent so already"
+bend_path = 'bones["Foot_R"].constraints[%d].bend' % end_index("Foot_R")
+doc.frame_current = 11
+assert [k["frame"] for k in rig.keyframes(bend_path)] == [0],     ("kept on the key the stretch leaves, not keyed again on the frame shown", rig.keyframes(bend_path))
+
+
+def bent(f, bend, base=None):
+    u = f / 20
+    e = u * u * (3 - 2 * u)
+    k = 2 * e * (1 - e)
+    p = plain[f] if base is None else base(f)
+    return (p[0] + bend[0] * k, p[1] + bend[1] * k)
+
+
+for f in (5, 10, 20, 26):
+    doc.frame_current = f
+    got = bones()["Calf_R"]["tail"]
+    want = bent(f, (0.3, 0.1)) if f < 20 else plain[f]
+    assert dist(got, want) < 1e-3, (f, "bent between the keys only", got, want)
+doc.frame_current = 0
+assert dist(end_of("Foot_R")["bend"], (0.3, 0.1)) < 1e-6, "kept on the key the stretch leaves"
+doc.frame_current = 10
+assert end_of("Foot_R")["bend"] == (0.0, 0.0), "read on that key only"
+with tempfile.TemporaryDirectory() as tmp:
+    path = str(pathlib.Path(tmp) / "bend.oanim")
+    assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
+    assert ops.wm.open_mainfile(filepath=path) == {'FINISHED'}
+doc, layers = oanim.data.document, oanim.data.layers
+rig = layers.active
+doc.frame_current = 10
+assert dist(bones()["Calf_R"]["tail"], bent(10, (0.3, 0.1))) < 1e-3, "a save keeps the bend"
+# A key put inside a bent stretch: the half before keeps the bend (on its key), the half after starts straight.
+doc.frame_current = 10
+rig.select_bone("Calf_R")
+assert ops.anim.keyframe_insert() == {'FINISHED'}
+doc.frame_current = 11
+doc.frame_current = 5
+u = 5 / 10
+e = u * u * (3 - 2 * u)
+assert dist(bones()["Calf_R"]["tail"], (plain[5][0] + 0.3 * 2 * e * (1 - e), plain[5][1] + 0.1 * 2 * e * (1 - e))) < 1e-3,     "the half before is bent at its own middle"
+doc.frame_current = 15
+assert dist(bones()["Calf_R"]["tail"], plain[15]) < 1e-3, "the half after starts straight"
+assert ops.armature.ik_path_bend(bone="Foot_R", frame="5", x="0", y="0") == {'FINISHED'}
+assert [(k["frame"], k["value"]) for k in rig.keyframes(bend_path)] == [], ("straightened, it keeps no bend", [(k["frame"], k["value"]) for k in rig.keyframes(bend_path)])
+doc.frame_current = 5
+assert dist(bones()["Calf_R"]["tail"], plain[5]) < 1e-4, "0, 0 straightens it"
+# Pinned: off the straight way from the key before's place to the key after's (the calf's key at 10 starts one).
+doc.frame_current = 10
+rig.select_bone("Foot_R")
+assert ops.armature.ik_pin_toggle() == {'FINISHED'}
+doc.frame_current = 15
+assert ops.armature.ik_path_bend(bone="Foot_R", x="-0.2", y="0.2") == {'FINISHED'}
+assert [k["frame"] for k in rig.keyframes(bend_path)] == [10], "the stretch from the calf's key"
+for f in (12, 15, 18):
+    doc.frame_current = f
+    u = (f - 10) / 10
+    e = u * u * (3 - 2 * u)
+    k = 2 * e * (1 - e)
+    want = (plain[10][0] + (plain[20][0] - plain[10][0]) * e - 0.2 * k,
+            plain[10][1] + (plain[20][1] - plain[10][1]) * e + 0.2 * k)
+    got = bones()["Calf_R"]["tail"]
+    assert dist(got, want) < 1e-3, (f, "pinned, bent off the straight way", got, want)
+
 print("test_ik_end: OK")

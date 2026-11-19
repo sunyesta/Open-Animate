@@ -478,6 +478,15 @@ struct BoneConstraint {
     c.constant = true;
     return c;
   }();
+  /* IK End: how far its path between two keys bends out at its middle (bone layer units), kept on the key it leaves
+   * (a stretch whose first key has none is straight): the point goes `bend` * 2e(1-e) off its way, e how far along. */
+  float2 bend;
+  Channel<float2> bend_keys = [] {
+    Channel<float2> c;
+    c.constant = true;
+    c.on_key_only = true;
+    return c;
+  }();
   /* LimitShape: the layer and its shape (ids; shape 0: the layer's first closed shape) to stay
    * inside; what stays inside, and with Whole the layer whose drawing it is (0: the layers that
    * follow this bone); how far that may go past the edge (0-1 of its size); and how soft the edge is

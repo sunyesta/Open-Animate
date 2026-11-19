@@ -1054,6 +1054,7 @@ static json layer_to_json(const Layer &layer)
                      {"follow_rotation", c.follow_rotation},
                      {"follow_scale", c.follow_scale},
                      {"follow_shift", {num(c.follow_shift.x), num(c.follow_shift.y)}},
+                     {"bend", {num(c.bend.x), num(c.bend.y)}},
                      {"follow_shift2", {num(c.follow_shift2.x), num(c.follow_shift2.y)}},
                      {"follow_point_id", c.follow_point_id},
                      {"follow_point2_id", c.follow_point2_id},
@@ -1089,6 +1090,7 @@ static json layer_to_json(const Layer &layer)
                      {"scale_spring", spring(c.scale_spring)}};
           put_keys(cj, "influence_keys", c.influence_keys);
           put_keys(cj, "pin_keys", c.pin_keys);
+          put_keys(cj, "bend_keys", c.bend_keys);
           put_keys(cj, "follow_shift_keys", c.follow_shift_keys);
           put_keys(cj, "follow_shift2_keys", c.follow_shift2_keys);
           put_keys(cj, "follow_shift3_keys", c.follow_shift3_keys);
@@ -3400,6 +3402,10 @@ static Layer layer_from_json(const json &j, int depth)
       }
       get_keys(cj, "influence_keys", c.influence_keys);
       get_keys(cj, "pin_keys", c.pin_keys);
+      get_keys(cj, "bend_keys", c.bend_keys);
+      if (const auto it = cj.find("bend"); it != cj.end() && it->is_array() && it->size() == 2) {
+        c.bend = {(*it)[0].get<float>(), (*it)[1].get<float>()};
+      }
       get_keys(cj, "gravity_keys", c.gravity_keys);
       get_keys(cj, "wind_keys", c.wind_keys);
       get_keys(cj, "wind_direction_keys", c.wind_direction_keys);

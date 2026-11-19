@@ -178,6 +178,7 @@ void constraint_keys_taken(BoneConstraint &now, const BoneConstraint &old)
 {
   now.influence_keys = old.influence_keys;
   now.pin_keys = old.pin_keys;
+  now.bend_keys = old.bend_keys;
   now.follow_shift_keys = old.follow_shift_keys;
   now.follow_shift2_keys = old.follow_shift2_keys;
   now.follow_shift3_keys = old.follow_shift3_keys;

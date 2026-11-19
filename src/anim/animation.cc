@@ -49,6 +49,7 @@ template<typename F> static void bone_other_channels(Bone &bone, F &&f)
   for (BoneConstraint &c : bone.constraints) {
     f(c.influence_keys, c.influence);
     f(c.pin_keys, c.pin);
+    f(c.bend_keys, c.bend);
     f(c.follow_shift_keys, c.follow_shift);
     f(c.follow_shift2_keys, c.follow_shift2);
     f(c.follow_shift3_keys, c.follow_shift3);
@@ -5283,6 +5284,9 @@ std::vector<ChannelRef> layer_channels(Layer &layer, bool drawing)
       add(cb + "influence", c.influence_keys, c.influence);
       if (c.type == BoneConstraintType::IKEnd || c.type == BoneConstraintType::IKBase) {
         add(cb + "pin", c.pin_keys, c.pin);
+        if (c.type == BoneConstraintType::IKEnd) {
+          add(cb + "bend", c.bend_keys, c.bend);
+        }
       }
       if (c.type == BoneConstraintType::FollowPoint) {
         add(cb + "follow_shift", c.follow_shift_keys, c.follow_shift);
@@ -5471,6 +5475,7 @@ static bool layer_channel_direct(Layer &layer, const std::string &path, ChannelR
     const std::string_view field = rest.substr(close + 2);
     if (field == "influence") return take(c.influence_keys, c.influence);
     if (field == "pin") return take(c.pin_keys, c.pin);
+    if (field == "bend") return take(c.bend_keys, c.bend);
     if (field == "follow_shift") return take(c.follow_shift_keys, c.follow_shift);
     if (field == "follow_shift2") return take(c.follow_shift2_keys, c.follow_shift2);
     if (field == "follow_shift3") return take(c.follow_shift3_keys, c.follow_shift3);
@@ -5528,11 +5533,17 @@ bool layer_channel(Layer &layer, const std::string &path, ChannelRef *r_ref)
   return false;
 }
 
+/* A channel read on its keys only (an IK End's bend) with nothing there: keying everything leaves it unkeyed. */
+template<typename T> static bool on_key_only_none(const Channel<T> &ch, const T &value, int frame)
+{
+  return ch.on_key_only && value == T{} && !ch.key_at(frame);
+}
+
 int layer_insert_keys(Layer &layer, int frame)
 {
   int count = 0;
   layer_for_each_channel(layer, [&](auto &ch, auto &value) {
-    if (ch.keyed_by_hand && !ch.animated()) {
+    if ((ch.keyed_by_hand && !ch.animated()) || on_key_only_none(ch, value, frame)) {
       return;
     }
     /* Keys hold the value without what action bone actions add. */
@@ -5553,7 +5564,7 @@ int layer_insert_filtered_keys(Layer &layer, const KeyFilter &filter, int frame)
   int count = 0;
   const auto key = [&](auto &ch, auto &value) {
     /* As layer_insert_keys: a setting keyed only by hand (a mask's Reach) waits to be keyed so. */
-    if (ch.keyed_by_hand && !ch.animated()) {
+    if ((ch.keyed_by_hand && !ch.animated()) || on_key_only_none(ch, value, frame)) {
       return;
     }
     const auto base = value - ch.from_action_bones;
