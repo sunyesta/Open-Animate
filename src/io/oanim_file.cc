@@ -947,6 +947,9 @@ static json layer_to_json(const Layer &layer)
         }
       });
       bj["end_distance"] = b.keep_end_distance;
+      if (b.bendy) {
+        bj["bendy"] = true;
+      }
       if (b.shape != BoneShape::None) {
         bj["shape"] = "CUSTOM";
       }
@@ -3160,10 +3163,14 @@ static Layer layer_from_json(const json &j, int depth)
     get_keys(bj, "scale_keys", b.scale_keys);
     b.depth = std::max(1e-4f, get_float(bj, "depth", 1.0f));
     get_keys(bj, "depth_keys", b.depth_keys);
+    bool bent = false;
     bone_curve_channels(b, [&](std::string_view name, float &value, Channel<float> &keys) {
       value = get_float(bj, std::string(name).c_str(), bone_curve_channel_default(name));
       get_keys(bj, (std::string(name) + "_keys").c_str(), keys);
+      bent = bent || value != bone_curve_channel_default(name) || keys.animated();
     });
+    /* Before Bendy Bones was a setting every regular bone bent: those bent or keyed keep it. */
+    b.bendy = g_loading_version < 10 ? bent : get_bool(bj, "bendy", false);
     b.keep_end_distance = get_bool(bj, "end_distance", false);
     const std::string shape = bj.value("shape", std::string());
     b.shape = shape == "CUSTOM" ? BoneShape::Custom : BoneShape::None;
@@ -4464,6 +4471,14 @@ bool oanim_document_from_json(const std::string &text, Document &r_doc, std::str
   vector_deform_resolve_legacy(doc);
   if (g_loading_version < 9) {
     controllers_keys_to_distance(doc);
+  }
+  if (g_loading_version < 10) {
+    /* And the bones drawings bend along with Deform: Curve. */
+    for (const Layer *layer : document_layers_flat(doc)) {
+      if (const Layer *armature = layer->parent_bone_curve ? layer_armature(doc, layer->id) : nullptr) {
+        layer_curve_bones_bendy(*layer_find(doc, armature->id), *layer);
+      }
+    }
   }
   /* Older files' controller sides linked to a bone's own action get ordinary actions of their own. */
   controller_links_undo(doc);

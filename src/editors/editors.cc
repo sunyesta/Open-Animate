@@ -467,19 +467,27 @@ bool ui_collapsing_header(const char *label, bool default_open)
   return open;
 }
 
-bool ui_panel_begin(const char *title, const std::string &header, unsigned int color, bool default_open);
+static bool panel_begin(const char *title, const std::string &header, unsigned int color, bool default_open,
+                        bool *check, bool *r_toggled, const char *check_tooltip);
 
 bool ui_panel_begin(const char *title, bool default_open)
 {
-  return ui_panel_begin(title, std::string(), 0u, default_open);
+  return panel_begin(title, std::string(), 0u, default_open, nullptr, nullptr, nullptr);
 }
 
 bool ui_panel_begin(const char *title, const std::string &header, unsigned int color)
 {
-  return ui_panel_begin(title, header, color, true);
+  return panel_begin(title, header, color, true, nullptr, nullptr, nullptr);
 }
 
-bool ui_panel_begin(const char *title, const std::string &header, unsigned int color, bool default_open)
+bool ui_panel_begin_check(const char *title, bool *check, bool *r_toggled, const char *tooltip, bool default_open)
+{
+  *r_toggled = false;
+  return panel_begin(title, std::string(), 0u, default_open, check, r_toggled, tooltip);
+}
+
+static bool panel_begin(const char *title, const std::string &header, unsigned int color, bool default_open,
+                        bool *check, bool *r_toggled, const char *check_tooltip)
 {
   const std::string key = ui_fold_scope() + "/" + title;
   /* A property being shown (ui_flash_bind) opens its panel. */
@@ -493,10 +501,37 @@ bool ui_panel_begin(const char *title, const std::string &header, unsigned int c
   if (color != 0) {
     ImGui::PushStyleColor(ImGuiCol_Text, color);
   }
-  const std::string label = header.empty() ? std::string(title) : header + "###" + title;
+  std::string label = header.empty() ? std::string(title) : header + "###" + title;
+  /* A checkbox in the header, as Blender's Deform panel has: between the arrow and the title. */
+  const float check_w = check ? ImGui::GetFrameHeight() : 0.0f;
+  if (check) {
+    const float space = std::max(1.0f, ImGui::CalcTextSize(" ").x);
+    label = std::string(size_t(std::ceil((check_w + ImGui::GetStyle().ItemInnerSpacing.x) / space)), ' ') + title +
+            "###" + title;
+  }
+  if (check && !boxed) {
+    ImGui::SetNextItemAllowOverlap();
+  }
   const bool open = boxed ? box_header(label.c_str(), title) : ImGui::CollapsingHeader(label.c_str());
   if (color != 0) {
     ImGui::PopStyleColor();
+  }
+  if (check) {
+    const ImVec2 after = ImGui::GetCursorScreenPos();
+    const ImRect h = boxed ? g_box.header : ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+    const ImGuiStyle &st = ImGui::GetStyle();
+    /* Past the arrow: CollapsingHeader puts its text after the frame padding, the arrow and the inner spacing. */
+    const float x = h.Min.x + st.FramePadding.x + ImGui::GetFontSize() + st.ItemInnerSpacing.x;
+    ImGui::SetCursorScreenPos(ImVec2(x, h.GetCenter().y - check_w * 0.5f));
+    ImGui::PushID(title);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(st.FramePadding.y, st.FramePadding.y));
+    *r_toggled = ImGui::Checkbox("##header_check", check);
+    if (check_tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("%s", check_tooltip);
+    }
+    ImGui::PopStyleVar();
+    ImGui::PopID();
+    ImGui::SetCursorScreenPos(after);
   }
   ui_fold_record(key, default_open, open);
   if (!open) {

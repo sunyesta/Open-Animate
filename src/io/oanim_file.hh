@@ -25,8 +25,9 @@ namespace oanim {
  * ("timing": its points; before, "speeds", one a frame, read as the curve they make). 8: an in handle with no length
  * in the setup turns from pointing back (before, from pointing on, as an out handle does). 9: a 2 Axis Controller's
  * knob is keyed as far as any bone's Transform (before, in frames of its actions: those times its Frame Size now), and
- * so are poses kept in the file. */
-inline constexpr int OANIM_FILE_VERSION = 9;
+ * so are poses kept in the file. 10: a bone bends along its curve only with "bendy" (before, every regular bone did: on
+ * opening, those bent or keyed, or carrying a drawing with Deform: Curve, get it). */
+inline constexpr int OANIM_FILE_VERSION = 10;
 
 /* Writes through a temporary file and renames it into place, so a failed save never damages
  * the existing file. Returns false and sets r_error on failure. */

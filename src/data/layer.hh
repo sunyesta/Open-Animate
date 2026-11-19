@@ -746,6 +746,10 @@ struct Bone {
    * constraints aiming at it: close, the eyes cross; far, they look the same way. Keyable. */
   float depth = 1.0f;
   Channel<float> depth_keys;
+  /* Bendy Bones (the Bone tab's toggle): the bone bends along its curve (below); off, it is straight, its curve channels
+   * kept for when it is turned on again. Off for bones made now; on in files from before for a bone bent or keyed, or
+   * carrying a drawing with Deform: Curve, so they look as they did. Not keyed. */
+  bool bendy = false;
   /* Bendy bones (anim/bone_curve.hh): the bone bends along a curve from head to tail, shaped by a handle at each end.
    * Where it is connected to its parent, the joint's two handles (its head's and the parent's tail's) are kept here:
    * lined up (`curve_lined` 1), both turned `curve_turn` from halfway between the two bones, so they stay lined up as

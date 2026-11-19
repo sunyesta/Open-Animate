@@ -41,8 +41,12 @@ bool bone_curve_channel_is_angle(std::string_view name);
 /* Puts every curve channel of `bone` (not its keys) back to rest. */
 void bone_curve_values_reset(Bone &bone);
 
-/* Whether a bone has a curve: a regular bone (a pin or a 2 Axis Controller is straight, and bends nothing). */
+/* Whether a bone has a curve: a regular bone with Bendy Bones on (a pin or a 2 Axis Controller is straight, and bends
+ * nothing). */
 bool bone_curve_has(const Bone &bone);
+/* Turns Bendy Bones on for the bones a drawing with Deform: Curve bends along (its Parent Bone, on to its chain's end):
+ * true if any was off. */
+bool layer_curve_bones_bendy(Layer &armature, const Layer &layer);
 /* The connected parent a bone's head joint is shared with (its index; -1: none, its head is an end). */
 int bone_curve_parent(const Layer &armature, size_t i);
 /* The one connected child a bone's tail joint is shared with (its index; -1: none, or several, its tail an end). */

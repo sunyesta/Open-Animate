@@ -180,6 +180,7 @@ static void bone_symmetrize_settings(Document &doc, Layer &armature, const Bone 
   dst.inherit_scale = src.inherit_scale;
   dst.local_location = src.local_location;
   dst.keep_end_distance = src.keep_end_distance;
+  dst.bendy = src.bendy;
   dst.shape = src.shape;
   dst.pin_size = src.pin_size;
   dst.shape_layer = layer_mirror_id(doc, src.shape_layer);
@@ -440,7 +441,9 @@ static int curve_bone_arg(Context &C, Layer &armature)
     const Bone &b = armature.bones[i];
     if (name.empty() ? b.id == armature.active_bone : b.name == name) {
       if (!bone_curve_has(b)) {
-        report(ReportType::Warning, b.name + " has no curve: a pin or a 2 Axis Controller stays straight");
+        report(ReportType::Warning, b.type == BoneType::Regular
+                                        ? b.name + " is straight: turn on its Bendy Bones (in the Bone tab) to curve it"
+                                        : b.name + " has no curve: a pin or a 2 Axis Controller stays straight");
         return -1;
       }
       return int(i);
@@ -827,6 +830,36 @@ static void register_curve_operators()
                    bone_curve_reset(armature, i);
                  }
                  return curve_values_of(armature) != before ? OpStatus::Finished : OpStatus::Cancelled;
+               });
+  rig_operator("armature.bendy_set", "Bendy Bones",
+               "Turn Bendy Bones on (bendy=1, the default) or off (0) for bone `bone`, else the selected bones: on, the "
+               "bone bends along its curve, its handles dragged in the viewport; off, it is straight (its curve kept for "
+               "when it is turned on again). A pin or a 2 Axis Controller stays straight",
+               bone_layer_active, [](Context &C) {
+                 Layer &armature = *active_armature(C);
+                 const bool on = op_arg(C, "bendy", "1") != "0";
+                 const std::string name = op_arg(C, "bone");
+                 int changed = 0, found = 0;
+                 for (Bone &b : armature.bones) {
+                   if (name.empty() ? !b.selected : b.name != name) {
+                     continue;
+                   }
+                   found++;
+                   if (b.type != BoneType::Regular || b.bendy == on) {
+                     continue;
+                   }
+                   b.bendy = on;
+                   changed++;
+                 }
+                 if (found == 0) {
+                   report(ReportType::Warning, name.empty() ? std::string("Select bones to change") : "No bone named " + name);
+                   return OpStatus::Cancelled;
+                 }
+                 if (changed == 0) {
+                   return OpStatus::Cancelled;
+                 }
+                 animation_evaluate(*C.document, C.document->frame_current);
+                 return OpStatus::Finished;
                });
 }
 
@@ -3038,6 +3071,7 @@ void rig_operators_register()
                    }
                    edited_action_restore(doc, was);
                  }
+                 std::vector<Layer *> bendy_layers;
                  for (Layer *layer : keyed_layers(C)) {
                    const Layer *armature = layer_armature(*C.document, layer->id);
                    if (!armature || layer->is_bone_layer()) {
@@ -3073,6 +3107,7 @@ void rig_operators_register()
                        changed++;
                      }
                    }
+                   bendy_layers.push_back(layer);
                    /* The chain the points bend along: on from the Parent Bone through connected children to `chain_end`
                     * (bendy bones; it makes Deform Curve). */
                    if (set_chain && layer->parent_bone != 0) {
@@ -3092,6 +3127,12 @@ void rig_operators_register()
                        changed++;
                      }
                    }
+                 }
+                 /* A drawing bending with Deform: Curve bends along bendy bones: its chain's are turned on. */
+                 int bent = 0;
+                 for (const Layer *layer : bendy_layers) {
+                   const Layer *armature = layer->parent_bone_curve ? layer_armature(doc, layer->id) : nullptr;
+                   bent += armature && layer_curve_bones_bendy(*layer_find(doc, armature->id), *layer) ? 1 : 0;
                  }
                  /* The actions first, the mainline last: an action bone action's keys add to the mainline, so the
                   * mainline is put right with them already in place. */
@@ -3150,7 +3191,10 @@ void rig_operators_register()
                    report(ReportType::Warning, std::to_string(locked) + (locked == 1 ? " layer is" : " layers are") +
                                                    " inside a group with a Parent Bone, which decides for it");
                  }
-                 return changed > 0 ? OpStatus::Finished : OpStatus::Cancelled;
+                 if (bent > 0 && changed == 0) {
+                   animation_evaluate(doc, doc.frame_current);
+                 }
+                 return changed > 0 || bent > 0 ? OpStatus::Finished : OpStatus::Cancelled;
                });
 
   rig_operator("armature.copy_bone_color_to_selected", "Copy Bone Color to Selected",

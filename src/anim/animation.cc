@@ -40,12 +40,25 @@
 
 namespace oanim {
 
+/* Whether a bone's curve channels are among its channels: Bendy Bones on, or keys on them (from when it was on), which
+ * go on moving with the rest. A straight bone keys no curve. */
+static bool bone_curve_listed(const Bone &bone)
+{
+  bool listed = bone_curve_has(bone);
+  bone_curve_channels(bone, [&](std::string_view, const float &, const Channel<float> &keys) {
+    listed = listed || !keys.keys.empty();
+  });
+  return listed;
+}
+
 /* A bone's channels besides its Transform and Angle (which are changes from its setup pose, worked out around them). */
 template<typename F> static void bone_other_channels(Bone &bone, F &&f)
 {
   f(bone.scale_keys, bone.scale);
   f(bone.depth_keys, bone.depth);
-  bone_curve_channels(bone, [&](std::string_view, float &value, Channel<float> &keys) { f(keys, value); });
+  if (bone_curve_listed(bone)) {
+    bone_curve_channels(bone, [&](std::string_view, float &value, Channel<float> &keys) { f(keys, value); });
+  }
   for (BoneConstraint &c : bone.constraints) {
     f(c.influence_keys, c.influence);
     f(c.pin_keys, c.pin);
@@ -5275,9 +5288,11 @@ std::vector<ChannelRef> layer_channels(Layer &layer, bool drawing)
     add(base + "angle", bone.angle_keys, bone.turn);
     add(base + "scale", bone.scale_keys, bone.scale);
     add(base + "depth", bone.depth_keys, bone.depth);
-    bone_curve_channels(bone, [&](std::string_view name, float &value, Channel<float> &keys) {
-      add(base + std::string(name), keys, value);
-    });
+    if (bone_curve_listed(bone)) {
+      bone_curve_channels(bone, [&](std::string_view name, float &value, Channel<float> &keys) {
+        add(base + std::string(name), keys, value);
+      });
+    }
     for (size_t i = 0; i < bone.constraints.size(); i++) {
       BoneConstraint &c = bone.constraints[i];
       const std::string cb = base + "constraints[" + std::to_string(i) + "].";

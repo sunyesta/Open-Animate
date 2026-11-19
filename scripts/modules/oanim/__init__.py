@@ -417,7 +417,8 @@ class _Layer:
     def bones(self):
         """A bone layer's bones: dicts with name, id, parent, position, angle (radians), setup_position
         and setup_angle (the setup pose, frame 0: their keys hold the change from it), length,
-        scale, strength, selected, select_head, select_tail, connected, shape, pin_size, shape_layer,
+        scale, strength, selected, select_head, select_tail, connected, bendy (Bendy Bones: it bends along its curve;
+        armature.bendy_set), shape, pin_size, shape_layer,
         color_set, colors (its regular, selected and active shades), active, head and tail (where it runs now, in the bone
         layer's space), type ("REGULAR", "PIN" or "CONTROLLER_2D"). A controller also has controller_actions (by side, "RIGHT", "LEFT", "UP", "DOWN"), controller_frame_size,
         controller_box (its lowest and highest corners, in frames from the rest point), knob (in frames), knob_shown
@@ -439,7 +440,7 @@ class _Layer:
 
     def bone_set(self, name, /, **values):
         """Pose or edit a bone: position=(x, y), angle, scale=(x, y) (x across the bone, y along
-        it; one number sets both), length, strength, name; a controller's knob=(x, y) in frames,
+        it; one number sets both), length, strength, name, bendy; a controller's knob=(x, y) in frames,
         knob_snap=True (after knob=: where Ctrl takes it, the nearest spot; with none it stays) and
         controller_frame_size; and how it is drawn: shape ("BONE" or
         "CUSTOM", while the viewport shows custom bone shapes; a pin is a bone type, armature.bone_convert(type="PIN")),

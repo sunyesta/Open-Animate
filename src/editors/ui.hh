@@ -92,6 +92,10 @@ bool ui_panel_begin(const char *title, bool default_open = true);
 /* The same with what the header says instead of `title` (which stays the panel's name, so it keeps its
  * fold), in `color` (0: the usual). */
 bool ui_panel_begin(const char *title, const std::string &header, unsigned int color);
+/* The same with a checkbox in its header, before the title (as Blender's Deform panel): `r_toggled` says it was
+ * clicked this frame (`check` already flipped). The checkbox shows whether the panel is open or folded. */
+bool ui_panel_begin_check(const char *title, bool *check, bool *r_toggled, const char *tooltip = nullptr,
+                          bool default_open = true);
 /* Panels open or folded as the project keeps them (Document::ui_open, saved with it): the editors
  * get the project each frame (ui_bind_project). `key` is "<editor>/<panel>"; ui_fold_scope() is the
  * editor of the window being drawn ("Properties"). ui_fold_next() opens or folds the next

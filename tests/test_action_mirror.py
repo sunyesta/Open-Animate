@@ -63,6 +63,9 @@ def build():
     ops.armature.bone_add(name="Arm_R", head_x="-0.6", head_y="-1.0", tail_x="-1.0", tail_y="-0.7")
     # It only drives its action: nothing is weighted to it, as an action bone off to the side of a rig.
     rig.bone_set("Turn_L", strength=0.0)
+    # The arms bend (Bendy Bones), so their curve handles are keyed and mirrored.
+    for arm in ("Arm_L", "Arm_R"):
+        assert ops.armature.bendy_set(bone=arm) == {'FINISHED'}
     ear_l = drawing("Ear_L", EAR_L, rig)
     ear_r = drawing("Ear_R", EAR_R, rig)
     face = drawing("Face_X", FACE, rig, closed=True)

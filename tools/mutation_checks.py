@@ -145,6 +145,19 @@ PENDING = [
     # The old IK constraint removed: loops through an IK End's chain.
     ('src/anim/follow_point.cc', '        grew |= add(b.id);\n', '        (void)0;\n',
      "a shape moved by an IK End's chain is a loop for that end's bone", 'tests/test_shape_loop.py'),
+    # Bendy Bones a toggle, in its own panel.
+    ('src/anim/bone_curve.cc', '  return bone.bendy && bone_curve_able(bone);\n', '  return bone_curve_able(bone);\n',
+     'a bone with Bendy Bones off is straight', 'tests/test_bendy_bones.py'),
+    ('src/ops/rig_ops.cc', '                   bent += armature && layer_curve_bones_bendy(*layer_find(doc, armature->id), *layer) ? 1 : 0;\n', '                   (void)armature;\n',
+     "Deform: Curve turns Bendy Bones on for the chain's bones", 'tests/test_bendy_bones.py'),
+    ('src/io/oanim_file.cc', '    b.bendy = g_loading_version < 10 ? bent : get_bool(bj, "bendy", false);\n', '    (void)bent;\n    b.bendy = get_bool(bj, "bendy", false);\n',
+     'a bent or keyed bone in a file from before opens bendy', 'tests/test_bendy_bones.py'),
+    ('src/io/oanim_file.cc', '        layer_curve_bones_bendy(*layer_find(doc, armature->id), *layer);\n', '        (void)armature;\n',
+     "a file from before's Deform: Curve drawing's bones open bendy", 'tests/test_bendy_bones.py'),
+    ('src/anim/animation.cc', '  if (bone_curve_listed(bone)) {\n    bone_curve_channels(bone, [&](std::string_view, float &value, Channel<float> &keys) { f(keys, value); });', '  if (bone_curve_listed(bone) || true) {\n    bone_curve_channels(bone, [&](std::string_view, float &value, Channel<float> &keys) { f(keys, value); });',
+     'a straight bone keys no curve', 'tests/test_bendy_bones.py'),
+    ('src/anim/bone_curve.cc', '      return true;\n    }\n    x = chain_parent(armature, size_t(x));', '      return true;\n    }\n    x = bone_curve_parent(armature, size_t(x));',
+     "a drawing's chain runs on through straight bones", 'tests/test_bendy_bones.py'),
 ]
 
 def build(root):

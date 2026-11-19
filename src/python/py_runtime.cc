@@ -3840,6 +3840,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
                                                                       : "NONE";
       d["local_location"] = b.local_location;
       d["keep_end_distance"] = b.keep_end_distance;
+      d["bendy"] = b.bendy;
       d["shape"] = b.shape == BoneShape::Custom ? "CUSTOM" : "BONE";
       d["pin_size"] = b.pin_size;
       const Layer *shape_layer = b.shape_layer ? layer_find(*current_context().document, b.shape_layer) : nullptr;
@@ -3998,6 +3999,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
       }
       else if (key == "strength") {
         bone.strength = std::max(0.0f, value.cast<float>());
+      }
+      else if (key == "bendy") {
+        bone.bendy = value.cast<bool>();
       }
       else if (key == "name") {
         const std::string before = bone.name, to = value.cast<std::string>();

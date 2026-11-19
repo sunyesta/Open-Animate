@@ -60,9 +60,15 @@ void bone_curve_values_reset(Bone &bone)
   });
 }
 
-bool bone_curve_has(const Bone &bone)
+/* A bone that can bend (a regular one), Bendy Bones on or not. */
+static bool bone_curve_able(const Bone &bone)
 {
   return !bone_is_pin(bone) && !bone_is_controller(bone);
+}
+
+bool bone_curve_has(const Bone &bone)
+{
+  return bone.bendy && bone_curve_able(bone);
 }
 
 static int bone_index(const Layer &armature, uint64_t id)
@@ -83,6 +89,18 @@ int bone_curve_parent(const Layer &armature, size_t i)
   }
   const int p = bone_index(armature, bone.parent);
   return p >= 0 && bone_curve_has(armature.bones[size_t(p)]) ? p : -1;
+}
+
+/* The connected parent a chain runs up to (its index; -1: none): bone_curve_parent, Bendy Bones on or not, so a
+ * drawing's chain runs on through a straight bone. */
+static int chain_parent(const Layer &armature, size_t i)
+{
+  const Bone &bone = armature.bones[i];
+  if (!bone.connected || bone.parent == 0 || bone.outer_bone != 0 || !bone_curve_able(bone)) {
+    return -1;
+  }
+  const int p = bone_index(armature, bone.parent);
+  return p >= 0 && bone_curve_able(armature.bones[size_t(p)]) ? p : -1;
 }
 
 int bone_curve_kid(const Layer &armature, size_t i)
@@ -364,7 +382,7 @@ bool bone_curve_chain_reaches(const Layer &armature, uint64_t start, uint64_t en
     if (armature.bones[size_t(x)].id == start) {
       return true;
     }
-    x = bone_curve_parent(armature, size_t(x));
+    x = chain_parent(armature, size_t(x));
   }
   return false;
 }
@@ -413,7 +431,7 @@ std::vector<size_t> layer_curve_chain(const Layer &armature, const Layer &layer)
     return {};
   }
   const int start = bone_index(armature, layer.parent_bone);
-  if (start < 0 || !bone_curve_has(armature.bones[size_t(start)])) {
+  if (start < 0 || !bone_curve_able(armature.bones[size_t(start)])) {
     return {};
   }
   std::vector<size_t> chain;
@@ -424,9 +442,19 @@ std::vector<size_t> layer_curve_chain(const Layer &armature, const Layer &layer)
       std::reverse(chain.begin(), chain.end());
       return chain;
     }
-    x = bone_curve_parent(armature, size_t(x));
+    x = chain_parent(armature, size_t(x));
   }
   return {size_t(start)};
+}
+
+bool layer_curve_bones_bendy(Layer &armature, const Layer &layer)
+{
+  bool changed = false;
+  for (const size_t i : layer_curve_chain(armature, layer)) {
+    changed = changed || !armature.bones[i].bendy;
+    armature.bones[i].bendy = true;
+  }
+  return changed;
 }
 
 /* --- Editing ------------------------------------------------------------------------------------------------ */

@@ -1,10 +1,14 @@
-"""Bendy bones: each bone bends along a curve from head to tail, shaped by a handle at each end. A joint between
+"""Bendy bones: with Bendy Bones on (off for a new bone), a bone bends along a curve from head to tail, shaped by a
+handle at each end. A joint between
 connected bones has two handles, lined up and staying lined up as the bones turn; Alt (alone=1) moves one alone,
 breaking them, after which each keeps its angle to its own bone, so a sharp corner stays sharp. An end joint has one
 handle, and left alone mirrors the other end (the bone an arc). Flatten Both to Bone lays a bone's handles along it
 (broken, so the bones beside keep their curves); Sharp Corner points a joint's handles along their bones. The handles
 are keyed. A drawing whose Parent Bone has Deform: Curve bends along its bone's curve, or a chain of connected bones,
-each point going where its place on the rest curve goes, as far along the same bone. Saved with the file.
+each point going where its place on the rest curve goes, as far along the same bone, and Deform: Curve turns Bendy
+Bones on for the chain's bones. Off, a bone is straight, keeps its curve for when it is turned on again, keys no curve
+and takes no curve edits. Saved with the file; in a file from before, a bone bent or keyed, or carrying a drawing with
+Deform: Curve, opens bendy and the rest straight.
 
 Run with:  OpenAnimate --background --python tests/test_bendy_bones.py
 """
@@ -24,11 +28,13 @@ assert ops.layer.new_bone() == {'FINISHED'}
 rig = layers.active
 
 
-def add(name, head, tail, parent=""):
+def add(name, head, tail, parent="", bendy=True):
     assert ops.armature.bone_add(name=name, head_x=repr(head[0]), head_y=repr(head[1]), tail_x=repr(tail[0]),
                                  tail_y=repr(tail[1]), parent=parent) == {'FINISHED'}
     if parent:
         assert ops.armature.bone_relations_set(bone=name, connected="1") == {'FINISHED'}
+    if bendy:
+        assert ops.armature.bendy_set(bone=name) == {'FINISHED'}
     ops.armature.select_none()
 
 
@@ -195,9 +201,9 @@ assert ops.armature.curve_sharp_corner(bone="Hand", end="HEAD") == {'FINISHED'}
 doc.frame_current = 0
 assert ops.layer.new_bone() == {'FINISHED'}
 rig = layers.active
-add("Upper", (0.0, 0.0), (1.0, 0.0))
-add("Fore", (1.0, 0.0), (1.6, -0.8), "Upper")
-add("Hand", (1.6, -0.8), (1.7, -1.2), "Fore")
+add("Upper", (0.0, 0.0), (1.0, 0.0), bendy=False)
+add("Fore", (1.0, 0.0), (1.6, -0.8), "Upper", bendy=False)
+add("Hand", (1.6, -0.8), (1.7, -1.2), "Fore", bendy=False)
 assert ops.layer.new() == {'FINISHED'}
 art = layers.active
 assert ops.layer.move_to_group(group=str(rig.id)) == {'FINISHED'}
@@ -207,8 +213,10 @@ outline = [(-0.08, 0.12), (0.5, 0.15), (0.95, 0.15), (1.2, -0.1), (1.75, -0.92),
            (1.05, -0.25), (0.5, -0.12), (-0.08, -0.12)]
 art.add_curve(outline)
 assert ops.layer.parent_bone_set(bone="Upper") == {'FINISHED'}
+assert not any(b["bendy"] for b in rig.bones), "Deform: Points leaves the bones straight"
 assert ops.layer.parent_bone_set(chain_end="Hand") == {'FINISHED'}
 assert art.parent_bone_deform == "CURVE" and list(_oanim.layer_parent_bone_chain(art.id)) == ["Upper", "Fore", "Hand"]
+assert all(b["bendy"] for b in rig.bones), "Deform: Curve turns Bendy Bones on along the chain"
 assert ops.layer.parent_bone_set(chain_end="Fore") == {'FINISHED'}
 assert list(_oanim.layer_parent_bone_chain(art.id)) == ["Upper", "Fore"]
 assert ops.layer.parent_bone_set(chain_end="Upper") == {'CANCELLED'} or \
@@ -216,7 +224,7 @@ assert ops.layer.parent_bone_set(chain_end="Upper") == {'CANCELLED'} or \
 assert ops.layer.parent_bone_set(chain_end="Fore") in ({'FINISHED'}, {'CANCELLED'})
 assert list(_oanim.layer_parent_bone_chain(art.id)) == ["Upper", "Fore"]
 # A bone not connected on from the Parent Bone can't end the chain.
-add("Loose", (3.0, 0.0), (3.5, 0.0))
+add("Loose", (3.0, 0.0), (3.5, 0.0), bendy=False)
 assert ops.layer.parent_bone_set(chain_end="Loose") == {'CANCELLED'}
 
 
@@ -286,12 +294,12 @@ doc.auto_freeze_keys = False
 doc.frame_current = 0
 assert ops.layer.new_bone() == {'FINISHED'}
 rig = layers.active
-add("Root", (0.0, 0.0), (1.0, 0.0))
-add("A", (1.0, 0.0), (2.0, 0.0), "Root")
-add("B", (2.0, 0.0), (3.0, 0.0), "A")
-add("C", (3.0, 0.0), (4.0, 0.0), "B")
-add("Side", (2.0, 0.0), (2.0, 1.0), "A")
-add("Loose", (0.0, 2.0), (1.0, 2.0))
+add("Root", (0.0, 0.0), (1.0, 0.0), bendy=False)
+add("A", (1.0, 0.0), (2.0, 0.0), "Root", bendy=False)
+add("B", (2.0, 0.0), (3.0, 0.0), "A", bendy=False)
+add("C", (3.0, 0.0), (4.0, 0.0), "B", bendy=False)
+add("Side", (2.0, 0.0), (2.0, 1.0), "A", bendy=False)
+add("Loose", (0.0, 2.0), (1.0, 2.0), bendy=False)
 assert ops.layer.new() == {'FINISHED'}
 art = layers.active
 assert ops.layer.move_to_group(group=str(rig.id)) == {'FINISHED'}
@@ -301,6 +309,7 @@ assert ops.layer.parent_bone_set(bone="B") == {'FINISHED'}
 assert art.parent_bone_deform != "CURVE"
 assert ops.layer.parent_bone_set(extend_to="C") == {'FINISHED'}
 assert art.parent_bone_deform == "CURVE" and list(_oanim.layer_parent_bone_chain(art.id)) == ["B", "C"]
+assert sorted(b["name"] for b in rig.bones if b["bendy"]) == ["B", "C"], "the chain's bones made bendy, no others"
 assert ops.layer.parent_bone_set(extend_to="A") == {'FINISHED'}
 assert list(_oanim.layer_parent_bone_chain(art.id)) == ["A", "B", "C"], "above: it starts there, its end kept"
 assert ops.layer.parent_bone_set(extend_to="B") == {'CANCELLED'}, "already in the chain"
@@ -317,5 +326,102 @@ assert list(_oanim.layer_parent_bone_chain(art.id)) == ["Root", "A", "B", "C"]
 # Parent to one bone: the chain starts again from it.
 assert ops.layer.parent_bone_set(bone="A") == {'FINISHED'}
 assert list(_oanim.layer_parent_bone_chain(art.id)) == ["A"]
+
+# --- Bendy Bones off and on: a new bone is straight; on, it bends; off again, straight, its curve kept for when it is
+# turned on again. Off, it keys no curve and takes no curve edits; one undo step each way.
+ops.wm.read_homefile(confirmed="1")
+doc, layers = oanim.data.document, oanim.data.layers
+doc.auto_freeze_keys = False
+doc.frame_current = 0
+assert ops.layer.new_bone() == {'FINISHED'}
+rig = layers.active
+add("Upper", (0.0, 0.0), (1.0, 0.0), bendy=False)
+add("Fore", (1.0, 0.0), (1.6, -0.8), "Upper", bendy=False)
+assert not bones()["Upper"]["bendy"], "a new bone is straight"
+
+
+def straight(name):
+    p = ctrl(name)
+    return abs(head_dev(name)) < 1e-6 and abs(tail_dev(name)) < 1e-6
+
+
+assert straight("Upper") and straight("Fore")
+assert ops.armature.curve_reset(bone="Upper") == {'CANCELLED'}, "a straight bone takes no curve edits"
+assert ops.armature.bendy_set(bone="Upper") == {'FINISHED'}
+assert ops.armature.bendy_set(bone="Upper") == {'CANCELLED'}, "already on"
+assert straight("Upper"), "its elbow joins a straight bone: a free end, both ends free, straight"
+assert ops.armature.bendy_set(bone="Fore") == {'FINISHED'}
+assert not straight("Upper") and gap("Upper", "Fore") < 1e-5, "both on: the elbow lined up, the curve smooth through it"
+bent = ctrl("Upper")
+assert ops.armature.bendy_set(bone="Upper", bendy="0") == {'FINISHED'}
+assert straight("Upper"), "off: straight"
+assert ops.ed.undo() == {'FINISHED'}
+assert bones()["Upper"]["bendy"] and all(dist(a, b) < 1e-6 for a, b in zip(ctrl("Upper"), bent)), "one undo step"
+# A handle dragged, then off and on again: the same curve.
+h = ctrl("Upper")[1]
+assert ops.armature.curve_handle_set(bone="Upper", end="HEAD", x=repr(h[0]), y=repr(h[1] + 0.3)) == {'FINISHED'}
+shaped = ctrl("Upper")
+assert ops.armature.bendy_set(bone="Upper", bendy="0") == {'FINISHED'} and straight("Upper")
+assert ops.armature.bendy_set(bone="Upper") == {'FINISHED'}
+assert all(dist(a, b) < 1e-6 for a, b in zip(ctrl("Upper"), shaped)), "on again: its curve as it was"
+# Keying: a straight bone keys no curve; its curve rows go.
+assert ops.armature.bendy_set(bone="Fore", bendy="0") == {'FINISHED'}
+doc.auto_key = True
+doc.frame_current = 10
+rig.select_bone("Upper")
+rig.select_bone("Fore", extend=True)
+assert ops.anim.keyframe_insert() == {'FINISHED'}
+assert rig.keyframes('bones["Upper"].curve_head_reach'), "a bendy bone keys its curve"
+assert not rig.keyframes('bones["Fore"].curve_head_reach'), "a straight one keys none"
+doc.frame_current = 0
+ops.armature.select_none()
+# Selected bones, a pin left out.
+assert ops.armature.bone_add(name="Pin", head_x="3", head_y="0", tail_x="3.5", tail_y="0") == {'FINISHED'}
+assert ops.armature.bone_convert(type="PIN") == {'FINISHED'}
+rig.select_bone("Pin")
+rig.select_bone("Fore", extend=True)
+assert ops.armature.bendy_set() == {'FINISHED'}
+assert bones()["Fore"]["bendy"] and not bones()["Pin"]["bendy"], "a pin stays straight"
+ops.armature.select_none()
+rig.select_bone("Pin")
+assert ops.armature.bendy_set() == {'CANCELLED'}
+ops.armature.select_none()
+
+# --- Saved; a file from before: the bent or keyed bones and a Deform: Curve drawing's open bendy, the others straight.
+import json, zipfile
+assert ops.armature.bendy_set(bone="Fore", bendy="0") == {'FINISHED'}
+assert ops.armature.bone_add(name="Plain", head_x="0", head_y="2", tail_x="1", tail_y="2") == {'FINISHED'}
+assert ops.armature.bone_add(name="Carrier", head_x="0", head_y="3", tail_x="1", tail_y="3") == {'FINISHED'}
+assert ops.armature.bendy_set(bone="Carrier") == {'FINISHED'}
+assert ops.layer.new() == {'FINISHED'}
+art = layers.active
+assert ops.layer.move_to_group(group=str(rig.id)) == {'FINISHED'}
+art = next(l for l in layers.all() if l.id == art.id)
+art.add_curve([(0.1, 3.1), (0.9, 3.1), (0.9, 2.9)])
+assert ops.layer.parent_bone_set(bone="Carrier", deform="CURVE") == {'FINISHED'}
+was = {b["name"]: b["bendy"] for b in rig.bones}
+assert was == {"Upper": True, "Fore": False, "Pin": False, "Plain": False, "Carrier": True}, was
+with tempfile.TemporaryDirectory() as tmp:
+    path = pathlib.Path(tmp) / "bendy.oanim"
+    assert ops.wm.save_as_mainfile(filepath=str(path)) == {'FINISHED'}
+    assert ops.wm.open_mainfile(filepath=str(path), confirmed="1") == {'FINISHED'}
+    rig = next(l for l in oanim.data.layers.all() if l.bones)
+    assert {b["name"]: b["bendy"] for b in rig.bones} == was, "saved"
+    old = pathlib.Path(tmp) / "old.oanim"
+    with zipfile.ZipFile(path) as z, zipfile.ZipFile(old, "w") as out:
+        for item in z.infolist():
+            data = z.read(item.filename)
+            if item.filename == "document.json":
+                root = json.loads(data)
+                root["version"] = 9
+                data = json.dumps(root).replace('"bendy": true, ', '').replace(', "bendy": true', '').encode()
+                assert b'"bendy"' not in data
+            out.writestr(item, data)
+    assert ops.wm.open_mainfile(filepath=str(old), confirmed="1") == {'FINISHED'}
+    rig = next(l for l in oanim.data.layers.all() if l.bones)
+    now = {b["name"]: b["bendy"] for b in rig.bones}
+    # Upper is bent (its handle dragged) and keyed, Carrier carries the Deform: Curve drawing; Fore (straight when keyed,
+    # so no curve keys), Plain and the pin open straight.
+    assert now == {"Upper": True, "Fore": False, "Pin": False, "Plain": False, "Carrier": True}, now
 
 print("test_bendy_bones: OK")
