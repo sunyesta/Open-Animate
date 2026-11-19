@@ -723,10 +723,11 @@ def bone_rotate_drag(steps, confirm=True, at=(0.0, 0.0), during=None):
 
 def bone_drag(at, steps, alt=False, zoom=100.0, confirm=True):
     """Test hook: on the active bone layer, the Select tool's press at document point `at` dragged through each of
-    `steps` (document points) as G, `alt` held, then let go (or cancelled): the bone pressed on is picked alone first
-    unless it is already. False when the press takes no bone (empty space, or a point over a bone's body: a box or
-    the point's own drag)."""
-    if not _oanim.bone_drag_begin(float(at[0]), float(at[1]), float(zoom)):
+    `steps` (document points), `alt` held, then let go (or cancelled): the bone pressed on is picked alone first
+    unless it is already. Routed as the viewport routes the press: with `alt` one a layer pick takes (Alt picks a layer
+    from any tool) is handed over to the drag as it moves. False when the press takes no bone (empty space, or a point
+    over a bone's body: a box or the point's own drag)."""
+    if not _oanim.bone_drag_begin(float(at[0]), float(at[1]), float(zoom), bool(alt)):
         return False
     last = at
     for s in steps:

@@ -10452,8 +10452,9 @@ struct BoneModal {
   bool knob_snap = false;
   /* Alt held while moving (posing): bones and pinned chains stretch. */
   bool stretch = false;
-  /* Posing, a bone's tip pressed and dragged: its layer and bone, picked whole again when the drag ends. */
-  std::pair<uint64_t, uint64_t> tip;
+  /* A drag on one bone posing (kind 'D'): the bone and the part pressed (start_mouse the press). */
+  uint64_t drag_bone = 0;
+  BoneDragPart drag_part = BoneDragPart::Body;
   /* Following Duplicate Bones (Shift D): it ends as that operator with the move, its Keyframes as given. */
   bool duplicate = false;
   std::string duplicate_keyframes = "0";
@@ -12150,17 +12151,6 @@ static bool bone_modal_start(Context &C, Area &area, char kind, float2 mouse_doc
   return true;
 }
 
-static void bone_click_select(Layer &armature, BoneHit hit, bool extend);
-
-/* A posed bone's tip dragged: the bone picked whole again (posing picks bones whole). */
-static void bone_tip_drag_done(Document &doc, std::pair<uint64_t, uint64_t> tip)
-{
-  Layer *l = tip.first ? layer_find(doc, tip.first) : nullptr;
-  if (l && bone_find(*l, tip.second)) {
-    bone_click_select(*l, {tip.second, BonePart::Body}, false);
-  }
-}
-
 static void bone_modal_end(Context &C, bool confirm)
 {
   animation_action_bone_drag_end();
@@ -12172,8 +12162,6 @@ static void bone_modal_end(Context &C, bool confirm)
     *C.document = std::move(g_bone_modal.snapshot);
     C.document->frame_current = frame;
   }
-  bone_tip_drag_done(*C.document, g_bone_modal.tip);
-  g_bone_modal.tip = {};
   g_bone_modal.active = false;
   g_bone_modal.snapshot = Document();
   g_bone_modal.bones.clear();
@@ -12222,6 +12210,24 @@ static void bone_modal_confirm(Context &C, float2 delta, float degrees, float fa
     args["actions"] = bm.duplicate_actions;
     operator_call(C, "armature.duplicate_move", args);
   }
+  else if (bm.kind == 'D') {
+    const Layer *l = layer_find(*C.document, bm.armature);
+    const Bone *bone = l ? bone_find(*l, bm.drag_bone) : nullptr;
+    if (!bone) {
+      return;
+    }
+    args.erase("posing");
+    args.erase("keep_poses");
+    args["layer"] = std::to_string(bm.armature);
+    args["bone"] = bone->name;
+    args["part"] = bm.drag_part == BoneDragPart::Tip ? "TIP" : bm.drag_part == BoneDragPart::Head ? "HEAD" : "BODY";
+    args["x"] = num_arg(bm.start_mouse.x);
+    args["y"] = num_arg(bm.start_mouse.y);
+    args["to_x"] = num_arg(bm.start_mouse.x + delta.x);
+    args["to_y"] = num_arg(bm.start_mouse.y + delta.y);
+    args["stretch"] = bm.stretch ? "1" : "0";
+    operator_call(C, "armature.bone_drag", args);
+  }
   else if (bm.kind == 'G') {
     args["move_x"] = num_arg(delta.x);
     args["move_y"] = num_arg(delta.y);
@@ -12241,7 +12247,6 @@ static void bone_modal_confirm(Context &C, float2 delta, float degrees, float fa
     args["squash"] = bm.squash ? "1" : "0";
     operator_call(C, "armature.resize", args);
   }
-  bone_tip_drag_done(*C.document, bm.tip);
 }
 
 /* While G, R or S drags on the setup frame, a 2 Axis Controller's setup goes with it, so its knob (its keys' distance
@@ -12330,6 +12335,8 @@ static void bone_modal_grab(Context &C, Layer &armature, float2 delta, bool alt)
   }
 }
 
+static void bone_modal_drag(Layer &armature, float2 mouse, bool alt);
+
 static std::string bone_modal_update(Context &C, const ViewMapping &view)
 {
   Layer *armature = layer_find(*C.document, g_bone_modal.armature);
@@ -12390,7 +12397,12 @@ static std::string bone_modal_update(Context &C, const ViewMapping &view)
       }
     }
   };
-  if (g_bone_modal.kind == 'G') {
+  if (g_bone_modal.kind == 'D') {
+    delta = mouse - g_bone_modal.start_mouse;
+    bone_modal_drag(*armature, mouse, io.KeyAlt);
+    std::snprintf(text, sizeof(text), "Drag Bone%s", bm.stretch ? "  stretching" : "");
+  }
+  else if (g_bone_modal.kind == 'G') {
     delta = mouse - g_bone_modal.start_mouse;
     /* A controller's knob snaps to its actions' keys instead (below), which aren't on any grid. */
     const bool knobs = !bm.setup_frame && std::any_of(armature->bones.begin(), armature->bones.end(), [](const Bone &b) {
@@ -12557,71 +12569,111 @@ static const Bone *knob_press_pick(Context &C, Layer &armature, const ViewMappin
   return knob;
 }
 
-/* The Select tool's press on a bone, one of its ends or its body, dragged after as G (Blender's tweak): the part picked
- * alone unless it is already, as a click picks it, a bone of the family's worked in as a click's would be. False on no
- * bone, or on a bone's body with a point of a drawing edited along under the press (a point wins over a body, as a
- * click picks; a bone's end wins over a point). `r_tip`: posing, the layer and bone whose tip alone was picked to drag,
- * picked whole again when the drag ends. */
-static bool bone_press_drag_pick(Context &C, Layer &armature, const ViewMapping &view, ImVec2 mouse,
-                                 std::pair<uint64_t, uint64_t> *r_tip = nullptr)
+/* The bone a Select tool press drags: its layer, index and, posing, which part (armature_bone_drag); on the setup frame,
+ * a pin or a custom shape's bone posing, none (moved as G). */
+struct BonePress {
+  Layer *layer = nullptr;
+  size_t index = 0;
+  std::optional<BoneDragPart> part;
+};
+
+/* The Select tool's press on a bone, one of its ends or its body, dragged after (Blender's tweak): the bone picked alone
+ * unless it is already, as a click picks it (a bone of the family's worked in as a click's would be). Posing it drags
+ * that bone alone, by the part pressed (the IK mockup's drags); on the setup frame the picked joints and bones as G.
+ * None on no bone, or on a bone's body with a point of a drawing edited along under the press (a point wins over a body,
+ * as a click picks; a bone's end wins over a point). */
+static std::optional<BonePress> bone_press_drag_pick(Context &C, Layer &armature, const ViewMapping &view, ImVec2 mouse)
 {
   Document &doc = *C.document;
   const std::vector<FamilyHit> under = pick_family_parts(doc, armature, view, mouse);
   if (under.empty() || !under.front().hit.bone || !under.front().layer) {
-    return false;
+    return std::nullopt;
   }
   const FamilyHit hit = under.front();
   if (hit.hit.part == BonePart::Body && select_press_grab(C, view, mouse, false).layer) {
-    return false;
+    return std::nullopt;
   }
   Layer &owner = *hit.layer;
   const Bone *bone = bone_find(owner, hit.hit.bone);
   if (!bone) {
-    return false;
+    return std::nullopt;
   }
-  /* Posing, a bone is picked whole (its ends pick the bone), but a press on its tip drags the tip: the bone turns to
-   * follow the mouse, Alt stretching it there. Unless it is one of several bones picked, which it brings along. */
-  if (r_tip && doc.frame_current != 0 && hit.hit.part == BonePart::Body && !bone_is_controller(*bone) &&
-      !shows_pin(doc, *bone))
-  {
-    const size_t index = size_t(bone - owner.bones.data());
+  BonePress press{&owner, size_t(bone - owner.bones.data()), std::nullopt};
+  /* Posing, a bone is picked whole (its ends pick the bone), but which part was pressed says how it drags: its tip
+   * ball, the head ball of one not connected (a connected one's is its parent's tip), else its body. */
+  if (doc.frame_current != 0 && !bone_is_controller(*bone) && !shows_pin(doc, *bone)) {
     const std::vector<ScreenBone> sbs = screen_bones(doc, owner, view);
-    const float2 m(mouse.x, mouse.y);
-    bool on_tip = false;
-    if (index < sbs.size() && custom_shape_loops(doc, *bone, sbs[index], view).empty()) {
-      const ScreenBone &sb = sbs[index];
+    press.part = BoneDragPart::Body;
+    if (press.index < sbs.size() && custom_shape_loops(doc, *bone, sbs[press.index], view).empty()) {
+      const ScreenBone &sb = sbs[press.index];
+      const float2 m(mouse.x, mouse.y);
+      const float reach = bone_joint_radius(sb) + 3.0f;
       const float tail_d = distance(m, float2(sb.tail.x, sb.tail.y));
-      on_tip = tail_d <= bone_joint_radius(sb) + 3.0f && tail_d < distance(m, float2(sb.head.x, sb.head.y));
-    }
-    bool others = false;
-    for (const Layer *l : armature_family(doc, armature.id)) {
-      for (const Bone &b : l->bones) {
-        others |= b.selected && !(l->id == owner.id && b.id == bone->id);
+      const float head_d = distance(m, float2(sb.head.x, sb.head.y));
+      if (tail_d <= reach && tail_d <= head_d) {
+        press.part = BoneDragPart::Tip;
       }
-    }
-    if (on_tip && !(bone->selected && others)) {
-      family_and_points_deselect(C, doc, armature);
-      bone_click_select(owner, {bone->id, BonePart::Tail}, false);
-      if (owner.id != armature.id && !layer_inside(doc, owner.id, armature.id)) {
-        doc.active_layer = owner.id;
+      else if (head_d <= reach && !bone->connected) {
+        press.part = BoneDragPart::Head;
       }
-      doc.picked_drawing = 0;
-      *r_tip = {owner.id, bone->id};
-      return true;
     }
   }
-  const bool picked = hit.hit.part == BonePart::Head   ? bone_head_selected(owner, *bone)
+  const bool picked = press.part                       ? bone->selected
+                      : hit.hit.part == BonePart::Head ? bone_head_selected(owner, *bone)
                       : hit.hit.part == BonePart::Tail ? bone_tail_selected(owner, *bone)
                                                        : bone->selected;
   if (!picked) {
     family_and_points_deselect(C, doc, armature);
-    bone_click_select(owner, hit.hit, false);
+    bone_click_select(owner, press.part ? BoneHit{bone->id, BonePart::Body} : hit.hit, false);
     if (owner.id != armature.id && !layer_inside(doc, owner.id, armature.id)) {
       doc.active_layer = owner.id;
     }
   }
   doc.picked_drawing = 0;
+  return press;
+}
+
+/* Where a bone drag's press and mouse are worked out: the bone layer's space, through a group's deform about the bone's
+ * base as it shows. */
+static Transform2D bone_drag_to_layer(const Document &doc, const Layer &armature, size_t index)
+{
+  const std::vector<BonePose> poses = armature_keyed_pose(armature, doc.frame_current == 0);
+  const float2 head = index < poses.size() ? poses[index].head : float2();
+  return (layer_world_transform(doc, armature.id) * layer_group_deform_at(doc, armature, head)).inverted();
+}
+
+/* A press on a bone at `start` (screen) dragged: the bone picked as bone_press_drag_pick does, then dragged (G on the
+ * setup frame and for pins) until the mouse comes up. False when the press takes no bone. */
+static bool bone_press_drag_begin(Context &C, Area &area, Layer &armature, const ViewMapping &view, ImVec2 start)
+{
+  const std::optional<BonePress> press = bone_press_drag_pick(C, armature, view, start);
+  if (!press || !bone_modal_start(C, area, press->part ? 'D' : 'G', view.to_document(start))) {
+    return false;
+  }
+  g_bone_modal.tweak = true;
+  if (press->part) {
+    BoneModal &bm = g_bone_modal;
+    bm.armature = press->layer->id;
+    bm.bones = press->layer->bones;
+    bm.also.clear();
+    bm.drag_bone = press->layer->bones[press->index].id;
+    bm.drag_part = *press->part;
+    bm.to_armature = bone_drag_to_layer(*C.document, *press->layer, press->index);
+  }
   return true;
+}
+
+/* A bone drag's update: the bone dragged from the press to `mouse` (document space), Alt stretching. */
+static void bone_modal_drag(Layer &armature, float2 mouse, bool alt)
+{
+  BoneModal &bm = g_bone_modal;
+  bm.stretch = alt;
+  const Bone *bone = bone_find(armature, bm.drag_bone);
+  if (!bone) {
+    return;
+  }
+  armature_bone_drag(armature, bm.bones, size_t(bone - armature.bones.data()), bm.drag_part,
+                     bm.to_armature.apply(bm.start_mouse), bm.to_armature.apply(mouse), alt);
 }
 
 bool bone_press_test(Context &C, float2 at, float zoom, bool transform_tool, bool shift)
@@ -12641,7 +12693,10 @@ bool bone_press_test(Context &C, float2 at, float zoom, bool transform_tool, boo
 
 /* Test hooks: the Select tool's press at `at` dragged to `to` as G (a background run draws no frames to drag in), Alt
  * held or not, then let go (confirmed) or cancelled. Begin is false when the press takes no bone. */
-bool bone_drag_begin_test(Context &C, float2 at, float zoom)
+static bool layer_pick_wanted(Context &C, const ViewMapping &view, bool alt, ImVec2 mouse);
+static bool layer_click_drag_bone(Context &C, Area &area, Layer &armature, const ViewMapping &view, ImVec2 start);
+
+bool bone_drag_begin_test(Context &C, float2 at, float zoom, bool alt)
 {
   static Area area;
   reach_update(C);
@@ -12650,13 +12705,12 @@ bool bone_drag_begin_test(Context &C, float2 at, float zoom)
     return false;
   }
   const ViewMapping view{{0.0f, 0.0f}, {1000.0f, 1000.0f}, {0.0f, 0.0f}, zoom};
-  std::pair<uint64_t, uint64_t> tip;
-  if (!bone_press_drag_pick(C, *armature, view, view.to_screen(at), &tip) || !bone_modal_start(C, area, 'G', at)) {
-    return false;
+  const ImVec2 start = view.to_screen(at);
+  /* As the viewport routes a press: one a layer pick takes (an Alt press) hands over to the drag once it moves. */
+  if (layer_pick_wanted(C, view, alt, start)) {
+    return layer_click_drag_bone(C, area, *armature, view, start);
   }
-  g_bone_modal.tweak = true;
-  g_bone_modal.tip = tip;
-  return true;
+  return C.wm->tool_settings.tool == Tool::Select && bone_press_drag_begin(C, area, *armature, view, start);
 }
 
 bool bone_drag_update_test(Context &C, float2 to, bool alt)
@@ -12666,7 +12720,12 @@ bool bone_drag_update_test(Context &C, float2 to, bool alt)
     return false;
   }
   const float2 delta = to - g_bone_modal.start_mouse;
-  bone_modal_grab(C, *armature, delta, alt);
+  if (g_bone_modal.kind == 'D') {
+    bone_modal_drag(*armature, to, alt);
+  }
+  else {
+    bone_modal_grab(C, *armature, delta, alt);
+  }
   bone_modal_follow(C, *armature, delta, 0.0f, 1.0f);
   return true;
 }
@@ -14616,6 +14675,25 @@ static OpStatus bones_transform_exec(Context &C, char kind)
       moving.push_back(active);
     }
   }
+  /* A drag on one bone (posing): the bone layer it is in (the active one's family), the bone by name. */
+  size_t drag_index = 0;
+  BoneDragPart drag_part = BoneDragPart::Body;
+  if (kind == 'D') {
+    Layer *owner = op_has_arg(C, "layer") ? layer_find(doc, uint64_t(std::strtoull(op_arg(C, "layer", "0").c_str(), nullptr, 10)))
+                                          : active;
+    const Bone *bone = owner && owner->is_bone_layer() ? bone_find_by_name(*owner, op_arg(C, "bone", "")) : nullptr;
+    const std::vector<Layer *> family = armature_family(doc, active->id);
+    if (!bone || doc.frame_current == 0 || std::find(family.begin(), family.end(), owner) == family.end()) {
+      return OpStatus::Cancelled;
+    }
+    const std::string part = op_arg(C, "part", "BODY");
+    if (part != "BODY" && part != "TIP" && part != "HEAD") {
+      return OpStatus::Cancelled;
+    }
+    drag_part = part == "TIP" ? BoneDragPart::Tip : part == "HEAD" ? BoneDragPart::Head : BoneDragPart::Body;
+    drag_index = size_t(bone - owner->bones.data());
+    moving = {owner};
+  }
   if (moving.empty()) {
     return OpStatus::Cancelled;
   }
@@ -14664,7 +14742,15 @@ static OpStatus bones_transform_exec(Context &C, char kind)
   for (const Moved &m : moved) {
     Layer *armature = m.armature;
     const std::vector<Bone> &start = m.start;
-    if (kind == 'G') {
+    if (kind == 'D') {
+      const Transform2D to_layer = bone_drag_to_layer(doc, *armature, drag_index);
+      const float2 press(op_arg_float(C, "x", 0.0f), op_arg_float(C, "y", 0.0f));
+      const float2 to(op_arg_float(C, "to_x", 0.0f), op_arg_float(C, "to_y", 0.0f));
+      armature_bone_drag(*armature, start, drag_index, drag_part, to_layer.apply(press), to_layer.apply(to),
+                         op_arg_bool(C, "stretch"));
+      C.undo_name = "Drag Bone";
+    }
+    else if (kind == 'G') {
       armature_grab_selected(*armature, start, m.to_armature.apply_vector(move), setup, op_arg_bool(C, "stretch"));
       if (op_arg_bool(C, "knob_snap")) {
         armature_snap_knobs(*armature);
@@ -15498,6 +15584,25 @@ static void transform_operators_register()
                         "bone moves whole, its parent turning and stretching; pinned chains stretch to hold",
                         "0")},
       bones_poll, [](Context &C) { return bones_transform_exec(C, 'G'); });
+  add("armature.bone_drag", "Drag Bone",
+      "Posing, drag one bone as the Select tool's press does: bone= (in the bone layer layer=, the active one's "
+      "family; default the active), part= BODY, TIP or HEAD (one not connected), pressed at x, y and dragged to to_x, "
+      "to_y (document space). A tip turns the bone to point there; a head moves it; a body moves a root and turns "
+      "any other by the angle the mouse went round its base. stretch=1 (Alt): a tip goes exactly there, the bone "
+      "stretching, its connected children keeping their tips; a head goes there alone; a connected bone's body moves "
+      "it whole, its parent stretching; any other body turns and stretches. only_bones= and without_children= as Move "
+      "Bones",
+      {panel_float("x", "X", "Pressed at, across", "0", -1e6f, 1e6f, 0.01f),
+       panel_float("y", "Y", "Pressed at, up", "0", -1e6f, 1e6f, 0.01f),
+       panel_float("to_x", "To X", "Dragged to, across", "0", -1e6f, 1e6f, 0.01f),
+       panel_float("to_y", "To Y", "Dragged to, up", "0", -1e6f, 1e6f, 0.01f),
+       op_bool_property("stretch", "Stretch", "As Alt while dragging", "0"), only_bones_option(),
+       without_children_option()},
+      [](Context &C) {
+        const Layer *a = C.document ? document_active_layer(*C.document) : nullptr;
+        return C.wm && a && a->is_bone_layer();
+      },
+      [](Context &C) { return bones_transform_exec(C, 'D'); });
   add("armature.rotate", "Rotate Bones", "Turn the selected bones by angle= degrees (as R does); only_bones= as Move Bones",
       {angle, only_bones_option(), without_children_option(), keep_bones}, bones_poll,
       [](Context &C) { return bones_transform_exec(C, 'R'); });
@@ -17646,11 +17751,7 @@ static void bone_tool_input(Context &C, Area &area, Layer &armature, const ViewM
   {
     const ImVec2 start = g_bone_box.start;
     g_bone_box = {};
-    std::pair<uint64_t, uint64_t> tip;
-    if (bone_press_drag_pick(C, armature, view, start, &tip) && bone_modal_start(C, area, 'G', view.to_document(start))) {
-      g_bone_modal.tweak = true;
-      g_bone_modal.tip = tip;
-    }
+    bone_press_drag_begin(C, area, armature, view, start);
     return;
   }
   if (g_bone_box.active && g_bone_box.area == area.id && g_bone_box.grab.layer &&
@@ -19036,40 +19137,63 @@ static void layer_pick_click(Context &C, const ViewMapping &view, ImVec2 mouse, 
   g_layer_pick_last = id;
 }
 
+/* A curve handle, an IK dot or ring, a Limit Angle end or an IK path's diamond of the Select tool's bone layer under
+ * `mouse`: dragged by the Select tool, Alt changing how. */
+static bool bone_tool_drag_under(Context &C, const ViewMapping &view, ImVec2 mouse)
+{
+  const Layer *armature = curve_armature(C);
+  if (!armature) {
+    return false;
+  }
+  const Document &doc = *C.document;
+  return curve_handle_under(doc, *armature, view, mouse) || ik_point_under(doc, *armature, view, mouse) ||
+         limit_end_under(doc, *armature, view, mouse) || ik_path_diamond_under(doc, *armature, view, mouse);
+}
+
 /* Whether a press starts a pick click: always with the Select Layer tool; with Alt from the tools
  * whose Alt-drags mean nothing else (not the Shape tool's centred shapes, a handle's drag or the
  * transform boxes, which pick on their own click instead). */
-static bool layer_pick_wanted(Context &C, const ViewMapping &view)
+static bool layer_pick_wanted(Context &C, const ViewMapping &view, bool alt, ImVec2 mouse)
 {
   const ToolSettings &ts = C.wm->tool_settings;
   if (ts.tool == Tool::SelectLayer) {
     return true;
   }
-  if (!ImGui::GetIO().KeyAlt || ts.tool == Tool::Shape || ts.tool == Tool::TransformBones ||
+  if (!alt || ts.tool == Tool::Shape || ts.tool == Tool::TransformBones ||
       ts.tool == Tool::TransformPoints)
   {
     return false;
   }
-  if (ts.tool == Tool::Select &&
-      pick_handle(C, view, ImGui::GetIO().MousePos, handles_shown(C.document->overlays, ts)).layer)
-  {
+  if (ts.tool == Tool::Select && pick_handle(C, view, mouse, handles_shown(C.document->overlays, ts)).layer) {
+    return false;
+  }
+  /* Nor on what the Select tool drags on a bone layer where Alt means something (a curve handle's one side, stretching
+   * from an IK dot or ring, a Limit Angle end, an IK path's diamond). A bone itself: an Alt click picks the layer, an
+   * Alt drag moves the bone (taken over once the mouse moves, layer_pick_update's caller). */
+  if (bone_tool_drag_under(C, view, mouse)) {
     return false;
   }
   /* The Motion Path tool's Alt click on a bone or point picks that instead (motion_path_pick_click), and on a path
    * handle or control point takes that. */
   if (ts.tool == Tool::MotionPath && C.document->motion_paths &&
-      (g_path_handle_under || motion_path_pick_click(C, view, ImGui::GetIO().MousePos, false, false)))
+      (g_path_handle_under || motion_path_pick_click(C, view, mouse, false, false)))
   {
     return false;
   }
   /* Alt-click on a guide line deletes it. */
   if (ts.tool == Tool::Annotate && annotate_mode_is_guide(ts.annotate_mode) && C.document->guide_settings.show) {
-    const ImVec2 mouse = ImGui::GetIO().MousePos;
     if (pick_guide_measure(*C.document, view, mouse).guide >= 0 || pick_guide_turn(*C.document, view, mouse).guide >= 0) {
       return false;
     }
   }
   return true;
+}
+
+/* A pick click's press (an Alt press) that moves, with the Select tool on a bone: a drag of that bone instead, Alt
+ * stretching it. */
+static bool layer_click_drag_bone(Context &C, Area &area, Layer &armature, const ViewMapping &view, ImVec2 start)
+{
+  return C.wm->tool_settings.tool == Tool::Select && bone_press_drag_begin(C, area, armature, view, start);
 }
 
 /* --- Follow Point's light blue points (anim/follow_point.hh) --- */
@@ -20419,12 +20543,22 @@ static void viewport_draw_contents(Area &area, Context &C)
     }
   }
   else if (g_layer_click.active && g_layer_click.area == area.id) {
-    layer_pick_update(C, view, dl);
+    /* An Alt press on a bone with the Select tool that moves: a drag of the bone (Alt stretching), not a layer pick. */
+    if (armature_active && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f) &&
+        layer_click_drag_bone(C, area, *armature_active, view, g_layer_click.start))
+    {
+      g_layer_click = {};
+    }
+    else {
+      layer_pick_update(C, view, dl);
+    }
   }
   else if (!g_modal.active && follow_point_input(C, area, view, hovered)) {
     /* The light blue point has the mouse. */
   }
-  else if (hovered && !g_modal.active && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && layer_pick_wanted(C, view)) {
+  else if (hovered && !g_modal.active && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+           layer_pick_wanted(C, view, io.KeyAlt, io.MousePos))
+  {
     g_layer_click = {true, area.id, io.MousePos};
     layer_pick_update(C, view, dl);
   }

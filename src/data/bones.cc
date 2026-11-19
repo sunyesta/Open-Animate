@@ -8,6 +8,7 @@
 #include <map>
 #include <mutex>
 #include <numbers>
+#include <optional>
 #include <set>
 
 #include "anim/controller.hh"
@@ -2310,6 +2311,226 @@ void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, 
     /* Pinned ends and bases the move left alone stay where they were. */
     armature_ik_hold(armature, original, armature.bones.size(), BoneConstraintType::IKEnd, stretch);
   }
+}
+
+void armature_bone_drag(Layer &armature, const std::vector<Bone> &original, size_t index, BoneDragPart part,
+                        float2 press, float2 mouse, bool stretch)
+{
+  const std::vector<float> was_turned = turned_angles(armature, original);
+  armature.bones = original;
+  const size_t n = armature.bones.size();
+  if (index >= n || bone_is_controller(armature.bones[index])) {
+    return;
+  }
+  const std::vector<BonePose> was = armature_keyed_pose(armature, false);
+  const float2 move = mouse - press;
+  /* The poses now and the way from the scene into bone k's parent (where its angle and position are). */
+  const auto parent_space = [&](size_t k, std::vector<BonePose> &r_now) {
+    r_now = armature_keyed_pose(armature, false);
+    const BonePose *parent = bone_pose_find(r_now, armature.bones[k].parent);
+    return parent ? parent->pose.inverted() : bone_outer_frame(armature.bones[k], false).inverted();
+  };
+  /* Bone k turned to point at `goal` (and with `grow`, stretched to reach it), its base where it is. Worked out in its
+   * parent's space and tried again, as a stretched parent skews what it carries: without `grow` its length in the scene
+   * is what is kept, so a bone turning under a stretched parent doesn't change length with the skew. */
+  const auto aim = [&](size_t k, float2 goal, bool grow) {
+    Bone &b = armature.bones[k];
+    std::vector<BonePose> now = armature_keyed_pose(armature, false);
+    if (!grow) {
+      const float2 way = goal - now[k].head;
+      const float len = distance(now[k].tail, now[k].head);
+      if (length(way) < 1e-7f || len < 1e-7f) {
+        return;
+      }
+      goal = now[k].head + way / length(way) * len;
+    }
+    for (int pass = 0; pass < 4; pass++) {
+      const Transform2D to_parent = parent_space(k, now);
+      const float2 h = to_parent.apply(now[k].head), t = to_parent.apply(now[k].tail), g = to_parent.apply(goal);
+      const float have = distance(t, h), want = distance(g, h);
+      if (have < 1e-7f || want < 1e-7f) {
+        return;
+      }
+      const float off = wrap_pi(direction_angle(g - h) - direction_angle(t - h));
+      /* Left alone when it would barely change, so a plain turn keys no stretch. */
+      const float ratio = std::abs(want / have - 1.0f) < 1e-6f ? 1.0f : want / have;
+      b.angle += off;
+      b.scale.y *= ratio;
+      if (std::abs(off) < 1e-6f && std::abs(ratio - 1.0f) < 1e-6f) {
+        return;
+      }
+    }
+  };
+  /* Bone k with its base and tip at `head` and `tail` in the scene (a connected one's base stays on its parent). */
+  const auto place = [&](size_t k, float2 head, float2 tail) {
+    Bone &b = armature.bones[k];
+    if (!b.connected) {
+      std::vector<BonePose> now;
+      for (int pass = 0; pass < 4; pass++) {
+        const Transform2D to_parent = parent_space(k, now);
+        const float2 off = head - now[k].head;
+        if (length(off) < 1e-7f) {
+          break;
+        }
+        b.position += to_parent.apply_vector(off);
+      }
+    }
+    aim(k, tail, true);
+  };
+  const auto children = [&](size_t k) {
+    std::vector<size_t> kids;
+    const uint64_t id = armature.bones[k].id;
+    for (size_t c = 0; c < n; c++) {
+      if (armature.bones[c].parent == id && c != k) {
+        kids.push_back(c);
+      }
+    }
+    return kids;
+  };
+  /* Bone c and everything hanging from it. */
+  const auto family_of = [&](size_t c) {
+    std::vector<size_t> all{c};
+    for (size_t at = 0; at < all.size(); at++) {
+      for (const size_t k : children(all[at])) {
+        if (std::find(all.begin(), all.end(), k) == all.end()) {
+          all.push_back(k);
+        }
+      }
+    }
+    return all;
+  };
+  /* Where each bone a stretch would bend ends up in the scene (its base and tip), put there after: a stretched bone
+   * carries the rest as one piece, as the mockup has it (otherwise they would stretch and skew with it). */
+  std::vector<std::optional<std::pair<float2, float2>>> spot(n);
+  const auto stay = [&](size_t c) {
+    for (const size_t d : family_of(c)) {
+      spot[d] = std::make_pair(was[d].head, was[d].tail);
+    }
+  };
+  const auto shifted = [&](size_t c, float2 by) {
+    for (const size_t d : family_of(c)) {
+      spot[d] = std::make_pair(was[d].head + by, was[d].tail + by);
+    }
+  };
+  /* Bone c's base riding its parent k from (old_head, old_tail) to (new_head, new_tail): its distance from the nearer
+   * end kept (Keep End Distance), else as far along; its side offset kept; c and its own turned with k. */
+  const auto carried = [&](size_t k, size_t c, float2 old_head, float2 old_tail, float2 new_head, float2 new_tail) {
+    const float old_len = std::max(distance(old_tail, old_head), 1e-7f);
+    const float new_len = std::max(distance(new_tail, new_head), 1e-7f);
+    const float2 u = (old_tail - old_head) / old_len, nu = (new_tail - new_head) / new_len;
+    const float2 q = was[c].head - old_head;
+    float x = q.x * u.x + q.y * u.y;
+    const float y = -q.x * u.y + q.y * u.x;
+    if (armature.bones[c].connected) {
+      x = new_len;
+    }
+    else if (armature.bones[c].keep_end_distance) {
+      x = x / old_len > 0.5f ? x - old_len + new_len : x;
+    }
+    else {
+      x = x / old_len * new_len;
+    }
+    (void)k;
+    const float2 at = new_head + nu * x + float2(-nu.y, nu.x) * y;
+    const float turn = wrap_pi(direction_angle(nu) - direction_angle(u));
+    for (const size_t d : family_of(c)) {
+      spot[d] = std::make_pair(at + rotate(was[d].head - was[c].head, turn), at + rotate(was[d].tail - was[c].head, turn));
+    }
+  };
+  Bone &b = armature.bones[index];
+  Bone *parent = b.parent != 0 && b.parent != b.id ? bone_find(armature, b.parent) : nullptr;
+  std::vector<BonePose> now;
+  switch (part) {
+    case BoneDragPart::Tip: {
+      const float2 goal = was[index].tail + move;
+      aim(index, goal, stretch);
+      if (stretch) {
+        /* Its connected children keep their tips, their bases riding its tip; the rest stay put. */
+        for (const size_t c : children(index)) {
+          if (armature.bones[c].connected) {
+            spot[c] = std::make_pair(goal, was[c].tail);
+            for (const size_t g : children(c)) {
+              stay(g);
+            }
+          }
+          else {
+            stay(c);
+          }
+        }
+      }
+      break;
+    }
+    case BoneDragPart::Head:
+      if (!stretch || b.connected) {
+        b.position += parent_space(index, now).apply_vector(move);
+      }
+      else {
+        place(index, was[index].head + move, was[index].tail);
+        for (const size_t c : children(index)) {
+          stay(c);
+        }
+      }
+      break;
+    case BoneDragPart::Body:
+      if (stretch && b.connected && parent && !parent->outer_carried && !bone_is_controller(*parent)) {
+        const size_t pi = size_t(parent - armature.bones.data());
+        aim(pi, was[index].head + move, true);
+        /* As it was in the scene, moved: its way and length kept, and all it carries. */
+        aim(index, was[index].tail + move, true);
+        for (const size_t c : children(index)) {
+          shifted(c, move);
+        }
+        /* The parent's other connected children keep their tips; the rest stay put. */
+        for (const size_t s : children(pi)) {
+          if (s == index) {
+            continue;
+          }
+          if (armature.bones[s].connected) {
+            spot[s] = std::make_pair(was[index].head + move, was[s].tail);
+            for (const size_t g : children(s)) {
+              stay(g);
+            }
+          }
+          else {
+            stay(s);
+          }
+        }
+      }
+      else if (!parent && !stretch) {
+        b.position += parent_space(index, now).apply_vector(move);
+      }
+      else {
+        /* Turned by the angle the mouse went round its base; stretched by how much further (Alt), from a press not
+         * right by the base. */
+        const float2 head = was[index].head;
+        const float2 from = press - head, to = mouse - head;
+        const float reach = distance(was[index].tail, head);
+        if (length(from) > 1e-6f && length(to) > 1e-6f) {
+          const float turn = wrap_pi(direction_angle(to) - direction_angle(from));
+          const float grow = stretch && length(from) > 0.1f * reach ? length(to) / length(from) : 1.0f;
+          const float2 tail = head + rotate(was[index].tail - head, turn) * grow;
+          aim(index, tail, stretch);
+          if (stretch) {
+            for (const size_t c : children(index)) {
+              carried(index, c, head, was[index].tail, head, tail);
+            }
+          }
+        }
+      }
+      break;
+  }
+  /* What the stretch carries, put where the mockup has it, parents first. */
+  for (const int k : bones_parents_first(armature)) {
+    if (spot[size_t(k)] && !bone_is_controller(armature.bones[size_t(k)])) {
+      place(size_t(k), spot[size_t(k)]->first, spot[size_t(k)]->second);
+    }
+  }
+  /* The same whole turns as before the drag. */
+  for (size_t i = 0; i < n && i < was_turned.size(); i++) {
+    float &angle = armature.bones[i].angle;
+    angle += 2.0f * PI * std::round((was_turned[i] - angle) / (2.0f * PI));
+  }
+  armature_ik_hold(armature, original, n, BoneConstraintType::IKEnd, stretch);
 }
 
 void armature_rotate_selected(Layer &armature, const std::vector<Bone> &original, float angle, bool setup_frame)

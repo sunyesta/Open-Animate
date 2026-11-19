@@ -213,6 +213,19 @@ std::vector<float2> armature_picked_heads(const Layer &armature, bool setup_fram
  * chains to hold. */
 void armature_grab_selected(Layer &armature, const std::vector<Bone> &original, float2 delta, bool setup_frame,
                             bool stretch = false);
+/* Posing, one bone dragged with the Select tool, by its body, its tip or (one not connected) its head: `press` and
+ * `mouse` in the bone layer's space; `stretch` is Alt. Children follow unless said.
+ * - Tip: the bone turns to point at where the tip was dragged, its length kept. Stretch: the tip goes exactly there,
+ *   the bone stretching; its connected children keep their tips (turning and stretching), the others stay put.
+ * - Head: the bone moves, with its children. Stretch: the head alone goes there, the bone turning and stretching to
+ *   keep its tip; its children stay put.
+ * - Body: a root moves; a bone with a parent turns about its base by the angle the mouse went round it. Stretch: a
+ *   connected bone moves whole, its parent turning and stretching to reach it (the parent's other connected children
+ *   keeping their tips, the rest staying put); any other turns and stretches with the mouse's reach from its base.
+ * Pinned ends and bases the drag leaves alone hold. */
+enum class BoneDragPart { Body, Tip, Head };
+void armature_bone_drag(Layer &armature, const std::vector<Bone> &original, size_t index, BoneDragPart part,
+                        float2 press, float2 mouse, bool stretch);
 void armature_rotate_selected(Layer &armature, const std::vector<Bone> &original, float angle,
                               bool setup_frame = false);
 /* S. On the setup frame it resizes the picked bones (their joints spread about the middle of
