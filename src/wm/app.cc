@@ -868,7 +868,10 @@ void App::build_default_layout(Workspace &workspace, ImGuiID dockspace_id)
 {
   ImGui::DockBuilderRemoveNode(dockspace_id);
   ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-  ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->WorkSize);
+  /* The work area as this frame's top and status bars leave it: on the first frame WorkSize still has the bars in
+   * it, and the viewport, the central node, would keep the difference once they take their room. */
+  ImGuiViewportP *viewport = static_cast<ImGuiViewportP *>(ImGui::GetMainViewport());
+  ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->GetBuildWorkRect().GetSize());
 
   /* Docking node for each editor type; types without one go to the main node. */
   ImGuiID main_id = dockspace_id;
@@ -876,18 +879,14 @@ void App::build_default_layout(Workspace &workspace, ImGuiID dockspace_id)
   const auto node_of = [&](EditorType type) -> ImGuiID & { return node_for[int(type)]; };
 
   if (workspace.kind == WorkspaceKind::Layout) {
-    /* Blender's Layout: viewport in the middle, properties on the right, timeline along the
-     * bottom with the Info log beside it. */
-    ImGuiID bottom = ImGui::DockBuilderSplitNode(main_id, ImGuiDir_Down, 0.22f, nullptr, &main_id);
-    /* Layers above Properties on the right, like Blender's outliner above its properties. */
-    ImGuiID right = ImGui::DockBuilderSplitNode(main_id, ImGuiDir_Right, 0.26f, nullptr, &main_id);
-    node_of(EditorType::Layers) = ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, 0.4f, nullptr, &right);
+    /* Blender's Layout: the timeline and the Asset Shelf along the whole bottom, above them the viewport with
+     * Layers over Properties in a narrow column on its right, like Blender's outliner over its properties. */
+    ImGuiID bottom = ImGui::DockBuilderSplitNode(main_id, ImGuiDir_Down, 0.2275f, nullptr, &main_id);
+    ImGuiID right = ImGui::DockBuilderSplitNode(main_id, ImGuiDir_Right, 0.162f, nullptr, &main_id);
+    node_of(EditorType::Layers) = ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, 0.451f, nullptr, &right);
     node_of(EditorType::Properties) = right;
-    node_of(EditorType::Info) = ImGui::DockBuilderSplitNode(bottom, ImGuiDir_Right, 0.35f, nullptr, &bottom);
+    node_of(EditorType::AssetShelf) = ImGui::DockBuilderSplitNode(bottom, ImGuiDir_Right, 0.35f, nullptr, &bottom);
     node_of(EditorType::Timeline) = bottom;
-    /* The Asset Shelf beside the timeline, Info to its right. */
-    node_of(EditorType::AssetShelf) =
-        ImGui::DockBuilderSplitNode(node_of(EditorType::Info), ImGuiDir_Left, 0.6f, nullptr, &node_of(EditorType::Info));
     node_of(EditorType::Viewport) = main_id;
   }
   else if (workspace.kind == WorkspaceKind::Animation) {
@@ -1008,7 +1007,7 @@ Workspace App::workspace_new(const std::string &name, WorkspaceKind kind)
   }
   return {name, kind,
           {area(EditorType::Viewport), area(EditorType::Layers), area(EditorType::Properties),
-           area(EditorType::Timeline), area(EditorType::AssetShelf), area(EditorType::Info)}};
+           area(EditorType::Timeline), area(EditorType::AssetShelf)}};
 }
 
 std::string App::workspace_unique_name(const std::string &base) const
