@@ -73,6 +73,10 @@ assert layer.active_point == b
 wm.select_click(1.0, 1.0, 1000.0, shift=True)
 assert layer.active_point == -1 and b not in picked_points(layer)
 assert not [m for m in wm.overlay_colors(layer)["points"] if m["color"].upper() == "#FFFFFF"]
+# A point dragged (not picked before) is picked alone, and the active one.
+ops.mesh.select_none()
+wm.select_press_grab(0.5, 0.1, 1000.0, drag=True)
+assert layer.active_point == point_at(layer, (0.5, 0.1)), layer.active_point
 # Saved with the drawing.
 wm.select_click(0.5, 1.0, 1000.0)
 middle = point_at(layer, (0.5, 1.0))
