@@ -92,10 +92,10 @@ assert all(p[2] for p in layer.points)
 assert oanim.wm.event_simulate("A", alt=True, area="Viewport")
 assert not any(p[2] for p in layer.points)
 assert oanim.wm.event_simulate("2", area="Viewport"), "2 switches to edge selection"
-assert oanim.wm.event_simulate("3", area="Viewport"), "3 switches to stroke selection"
+assert oanim.wm.event_simulate("3", area="Viewport"), "3 switches to shape selection"
 layer.select_points([0])
-assert oanim.ops.mesh.select_mode_stroke() == {'FINISHED'}
-assert sum(p[2] for p in layer.points) == 4, "stroke mode selects the whole square"
+assert oanim.ops.mesh.select_mode_shape() == {'FINISHED'}
+assert sum(p[2] for p in layer.points) == 4, "shape mode selects the whole square"
 oanim.ops.mesh.select_mode_point()
 
 # Undo restores deleted geometry.

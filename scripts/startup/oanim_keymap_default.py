@@ -129,7 +129,8 @@ KEYMAP = (
     ("Viewport", "mesh.deselect_linked_pick", "L", {"shift": True}),
     ("Viewport", "mesh.select_mode_point", "1", {}),
     ("Viewport", "mesh.select_mode_edge", "2", {}),
-    ("Viewport", "mesh.select_mode_stroke", "3", {}),
+    ("Viewport", "mesh.select_mode_shape", "3", {}),
+    ("Viewport", "mesh.select_mode_shape_group", "4", {}),
     ("Viewport", "mesh.delete_menu", "X", {}),
     # Blender's Merge menu (M), for points; on a bone layer, Move to Bone Collection takes it first.
     ("Viewport", "mesh.merge_menu", "M", {}),

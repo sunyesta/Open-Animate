@@ -223,8 +223,8 @@ struct MirrorSelection {
 MirrorSelection mirror_selection_begin(Context &C);
 void mirror_selection_end(Context &C, const MirrorSelection &mirror);
 
-/* In Stroke mode, selects every point of the curves that already have a selected point, so
- * the whole stroke moves together. Does nothing in Point and Edge mode. */
+/* In Shape mode, selects every point of the shapes that already have a selected point, so each
+ * shape moves whole; in Shape Group mode with every shape of its tree. Does nothing in Point and Edge mode. */
 void drawing_expand_selection_by_mode(Context &C, VectorDrawing &drawing);
 
 }  // namespace oanim

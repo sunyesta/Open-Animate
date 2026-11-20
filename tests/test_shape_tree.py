@@ -300,4 +300,35 @@ assert ops.mesh.shape_apply(shape=str(ids(layer)[1])) == {'CANCELLED'}
 assert ops.mesh.shape_apply(shape=str(ids(layer)[0])) == {'CANCELLED'}
 assert layer.shape_count == 2
 
+# --- Selection modes 3 and 4: whole shapes, and shapes with their sub shapes ------------------------------------------
+def picked_points(layer):
+    return sorted(i for i, p in enumerate(layer.points) if p[2])
+
+
+layer = scene()
+under(layer, 1, 0)
+square_points = sorted(layer.curve_points(0))
+circle_points = sorted(layer.curve_points(1))
+assert oanim.wm.event_simulate("3", area="Viewport")
+# Where both are, the top one (the circle, a sub shape, by its own outline); clicked again there, the square.
+oanim.wm.select_click(0.9, 0.5, 1000.0)
+assert picked_points(layer) == circle_points, picked_points(layer)
+oanim.wm.select_click(0.9, 0.5, 1000.0)
+assert picked_points(layer) == square_points, picked_points(layer)
+# A press on the shape picked grabs it, though the circle is over it there.
+grab = oanim.wm.select_press_grab(0.9, 0.5, 1000.0, False, False)
+assert grab == [(layer.id, square_points)] or sorted(grab[0][1]) == square_points, grab
+# Points picked otherwise grow to their whole shape.
+ops.mesh.select_none()
+layer.select_points([square_points[0]])
+ops.mesh.select_mode_shape()
+assert picked_points(layer) == square_points
+# Shape Group: the tree whole, wherever it is clicked.
+assert oanim.wm.event_simulate("4", area="Viewport")
+oanim.wm.select_click(1.3, 0.5, 1000.0)
+assert picked_points(layer) == sorted(square_points + circle_points), picked_points(layer)
+oanim.wm.select_click(5.0, 5.0, 1000.0)
+assert picked_points(layer) == [], "a click on nothing lets go"
+ops.mesh.select_mode_point()
+
 print("test_shape_tree: OK")

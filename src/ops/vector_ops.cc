@@ -409,24 +409,28 @@ static bool editable_with_selection_poll(Context &C)
 void drawing_expand_selection_by_mode(Context &C, VectorDrawing &drawing)
 {
   const SelectMode mode = C.wm->tool_settings.select_mode;
-  if (mode != SelectMode::Stroke) {
+  if (!select_mode_shapes(mode)) {
     return;
   }
-  const std::vector<bool> was_selected = [&] {
-    std::vector<bool> s(drawing.points.size());
-    for (size_t i = 0; i < drawing.points.size(); i++) {
-      s[i] = drawing.points[i].selected;
+  /* Every shape with a point picked is picked whole; in Shape Group mode with its whole tree. */
+  const std::vector<bool> touched = drawing_selected_shapes(drawing);
+  std::vector<bool> whole(drawing.shapes.size(), false);
+  for (int s = 0; s < int(drawing.shapes.size()); s++) {
+    if (!touched[size_t(s)]) {
+      continue;
     }
-    return s;
-  }();
-  for (const Curve &curve : drawing.curves) {
-    bool any = false;
-    for (const CurvePoint &cp : curve.points) {
-      any |= was_selected[cp.point];
+    if (mode == SelectMode::Shape) {
+      whole[size_t(s)] = true;
+      continue;
     }
-    if (any) {
-      for (const CurvePoint &cp : curve.points) {
-        drawing.points[cp.point].selected = true;
+    for (const int m : shape_tree_members(drawing, shape_tree_root(drawing, s))) {
+      whole[size_t(m)] = true;
+    }
+  }
+  for (int s = 0; s < int(drawing.shapes.size()); s++) {
+    if (whole[size_t(s)]) {
+      for (const int p : shape_points(drawing, drawing.shapes[size_t(s)])) {
+        drawing.points[size_t(p)].selected = true;
       }
     }
   }
@@ -945,7 +949,7 @@ void vector_operators_register()
     OperatorType ot;
     ot.idname = idname;
     ot.name = name;
-    ot.description = "Change what clicking selects: points, whole strokes, or segments between junctions";
+    ot.description = "Change what clicking selects: points, edges, whole shapes, or shapes with their sub shapes";
     ot.exec = [mode](Context &C) {
       C.wm->tool_settings.select_mode = mode;
       for (Layer *layer : editable_layers(C)) {
@@ -957,7 +961,8 @@ void vector_operators_register()
   };
   select_mode_op("mesh.select_mode_point", "Point Selection Mode", SelectMode::Point);
   select_mode_op("mesh.select_mode_edge", "Edge Selection Mode", SelectMode::Edge);
-  select_mode_op("mesh.select_mode_stroke", "Stroke Selection Mode", SelectMode::Stroke);
+  select_mode_op("mesh.select_mode_shape", "Shape Selection Mode", SelectMode::Shape);
+  select_mode_op("mesh.select_mode_shape_group", "Shape Group Selection Mode", SelectMode::ShapeGroup);
 
   /* --- Editing ----------------------------------------------------------------- */
   vector_operator("mesh.delete", "Delete Points",

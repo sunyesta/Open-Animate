@@ -58,8 +58,13 @@ inline bool annotate_mode_is_guide(AnnotateMode mode)
   return mode == AnnotateMode::GuideLine || mode == AnnotateMode::GuidePerspective || mode == AnnotateMode::GuideGrid;
 }
 
-/* Blender Grease Pencil's selection modes (1, 2, 3). */
-enum class SelectMode { Point, Edge, Stroke };
+/* The selection modes (1 to 4): points, edges, whole shapes (a shape's own points, its sub shapes staying put) and
+ * shape groups (a shape with every sub shape under it). */
+enum class SelectMode { Point, Edge, Shape, ShapeGroup };
+inline bool select_mode_shapes(SelectMode mode)
+{
+  return mode == SelectMode::Shape || mode == SelectMode::ShapeGroup;
+}
 
 /* The kinds of pen that take away what they brush. */
 inline bool draw_mode_cuts(DrawMode mode)

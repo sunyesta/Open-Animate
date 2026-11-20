@@ -1,5 +1,5 @@
-"""Edges and Strokes modes pick the line nearest the click across every drawing being edited (not the first drawing with
-a line within reach), a click on a line's painted width counting as on it; in Strokes mode a line under the mouse beats
+"""Edges and Shapes modes pick the line nearest the click across every drawing being edited (not the first drawing with
+a line within reach), a click on a line's painted width counting as on it; in Shapes mode a line under the mouse beats
 a point of another line beside it; clicking again in the same place picks the next line there (a lid over an eye's
 white), and a press in Edges mode grabs the line a click would pick.
 
@@ -51,9 +51,9 @@ ops.mesh.select_mode_edge()
 # 30 pixels from the thick line's middle (its painted half width is 50), 40 from the thin one.
 assert click(0.3, 0.03) == {"thick": [0, 1]}, picked()
 
-# --- Strokes: a line under the mouse beats a point of another line beside it --------------------------------------------
+# --- Shapes: a line under the mouse beats a point of another line beside it --------------------------------------------
 scene(("lashes", [(0.0, 1.0), (0.0, 1.2)], 0.004), ("other", [(0.012, 1.1), (0.1, 1.1)], 0.004))
-ops.mesh.select_mode_stroke()
+ops.mesh.select_mode_shape()
 # Right on the first lash, 11 pixels from the other's end point (points reach 20).
 assert click(0.001, 1.1) == {"lashes": [0, 1]}, picked()
 # On the other's end point itself: that stroke.

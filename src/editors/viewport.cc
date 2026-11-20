@@ -29,6 +29,8 @@
 
 #include "core/log.hh"
 #include "anim/gradient_shown.hh"
+#include "anim/shape_tree.hh"
+#include "data/fill_area.hh"
 #include "anim/controller.hh"
 #include "anim/controller_preview.hh"
 #include "anim/bone_family.hh"
@@ -563,12 +565,12 @@ static void deselect_all(VectorDrawing &drawing)
 static HandleDisplay handles_shown(const ViewportOverlays &ov, const ToolSettings &ts)
 {
   /* Weights are about points, not curve shapes: handles would only get in the way there. Edges
-   * and Strokes modes pick lines, not points, so their handles go too; and the Transform Points box
+   * mode picks lines and the Shape modes shapes, not points, so their handles go too; and the Transform Points box
    * works on the points as a whole. */
   if (!ov.show || !ov.points || (ts.tool == Tool::Draw && ts.draw_mode != DrawMode::Pen) ||
       ts.tool == Tool::WeightPaint || ts.tool == Tool::WeightSelect || ts.tool == Tool::TransformPoints ||
       ts.tool == Tool::TransformLayer || (ts.tool == Tool::MotionPath && ts.path_edit_layer) ||
-      ts.tool == Tool::Sculpt || ts.select_mode == SelectMode::Edge || ts.select_mode == SelectMode::Stroke)
+      ts.tool == Tool::Sculpt || ts.select_mode == SelectMode::Edge || select_mode_shapes(ts.select_mode))
   {
     return HandleDisplay::None;
   }
@@ -581,7 +583,9 @@ static bool point_gizmo_busy();
 static bool points_overlay_shown(const ViewportOverlays &ov, const ToolSettings &ts)
 {
   /* Transform Layer moves the layer as a whole: its points would only look picked. */
-  return ov.points && !(ts.tool == Tool::Draw && ts.draw_mode != DrawMode::Pen) &&
+  /* Shape and Shape Group modes show outlines only. */
+  return ov.points && !(ts.tool == Tool::Select && select_mode_shapes(ts.select_mode)) &&
+         !(ts.tool == Tool::Draw && ts.draw_mode != DrawMode::Pen) &&
          !(ts.tool == Tool::Sculpt && !ts.sculpt_selected_only) && ts.tool != Tool::TransformLayer &&
          !(ts.tool == Tool::MotionPath && ts.path_edit_layer) && !point_gizmo_busy();
 }
@@ -6745,7 +6749,8 @@ static void header_draw(Area &area, Context &C, ImVec2 origin, float width)
     ImGui::Separator();
     menu_operator(C, "Points", "mesh.select_mode_point");
     menu_operator(C, "Edges", "mesh.select_mode_edge");
-    menu_operator(C, "Strokes", "mesh.select_mode_stroke");
+    menu_operator(C, "Shapes", "mesh.select_mode_shape");
+    menu_operator(C, "Shape Groups", "mesh.select_mode_shape_group");
     ImGui::EndPopup();
   }
   /* A bone layer's header has Blender's Armature menu in place of the Drawing one. */
@@ -6879,8 +6884,17 @@ static void header_draw(Area &area, Context &C, ImVec2 origin, float width)
       operator_call(C, "mesh.select_mode_edge");
     }
     ImGui::SameLine(0, 1);
-    if (header_toggle("Strokes", ts.select_mode == SelectMode::Stroke, "Select whole strokes (3)")) {
-      operator_call(C, "mesh.select_mode_stroke");
+    if (header_toggle("Shapes", ts.select_mode == SelectMode::Shape,
+                      "Select whole shapes: a click picks the shape under it, again the next one there; a drag on "
+                      "the picked one moves its points, its sub shapes staying put (3)"))
+    {
+      operator_call(C, "mesh.select_mode_shape");
+    }
+    ImGui::SameLine(0, 1);
+    if (header_toggle("Groups", ts.select_mode == SelectMode::ShapeGroup,
+                      "Select shape groups: a shape with all its sub shapes, moved together (4)"))
+    {
+      operator_call(C, "mesh.select_mode_shape_group");
     }
   }
   if (editable_points) {
@@ -7997,7 +8011,7 @@ static void split_curve_done(ToolSettings &ts)
   }
 }
 
-/* A line near the mouse in Edges and Strokes modes: the segment (its two points, by the drawing's own points), how
+/* A line near the mouse in Edges mode: the segment (its two points, by the drawing's own points), how
  * far the mouse is from its middle in pixels, and how near the front its drawing is drawn. */
 struct LineHit {
   Layer *layer = nullptr;
@@ -8087,7 +8101,7 @@ static struct {
   ShapeEdge edge{-1, 0};
 } g_line_cycle;
 
-/* Picks the nearest point (or, in Edges and Strokes mode, the line) under the mouse across every
+/* Picks the nearest point (or, in Edges mode, the line; in the Shape modes, the shape) under the mouse across every
  * editable layer, and selects it as Blender does: a plain click replaces the selection, Shift
  * toggles, Ctrl removes. */
 /* A click on points where the last one was (the mouse within a couple of pixels): the next point under
@@ -8097,11 +8111,138 @@ static struct {
   uint64_t layer = 0, point = 0;
 } g_point_cycle;
 
+/* Shape and Shape Group modes: the shapes under the mouse across the edited drawings, the top one first. Each shape by
+ * its own outline (a sub shape's too, which draws nothing of its own); in Shape Group mode each tree once, by its top
+ * shape. */
+struct ShapeHit {
+  Layer *layer = nullptr;
+  int shape = -1;
+};
+static std::vector<ShapeHit> shapes_under(Context &C, const ViewMapping &view, float2 mouse_document)
+{
+  std::vector<ShapeHit> out;
+  const bool group = C.wm->tool_settings.select_mode == SelectMode::ShapeGroup;
+  std::vector<float2> outline;
+  for (Layer *layer : editable_layers(C)) {
+    const Transform2D to_document = layer_world_transform(*C.document, layer->id);
+    const float pixel = 1.0f / std::max(view.zoom * to_document.scale(), 1e-6f);
+    const float2 at = to_document.inverted().apply(mouse_document);
+    const Posed shown = posed(*C.document, *layer);
+    const VectorDrawing &d = *shown.drawing;
+    if (d.shapes.size() != layer->drawing.shapes.size()) {
+      continue;
+    }
+    const float reach = pick_line_pixels() * pixel;
+    for (int s = int(d.shapes.size()) - 1; s >= 0; s--) {
+      const Shape &shape = d.shapes[size_t(s)];
+      if (shape.hidden || !shape.shown) {
+        continue;
+      }
+      const bool area = shape.has_fill || shape.parent != 0 || !shape_children(d, shape.id).empty();
+      bool hit = area && shape_fill_contains(d, shape, at);
+      for (const Shape &run : hit ? std::vector<Shape>() : shape_runs(d, shape)) {
+        bool closed = false;
+        shape_outline(d, run, 12, outline, nullptr, &closed);
+        const size_t n = outline.size();
+        for (size_t i = 0; !hit && n >= 2 && i + 1 < n + (closed ? 1 : 0); i++) {
+          hit = distance_to_segment(at, outline[i], outline[(i + 1) % n]) <= reach;
+        }
+      }
+      if (!hit) {
+        continue;
+      }
+      const int take = group ? shape_tree_root(layer->drawing, s) : s;
+      if (std::none_of(out.begin(), out.end(), [&](const ShapeHit &h) { return h.layer == layer && h.shape == take; })) {
+        out.push_back({layer, take});
+      }
+    }
+  }
+  return out;
+}
+
+/* The points a shape hit picks: the shape's own, or in Shape Group mode its whole tree's. */
+static std::vector<int> shape_hit_points(Context &C, const ShapeHit &hit)
+{
+  const VectorDrawing &d = hit.layer->drawing;
+  std::vector<int> out;
+  const std::vector<int> members = C.wm->tool_settings.select_mode == SelectMode::ShapeGroup
+                                       ? shape_tree_members(d, hit.shape)
+                                       : std::vector<int>{hit.shape};
+  for (const int m : members) {
+    for (const int p : shape_points(d, d.shapes[size_t(m)])) {
+      if (std::find(out.begin(), out.end(), p) == out.end()) {
+        out.push_back(p);
+      }
+    }
+  }
+  return out;
+}
+
+static bool points_all_selected(const VectorDrawing &d, const std::vector<int> &points)
+{
+  return !points.empty() && std::all_of(points.begin(), points.end(), [&](int p) { return d.points[size_t(p)].selected; });
+}
+
+static struct {
+  ImVec2 pos{-1e9f, -1e9f};
+  uint64_t layer = 0, shape = 0;
+} g_shape_cycle;
+
+/* A click in Shape or Shape Group mode: the shape under it (clicked again in the same place, the next one there). */
+static void select_click_shapes(Context &C, const ViewMapping &view, float2 mouse_document, bool shift, bool ctrl)
+{
+  const std::vector<ShapeHit> hits = shapes_under(C, view, mouse_document);
+  const ImVec2 mouse_screen = view.to_screen(mouse_document);
+  size_t choice = 0;
+  const ImVec2 moved = mouse_screen - g_shape_cycle.pos;
+  if (!hits.empty() && moved.x * moved.x + moved.y * moved.y <= 16.0f) {
+    for (size_t k = 0; k < hits.size(); k++) {
+      if (hits[k].layer->id == g_shape_cycle.layer &&
+          hits[k].layer->drawing.shapes[size_t(hits[k].shape)].id == g_shape_cycle.shape)
+      {
+        choice = (k + 1) % hits.size();
+        break;
+      }
+    }
+  }
+  if (!shift && !ctrl) {
+    for (Layer *layer : editable_layers(C)) {
+      deselect_all(layer->drawing);
+    }
+  }
+  Layer &camera = document_camera(*C.document);
+  if (hits.empty()) {
+    g_shape_cycle = {};
+    if (!shift && !ctrl) {
+      camera.selected = false;
+    }
+    return;
+  }
+  const ShapeHit &hit = hits[choice];
+  VectorDrawing &d = hit.layer->drawing;
+  g_shape_cycle = {mouse_screen, hit.layer->id, d.shapes[size_t(hit.shape)].id};
+  const std::vector<int> points = shape_hit_points(C, hit);
+  const bool on = ctrl ? false : (shift ? !points_all_selected(d, points) : true);
+  for (const int p : points) {
+    d.points[size_t(p)].selected = on;
+  }
+  if (on) {
+    C.document->active_shape_layer = hit.layer->id;
+    C.document->active_shape = d.shapes[size_t(hit.shape)].id;
+    C.document->picked_drawing = hit.layer->id;
+  }
+  camera.selected &= shift || ctrl;
+}
+
 static void select_click(Context &C, const ViewMapping &view, float2 mouse_document, HandleDisplay handles)
 {
   /* Shift adds, Ctrl takes away (none in a background run, which has no ImGui: the Motion Path tool's test hook). */
   const bool has_io = ImGui::GetCurrentContext() != nullptr;
   const bool shift = has_io && ImGui::GetIO().KeyShift, ctrl = has_io && ImGui::GetIO().KeyCtrl;
+  if (select_mode_shapes(C.wm->tool_settings.select_mode)) {
+    select_click_shapes(C, view, mouse_document, shift, ctrl);
+    return;
+  }
   const std::vector<Layer *> layers = editable_layers(C);
   Layer *hit_layer = nullptr;
   std::vector<int> picked;
@@ -8184,9 +8325,9 @@ static void select_click(Context &C, const ViewMapping &view, float2 mouse_docum
     }
     return;
   }
-  /* A click on a line takes that edge (its two points) in Edges mode, and the whole line in Strokes mode: the line
+  /* A click on a line takes that edge (its two points) in Edges mode: the line
    * whose middle is nearest the mouse across every drawing (anywhere on its painted width reaches it), clicked again in
-   * the same place the next one there. In Strokes mode it beats a point no nearer (a point of another line beside it). In Points mode
+   * the same place the next one there. In Points mode
    * only points are picked: a click on a line selects nothing. */
   if (C.wm->tool_settings.select_mode != SelectMode::Point) {
     const std::vector<LineHit> lines = lines_near(C, view, mouse_document);
@@ -8255,6 +8396,26 @@ static PressGrab select_press_grab(Context &C, const ViewMapping &view, ImVec2 m
   }
   grab.threshold = tablet_state().touching ? 10.0f : 3.0f;
   const float2 mouse_document = view.to_document(mouse);
+  /* Shape modes: a press on the shape picked drags it (wherever under the others), else the top shape there. */
+  if (select_mode_shapes(C.wm->tool_settings.select_mode)) {
+    const std::vector<ShapeHit> hits = shapes_under(C, view, mouse_document);
+    const ShapeHit *take = hits.empty() ? nullptr : &hits.front();
+    for (const ShapeHit &hit : hits) {
+      if (points_all_selected(hit.layer->drawing, shape_hit_points(C, hit))) {
+        take = &hit;
+        break;
+      }
+    }
+    if (take) {
+      grab.layer = take->layer->id;
+      grab.points = shape_hit_points(C, *take);
+      grab.distance = 0.0f;
+      if (grab.points.empty()) {
+        grab.layer = 0;
+      }
+    }
+    return grab;
+  }
   const bool edges = C.wm->tool_settings.select_mode == SelectMode::Edge;
   float best = FLT_MAX;
   for (Layer *layer : edges ? std::vector<Layer *>() : editable_layers(C)) {
@@ -9408,8 +9569,37 @@ static void draw_drawing_overlay(uint64_t slot, const Layer &owner, const Posed 
                                  bool show_points, int quality, HandleDisplay handles, bool point_squares = true,
                                  const LineCutter *cutter = nullptr, float point_size = 6.0f, float handle_size = 6.5f)
 {
-  const VectorDrawing &drawing = *shown.drawing;
-  const VectorDrawing *wires = posed_wires(shown);
+  /* A shape tree that leaves nothing (an Intersect no longer overlapping): its top shape's own outline dashed and
+   * faint, as a hidden edge, so it can still be found and picked. */
+  std::optional<VectorDrawing> dashed, dashed_wires;
+  if (drawing_has_shape_tree(*shown.drawing)) {
+    const VectorDrawing &d = *shown.drawing;
+    for (int s = 0; s < int(d.shapes.size()); s++) {
+      if (d.shapes[size_t(s)].parent != 0 || shape_children(d, d.shapes[size_t(s)].id).empty()) {
+        continue;
+      }
+      bool empty = false;
+      shape_tree_solve(d, s, -1, &empty);
+      if (!empty) {
+        continue;
+      }
+      if (!dashed) {
+        dashed = d;
+        if (const VectorDrawing *w = posed_wires(shown); w && w->curves.size() == d.curves.size()) {
+          dashed_wires = *w;
+        }
+      }
+      for (const ShapeEdge &e : d.shapes[size_t(s)].edges) {
+        for (VectorDrawing *v : {&*dashed, dashed_wires ? &*dashed_wires : nullptr}) {
+          if (v && e.curve < int(v->curves.size()) && e.segment < int(v->curves[size_t(e.curve)].points.size())) {
+            v->curves[size_t(e.curve)].points[size_t(e.segment)].edge_hidden = true;
+          }
+        }
+      }
+    }
+  }
+  const VectorDrawing &drawing = dashed ? *dashed : *shown.drawing;
+  const VectorDrawing *wires = dashed_wires ? &*dashed_wires : (dashed ? nullptr : posed_wires(shown));
   /* A pixel in layer space, in steps of 2^(1/8) as the scene renderer's: zooming makes them again every few
    * wheel notches. */
   const float pixel =
@@ -16581,11 +16771,15 @@ static bool point_under(Context &C, const ViewMapping &view, ImVec2 mouse)
   return false;
 }
 
-/* Whether a line of an edited layer is under the mouse, where a click picks lines (Edges and Strokes modes). */
+/* Whether a line of an edited layer is under the mouse, where a click picks lines (Edges mode), or a shape, where a
+ * click picks shapes (Shape and Shape Group modes). */
 static bool line_under(Context &C, const ViewMapping &view, ImVec2 mouse)
 {
   if (C.wm->tool_settings.select_mode == SelectMode::Point) {
     return false;
+  }
+  if (select_mode_shapes(C.wm->tool_settings.select_mode)) {
+    return !shapes_under(C, view, view.to_document(mouse)).empty();
   }
   const float2 mouse_document = view.to_document(mouse);
   for (Layer *layer : editable_layers(C)) {
