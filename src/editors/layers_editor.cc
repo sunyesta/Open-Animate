@@ -21,6 +21,7 @@
 #include "data/media_layer.hh"
 #include "editors/editors.hh"
 #include "editors/ui.hh"
+#include "ui/icons.hh"
 #include "ops/edit_ops.hh"
 #include "ops/operator.hh"
 #include "ops/undo.hh"
@@ -82,55 +83,33 @@ static constexpr ImU32 COL_ACTIVE_ROW = IM_COL32(0x33, 0x4d, 0x80, 255);
 static constexpr ImU32 COL_SELECTED_ROW = IM_COL32(0x33, 0x4d, 0x80, 130);
 static constexpr ImU32 COL_REFERENCE = IM_COL32(0x6f, 0xb8, 0xff, 255);
 
-/* --- Icons, drawn with lines. --- */
+/* --- Icons. --- */
 
-static void icon_eye(ImDrawList *dl, ImVec2 c, float s, bool open)
+/* A row's icons, as Blender's Outliner draws them: 16 pixels at the interface's scale. */
+static float row_icon_size()
 {
-  const ImU32 col = open ? COL_ICON : COL_ICON_OFF;
-  dl->PathArcTo(c + ImVec2(0, s * 0.9f), s * 1.2f, -PI * 0.78f, -PI * 0.22f, 10);
-  dl->PathArcTo(c - ImVec2(0, s * 0.9f), s * 1.2f, PI * 0.22f, PI * 0.78f, 10);
-  dl->PathStroke(col, ImDrawFlags_Closed, 1.3f);
-  if (open) {
-    dl->AddCircleFilled(c, s * 0.32f, col);
-  }
-  else {
-    dl->AddLine(c + ImVec2(-s * 0.9f, s * 0.6f), c + ImVec2(s * 0.9f, -s * 0.6f), col, 1.3f);
-  }
+  return std::round(ui_space(16.0f));
 }
 
-/* Blender's render toggle: a small camera while the layer renders; off, it is a guide, shown as a
- * dashed frame in the guides' light blue (brighter while the viewport hides guides, saying why the
- * layer isn't there). */
+/* Blender's eye: open while the layer shows, shut (dimmer) while hidden. */
+static void icon_eye(ImDrawList *dl, ImVec2 c, bool open)
+{
+  ui_icon_centered(dl, open ? "eye_open" : "eye_closed", c, row_icon_size(), open ? COL_ICON : COL_ICON_OFF);
+}
+
+/* Blender's render toggle: its camera while the layer renders; crossed out while it is a guide, in the guides'
+ * light blue (brighter while the viewport hides guides, saying why the layer isn't there). */
 static constexpr ImU32 COL_GUIDE = IM_COL32(0x86, 0xc4, 0xd6, 255);
-static void icon_camera(ImDrawList *dl, ImVec2 c, float s, bool on, bool guides_hidden)
+static void icon_camera(ImDrawList *dl, ImVec2 c, bool on, bool guides_hidden)
 {
-  if (!on) {
-    const ImU32 col = guides_hidden ? IM_COL32(0xb8, 0xe6, 0xf2, 255) : COL_GUIDE;
-    const ImVec2 a = c + ImVec2(-s * 0.85f, -s * 0.7f), b = c + ImVec2(s * 0.85f, s * 0.7f);
-    /* Two dashes a side, corners left open. */
-    for (const float u : {0.12f, 0.58f}) {
-      const float v = u + 0.3f;
-      dl->AddLine(ImVec2(a.x + (b.x - a.x) * u, a.y), ImVec2(a.x + (b.x - a.x) * v, a.y), col, 1.4f);
-      dl->AddLine(ImVec2(a.x + (b.x - a.x) * u, b.y), ImVec2(a.x + (b.x - a.x) * v, b.y), col, 1.4f);
-      dl->AddLine(ImVec2(a.x, a.y + (b.y - a.y) * u), ImVec2(a.x, a.y + (b.y - a.y) * v), col, 1.4f);
-      dl->AddLine(ImVec2(b.x, a.y + (b.y - a.y) * u), ImVec2(b.x, a.y + (b.y - a.y) * v), col, 1.4f);
-    }
-    return;
-  }
-  const ImU32 col = COL_ICON;
-  dl->AddRect(c + ImVec2(-s * 0.95f, -s * 0.5f), c + ImVec2(s * 0.35f, s * 0.6f), col, 1.5f, 0, 1.3f);
-  dl->AddTriangleFilled(c + ImVec2(s * 0.35f, s * 0.05f), c + ImVec2(s * 0.95f, -s * 0.4f),
-                        c + ImVec2(s * 0.95f, s * 0.5f), col);
-  dl->AddRectFilled(c + ImVec2(-s * 0.75f, -s * 0.85f), c + ImVec2(-s * 0.2f, -s * 0.5f), col, 1.0f);
+  const ImU32 col = on ? COL_ICON : guides_hidden ? IM_COL32(0xb8, 0xe6, 0xf2, 255) : COL_GUIDE;
+  ui_icon_centered(dl, on ? "render_on" : "render_off", c, row_icon_size(), col);
 }
 
-static void icon_lock(ImDrawList *dl, ImVec2 c, float s, bool locked)
+/* Blender's padlock: shut while locked, open (dimmer) while not. */
+static void icon_lock(ImDrawList *dl, ImVec2 c, bool locked)
 {
-  const ImU32 col = locked ? COL_ICON : COL_ICON_OFF;
-  dl->AddRectFilled(c + ImVec2(-s * 0.6f, -s * 0.1f), c + ImVec2(s * 0.6f, s * 0.75f), col, 1.0f);
-  const float shift = locked ? 0.0f : s * 0.45f;
-  dl->PathArcTo(c + ImVec2(shift, -s * 0.15f), s * 0.38f, PI, 2.0f * PI, 8);
-  dl->PathStroke(col, 0, 1.3f);
+  ui_icon_centered(dl, locked ? "lock_on" : "lock_off", c, row_icon_size(), locked ? COL_ICON : COL_ICON_OFF);
 }
 
 static void icon_gear(ImDrawList *dl, ImVec2 c, float s, ImU32 col)
@@ -143,83 +122,52 @@ static void icon_gear(ImDrawList *dl, ImVec2 c, float s, ImU32 col)
   dl->AddCircle(c, s * 0.55f, col, 16, 1.6f);
 }
 
-static void icon_layer_type(ImDrawList *dl, ImVec2 c, float s, const Layer &layer)
+/* Layer icons' colours, Blender's: white for what holds layers (groups, bone layers, switches) and the camera, green
+ * for drawn layers (vector, text, gradient), red for pixel layers (media), blue for a reference of any of them. */
+static constexpr ImU32 COL_LAYER_HOLDER = IM_COL32(0xe6, 0xe6, 0xe6, 255);
+static constexpr ImU32 COL_LAYER_PIXELS = IM_COL32(0xcc, 0x66, 0x70, 255);
+
+static ImU32 layer_icon_color(const Layer &layer)
 {
-  const ImU32 col = layer.is_reference() ? COL_REFERENCE : COL_ICON;
+  if (layer.is_reference()) {
+    return ICON_COL_LAYER;
+  }
   if (layer.is_media()) {
-    /* What it holds: a picture (a frame with a hill), film (a frame with sprocket holes) or sound
-     * (a speaker); a red mark when a file is missing. */
+    return COL_LAYER_PIXELS;
+  }
+  return layer.is_group() ? COL_LAYER_HOLDER : ICON_COL_DATA;
+}
+
+/* A layer's kind as its icon (scripts/icons), centred on `c`: a picture, film or sound for media, with a red mark when a
+ * file is missing; the link for a reference. */
+static void icon_layer_type(ImDrawList *dl, ImVec2 c, const Layer &layer)
+{
+  const float size = row_icon_size(), s = size * 0.5f;
+  const char *name = "tab_vector";
+  if (layer.is_media()) {
     const MediaKind kind = layer.media.clips.empty() ? MediaKind::Image : media_clip_info(layer.media.clips[0]).kind;
-    if (kind == MediaKind::Audio) {
-      dl->AddRectFilled(c + ImVec2(-s * 0.8f, -s * 0.3f), c + ImVec2(-s * 0.35f, s * 0.3f), col, 1.0f);
-      dl->AddTriangleFilled(c + ImVec2(-s * 0.4f, -s * 0.3f), c + ImVec2(s * 0.15f, -s * 0.8f),
-                            c + ImVec2(s * 0.15f, s * 0.8f), col);
-      dl->AddTriangleFilled(c + ImVec2(-s * 0.4f, -s * 0.3f), c + ImVec2(s * 0.15f, s * 0.8f),
-                            c + ImVec2(-s * 0.4f, s * 0.3f), col);
-      dl->PathArcTo(c + ImVec2(s * 0.2f, 0.0f), s * 0.55f, -0.9f, 0.9f, 8);
-      dl->PathStroke(col, 0, 1.3f);
-    }
-    else {
-      dl->AddRect(c + ImVec2(-s * 0.85f, -s * 0.65f), c + ImVec2(s * 0.85f, s * 0.65f), col, 1.5f, 0, 1.3f);
-      if (kind == MediaKind::Video || kind == MediaKind::Sequence) {
-        for (int i = 0; i < 3; i++) {
-          const float x = -s * 0.5f + float(i) * s * 0.5f;
-          dl->AddRectFilled(c + ImVec2(x - s * 0.12f, -s * 0.5f), c + ImVec2(x + s * 0.12f, -s * 0.3f), col);
-          dl->AddRectFilled(c + ImVec2(x - s * 0.12f, s * 0.3f), c + ImVec2(x + s * 0.12f, s * 0.5f), col);
-        }
-      }
-      else {
-        dl->AddTriangleFilled(c + ImVec2(-s * 0.7f, s * 0.5f), c + ImVec2(-s * 0.15f, -s * 0.15f),
-                              c + ImVec2(s * 0.35f, s * 0.5f), col);
-        dl->AddCircleFilled(c + ImVec2(s * 0.4f, -s * 0.25f), s * 0.16f, col);
-      }
-    }
-    if (std::any_of(layer.media.clips.begin(), layer.media.clips.end(), media_clip_missing)) {
-      dl->AddCircleFilled(c + ImVec2(s * 0.7f, s * 0.55f), s * 0.42f, IM_COL32(0xe0, 0x40, 0x40, 255), 12);
-      dl->AddLine(c + ImVec2(s * 0.7f, s * 0.32f), c + ImVec2(s * 0.7f, s * 0.6f), IM_COL32_WHITE, 1.4f);
-      dl->AddCircleFilled(c + ImVec2(s * 0.7f, s * 0.75f), 1.1f, IM_COL32_WHITE);
-    }
-    return;
+    name = kind == MediaKind::Audio                                    ? "media_sound"
+           : kind == MediaKind::Video || kind == MediaKind::Sequence ? "media_movie"
+                                                                       : "tab_media";
   }
-  if (layer.is_gradient()) {
-    /* A square shaded from dark to light, as a gradient's swatch. */
-    const ImVec2 lo = c + ImVec2(-s * 0.8f, -s * 0.65f), hi = c + ImVec2(s * 0.8f, s * 0.65f);
-    const ImU32 clear = (col & 0x00ffffffu) | (0x30u << 24);
-    dl->AddRectFilledMultiColor(lo, hi, clear, col, col, clear);
-    dl->AddRect(lo, hi, col, 1.5f, 0, 1.2f);
-    if (layer.is_reference()) {
-      ui_link_icon(dl, c + ImVec2(s * 0.7f, s * 0.6f), s * 0.42f, COL_REFERENCE);
-    }
-    return;
+  else if (layer.is_gradient()) {
+    name = "tab_gradient";
   }
-  if (layer.is_text()) {
-    /* A serif T, as Blender's text object icon. */
-    dl->AddLine(c + ImVec2(-s * 0.7f, -s * 0.65f), c + ImVec2(s * 0.7f, -s * 0.65f), col, 1.8f);
-    dl->AddLine(c + ImVec2(-s * 0.7f, -s * 0.75f), c + ImVec2(-s * 0.7f, -s * 0.4f), col, 1.3f);
-    dl->AddLine(c + ImVec2(s * 0.7f, -s * 0.75f), c + ImVec2(s * 0.7f, -s * 0.4f), col, 1.3f);
-    dl->AddLine(c + ImVec2(0.0f, -s * 0.65f), c + ImVec2(0.0f, s * 0.7f), col, 1.8f);
-    dl->AddLine(c + ImVec2(-s * 0.35f, s * 0.7f), c + ImVec2(s * 0.35f, s * 0.7f), col, 1.3f);
-    return;
+  else if (layer.is_text()) {
+    name = "tab_text";
   }
-  if (layer.is_bone_layer()) {
-    /* A cartoon bone, corner to corner: a bone layer (sub bone groups too), told apart from a plain group's folder. */
-    dl->AddLine(c + ImVec2(-s * 0.425f, s * 0.425f), c + ImVec2(s * 0.425f, -s * 0.425f), col, s * 0.325f);
-    for (const ImVec2 knob : {ImVec2(-0.6125f, 0.3875f), ImVec2(-0.3875f, 0.6125f), ImVec2(0.3875f, -0.6125f),
-                              ImVec2(0.6125f, -0.3875f)})
-    {
-      dl->AddCircleFilled(c + knob * s, s * 0.2375f, col, 12);
-    }
+  else if (layer.is_bone_layer()) {
+    /* A cartoon bone: a bone layer (sub bone groups too), told apart from a plain group's folder. */
+    name = "tab_bone";
   }
   else if (layer.is_group()) {
-    /* A folder. */
-    dl->AddRectFilled(c + ImVec2(-s * 0.8f, -s * 0.55f), c + ImVec2(-s * 0.1f, -s * 0.3f), col, 1.0f);
-    dl->AddRectFilled(c + ImVec2(-s * 0.8f, -s * 0.35f), c + ImVec2(s * 0.8f, s * 0.6f), col, 1.5f);
+    name = "layer_group";
   }
-  else {
-    /* A curve with a point: a vector layer. */
-    dl->AddBezierCubic(c + ImVec2(-s * 0.8f, s * 0.5f), c + ImVec2(-s * 0.3f, -s * 0.9f),
-                       c + ImVec2(s * 0.3f, s * 0.9f), c + ImVec2(s * 0.8f, -s * 0.5f), col, 1.4f, 12);
-    dl->AddCircleFilled(c + ImVec2(s * 0.8f, -s * 0.5f), s * 0.18f, col);
+  ui_icon_centered(dl, name, c, size, layer_icon_color(layer));
+  if (layer.is_media() && std::any_of(layer.media.clips.begin(), layer.media.clips.end(), media_clip_missing)) {
+    dl->AddCircleFilled(c + ImVec2(s * 0.7f, s * 0.55f), s * 0.42f, IM_COL32(0xe0, 0x40, 0x40, 255), 12);
+    dl->AddLine(c + ImVec2(s * 0.7f, s * 0.32f), c + ImVec2(s * 0.7f, s * 0.6f), IM_COL32_WHITE, 1.4f);
+    dl->AddCircleFilled(c + ImVec2(s * 0.7f, s * 0.75f), 1.1f, IM_COL32_WHITE);
   }
   if (layer.is_reference()) {
     /* The link icon, small, for a reference. */
@@ -422,10 +370,9 @@ static void camera_row(Context &C)
   else if (hovered) {
     dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), IM_COL32(0xff, 0xff, 0xff, 14), 3.0f);
   }
-  const float icon = h * 0.32f;
   const float cy = row_min.y + h * 0.5f;
   const float x = row_min.x + 8.0f + h * 0.7f;
-  icon_camera(dl, ImVec2(x + h * 0.4f, cy), icon * 1.3f, true, false);
+  ui_icon_centered(dl, "layer_camera", ImVec2(x + h * 0.4f, cy), row_icon_size(), COL_LAYER_HOLDER);
   dl->AddText(ImVec2(x + h * 0.9f, cy - ImGui::GetFontSize() * 0.5f), IM_COL32(0xe6, 0xe6, 0xe6, 255), "Camera");
   ImGui::PopID();
   /* A line between it and the layers. */
@@ -743,15 +690,9 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
     if (ImGui::InvisibleButton("##expand", ImVec2(h * 0.7f, h))) {
       layer.expanded = !layer.expanded;
     }
-    const ImVec2 c(x + h * 0.35f, cy);
-    if (layer.expanded) {
-      dl->AddTriangleFilled(c + ImVec2(-icon * 0.8f, -icon * 0.4f), c + ImVec2(icon * 0.8f, -icon * 0.4f),
-                            c + ImVec2(0, icon * 0.6f), COL_ICON);
-    }
-    else {
-      dl->AddTriangleFilled(c + ImVec2(-icon * 0.4f, -icon * 0.8f), c + ImVec2(icon * 0.6f, 0),
-                            c + ImVec2(-icon * 0.4f, icon * 0.8f), COL_ICON);
-    }
+    /* Blender's rounded arrow, as the panels'. */
+    ui_icon_centered(dl, layer.expanded ? "arrow_down" : "arrow_right", ImVec2(x + h * 0.35f, cy),
+                     std::round(ui_space(12.0f)), COL_ICON);
   }
   x += h * 0.7f;
   if (const Layer *sw = layer_parent(doc, layer.id); sw && sw->is_switch()) {
@@ -784,7 +725,7 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
     }
     x += h * 0.6f;
   }
-  icon_layer_type(dl, ImVec2(x + h * 0.4f, cy), icon * 1.3f, layer);
+  icon_layer_type(dl, ImVec2(x + h * 0.4f, cy), layer);
   if (layer.is_reference() && reference_change_count(layer) > 0) {
     /* A copy with changes of its own (the Reference tab lists them). */
     dl->AddCircleFilled(ImVec2(x + h * 0.4f + icon * 1.1f, cy - icon * 0.9f), icon * 0.32f, IM_COL32(0x6b, 0xdb, 0xd1, 255));
@@ -877,7 +818,7 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
     ImGui::SetTooltip("Show or hide the layer");
   }
-  icon_eye(dl, ImVec2(right - h * 2.5f, cy), icon, layer.visible);
+  icon_eye(dl, ImVec2(right - h * 2.5f, cy), layer.visible);
   ImGui::SetCursorScreenPos(ImVec2(right - h * 2.0f, row_min.y));
   if (ImGui::InvisibleButton("##render", ImVec2(h, h))) {
     layer.render_visible = !layer.render_visible;
@@ -890,8 +831,7 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
                           : "Guide: shown while you work, hidden with the viewport's overlays (Shift Z), never "
                             "rendered.\nClick to render it");
   }
-  icon_camera(dl, ImVec2(right - h * 1.5f, cy), icon, layer.render_visible,
-              !(doc.overlays.show && doc.overlays.guides));
+  icon_camera(dl, ImVec2(right - h * 1.5f, cy), layer.render_visible, !(doc.overlays.show && doc.overlays.guides));
   ImGui::SetCursorScreenPos(ImVec2(right - h, row_min.y));
   if (ImGui::InvisibleButton("##lock", ImVec2(h, h))) {
     layer.locked = !layer.locked;
@@ -900,7 +840,7 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
     ImGui::SetTooltip("Lock the layer's drawing against edits");
   }
-  icon_lock(dl, ImVec2(right - h * 0.5f, cy), icon, layer.locked);
+  icon_lock(dl, ImVec2(right - h * 0.5f, cy), layer.locked);
 
   ImGui::SetCursorScreenPos(ImVec2(row_min.x, row_min.y + h));
   ImGui::PopID();
@@ -1068,7 +1008,7 @@ static void draw_order_view(Context &C)
     }
     const float cy = row_min.y + h * 0.5f;
     float x = row_min.x + 8.0f;
-    icon_layer_type(dl, ImVec2(x + h * 0.4f, cy), h * 0.32f * 1.3f, layer);
+    icon_layer_type(dl, ImVec2(x + h * 0.4f, cy), layer);
     x += h * 0.9f;
     const ImU32 text = layer.shown() ? IM_COL32(0xe6, 0xe6, 0xe6, 255) : IM_COL32(0x80, 0x80, 0x80, 255);
     dl->AddText(ImVec2(x, cy - ImGui::GetFontSize() * 0.5f), text, layer.name.c_str());

@@ -81,7 +81,9 @@ remove them when the checks are done.
   patched in `cmake/Dependencies.cmake`, `GOAnimTextShadowAlpha`).
 - Icons are SVGs in `scripts/icons` on a 16 grid (white draws, black cuts out), drawn by `ui_icon` (`src/ui/icons.*`,
   NanoSVG) into a texture at the size shown and tinted; Properties' tabs run down its left side in Blender's colours
-  (`properties_tab_strip` in `src/editors/properties.cc`: grey document, blue for every layer, green for its kind).
+  (`properties_tab_strip` in `src/editors/properties.cc`: grey document, blue for every layer, green for its kind); the
+  Layers editor's icons the same way (`layer_icon_color` in `src/editors/layers_editor.cc`: white groups, bone layers and
+  camera, green drawn layers, red pixel layers such as media, blue references) with Blender's eye, camera and lock.
 - Use ImGui wherever it can do the job; write custom widgets on top of it only where Blender's look
   or behaviour differs.
 - ImGui gotcha: in a docked window `SetCursorPos()` is measured from above the tab bar and gets
