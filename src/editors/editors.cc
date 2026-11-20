@@ -1657,9 +1657,13 @@ struct Eyedropper {
 };
 Eyedropper g_eyedropper;
 
-/* A pipette, as on Blender's eyedropper button. */
+/* The eyedropper (scripts/icons/eyedropper.svg) centred on `c`; `s` is about a third of its size, as
+ * the callers' button heights give it. A few lines stand in when the icon file is missing. */
 void eyedropper_icon(ImDrawList *dl, ImVec2 c, float s, ImU32 col)
 {
+  if (ui_icon_centered(dl, "eyedropper", c, std::round(s * 2.35f), col)) {
+    return;
+  }
   const ImVec2 tip(c.x - s * 0.7f, c.y + s * 0.7f), bulb(c.x + s * 0.45f, c.y - s * 0.45f);
   dl->AddLine(tip, bulb, col, std::max(1.5f, s * 0.22f));
   dl->AddCircleFilled(ImVec2(bulb.x + s * 0.2f, bulb.y - s * 0.2f), s * 0.32f, col);
