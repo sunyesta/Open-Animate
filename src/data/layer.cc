@@ -781,7 +781,11 @@ const rna::StructRNA &Layer::rna()
         def_float_fn<Layer>(
             "gradient_squash", "Squash",
             "A radial gradient's rings: how far they reach across its path, as a share of along it", 0.01f, 100.0f,
-            [](const Layer &l) { return l.gradient.squash; }, [](Layer &l, float v) { l.gradient.squash = v; }),
+            [](const Layer &l) { return l.gradient.squash; }, [](Layer &l, float v) {
+              if (!std::isnan(v)) {
+                l.gradient.squash = std::clamp(v, 0.01f, 100.0f);
+              }
+            }),
     };
     return s;
   }();

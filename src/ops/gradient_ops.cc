@@ -1,6 +1,7 @@
 #include "ops/gradient_ops.hh"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <sstream>
 #include <string>
@@ -76,8 +77,21 @@ int gradients_check(Document &doc, const std::function<const Document &()> &was)
     Layer &layer = *layer_find(doc, flat->id);
     const Document &before = was();
     const Layer *had = layer_find(before, layer.id);
-    if (had && had->is_gradient() && gradient_layer_valid(*had) && before.frame_current == doc.frame_current) {
-      layer.drawing = had->drawing;
+    if (had && had->is_gradient() && gradient_layer_valid(*had)) {
+      if (before.frame_current == doc.frame_current) {
+        layer.drawing = had->drawing;
+      }
+      else {
+        /* That step's points are another frame's pose: only the points it hadn't go, the rest staying where they are
+         * now. */
+        std::vector<bool> extra(layer.drawing.points.size(), false);
+        for (size_t p = 0; p < extra.size(); p++) {
+          const uint64_t id = layer.drawing.points[p].id;
+          extra[p] = std::none_of(had->gradient.stops.begin(), had->gradient.stops.end(),
+                                  [&](const GradientStop &s) { return s.point == id; });
+        }
+        drawing_remove_points(layer.drawing, extra);
+      }
       layer.gradient.stops = stops_merged(had->gradient.stops, layer.gradient.stops);
     }
     gradient_layer_repair(layer);
@@ -118,6 +132,11 @@ static Layer *gradient_layer(Context &C)
 static bool parse_color(const std::string &text, Color *r_color)
 {
   if (!text.empty() && text[0] == '#' && (text.size() == 7 || text.size() == 9)) {
+    /* strtoul would take a sign or spaces too. */
+    if (!std::all_of(text.begin() + 1, text.end(), [](char ch) { return std::isxdigit(static_cast<unsigned char>(ch)); }))
+    {
+      return false;
+    }
     char *end = nullptr;
     const unsigned long v = std::strtoul(text.c_str() + 1, &end, 16);
     if (!end || *end != '\0') {
@@ -269,12 +288,14 @@ void gradient_operators_register()
           return OpStatus::Cancelled;
         }
         GradientStop &s = layer.gradient.stops[size_t(span)];
-        if (op_has_arg(C, "midpoint")) {
-          s.midpoint = std::clamp(op_arg_float(C, "midpoint", s.midpoint), 0.02f, 0.98f);
-        }
-        if (op_has_arg(C, "falloff") && !gradient_falloff_from_identifier(op_arg(C, "falloff").c_str(), &s.falloff)) {
+        GradientFalloff falloff = s.falloff;
+        if (op_has_arg(C, "falloff") && !gradient_falloff_from_identifier(op_arg(C, "falloff").c_str(), &falloff)) {
           report(ReportType::Error, "falloff is SMOOTH, LINEAR or HARD");
           return OpStatus::Cancelled;
+        }
+        s.falloff = falloff;
+        if (op_has_arg(C, "midpoint")) {
+          s.midpoint = std::clamp(op_arg_float(C, "midpoint", s.midpoint), 0.02f, 0.98f);
         }
         return OpStatus::Finished;
       });
@@ -288,20 +309,18 @@ void gradient_operators_register()
         Layer &layer = *gradient_layer(C);
         GradientSettings &g = layer.gradient;
         const int n = int(g.stops.size());
+        const int stop = op_has_arg(C, "stop") ? op_arg_int(C, "stop", 0) : -1;
+        const int span = op_has_arg(C, "span") ? op_arg_int(C, "span", 0) : -1;
+        /* Both checked before either is picked. */
+        if ((op_has_arg(C, "stop") && (stop < 0 || stop >= n)) || (op_has_arg(C, "span") && (span < 0 || span >= n - 1))) {
+          return OpStatus::Cancelled;
+        }
         if (op_has_arg(C, "stop")) {
-          const int stop = op_arg_int(C, "stop", 0);
-          if (stop < 0 || stop >= n) {
-            return OpStatus::Cancelled;
-          }
           g.active_stop = stop;
           g.active_span = std::min(stop, n - 2);
           select_stop(layer, stop);
         }
         if (op_has_arg(C, "span")) {
-          const int span = op_arg_int(C, "span", 0);
-          if (span < 0 || span >= n - 1) {
-            return OpStatus::Cancelled;
-          }
           g.active_span = span;
         }
         if (C.undo) {

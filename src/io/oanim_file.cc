@@ -3639,7 +3639,8 @@ static Layer layer_from_json(const json &j, int depth)
     gradient_type_from_identifier(get_string(*it, "type").c_str(), &g.type);
     gradient_ends_from_identifier(get_string(*it, "ends").c_str(), &g.ends);
     gradient_mix_from_identifier(get_string(*it, "mix").c_str(), &g.mix);
-    g.squash = std::max(get_float(*it, "squash", 1.0f), 0.01f);
+    g.squash = get_float(*it, "squash", 1.0f);
+    g.squash = std::isfinite(g.squash) ? std::clamp(g.squash, 0.01f, 100.0f) : 1.0f;
     if (auto stops = it->find("stops"); stops != it->end() && stops->is_array()) {
       for (const json &sj : *stops) {
         if (!sj.is_object()) {

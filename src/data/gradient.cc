@@ -288,7 +288,7 @@ GradientField gradient_field(const VectorDrawing &drawing, const GradientSetting
   GradientField f;
   f.type = settings.type;
   f.ends = settings.ends;
-  f.squash = std::max(settings.squash, 0.01f);
+  f.squash = std::isfinite(settings.squash) ? std::clamp(settings.squash, 0.01f, 100.0f) : 1.0f;
   if (drawing.curves.empty() || drawing.curves[0].points.size() < 2 ||
       settings.stops.size() != drawing.curves[0].points.size())
   {
@@ -313,6 +313,14 @@ GradientField gradient_field(const VectorDrawing &drawing, const GradientSetting
       f.t_of.push_back(t);
     }
     f.stop_arc.push_back(total);
+  }
+  /* A place no number reaches (a script's NaN, a file's 1e39) leaves no path: nothing shows. */
+  if (!std::isfinite(total)) {
+    GradientField none;
+    none.type = f.type;
+    none.ends = f.ends;
+    none.squash = f.squash;
+    return none;
   }
   f.total = std::max(total, 1e-6f);
   f.start = f.path.front();
@@ -426,7 +434,8 @@ std::array<float, 4> gradient_color_along(const GradientField &f, float a)
     m = m < 0.0f ? m + 2.0f * L : m;
     a = m <= L ? m : 2.0f * L - m;
   }
-  const float x = std::clamp(a / L, 0.0f, 1.0f) * float(GRADIENT_LUT_SIZE);
+  /* NaN (a place no number reaches) takes the start, never an index past the table. */
+  const float x = std::isnan(a) ? 0.0f : std::clamp(a / L, 0.0f, 1.0f) * float(GRADIENT_LUT_SIZE);
   const int i = std::min(int(x), GRADIENT_LUT_SIZE - 1);
   const float t = x - float(i);
   const Channels &c0 = f.lut[size_t(i)], &c1 = f.lut[size_t(i) + 1];

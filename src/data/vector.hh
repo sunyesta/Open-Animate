@@ -547,8 +547,9 @@ void drawing_remove_points(VectorDrawing &drawing, const std::vector<bool> &remo
 /* Merge (M): each group of points becomes one, at their middle (the first of them is kept, the others go). Curves
  * through them run through it; a segment between two of them goes (shapes along it carry on across). Shapes that
  * met only at some of them become one shape, a line with a line and a fill with a fill, in the first one's look.
- * Returns how many points went. */
-int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<int>> &groups);
+ * Returns how many points went. `r_closed`, when given, is set to which curves (as they are now) it closed. */
+int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<int>> &groups,
+                         std::vector<bool> *r_closed = nullptr);
 /* The selected points in groups of those within `distance` of one another (by way of each other): what Merge by
  * Distance merges. Groups of one are left out. */
 std::vector<std::vector<int>> drawing_points_within(const VectorDrawing &drawing, float distance);
@@ -680,13 +681,15 @@ std::vector<bool> drawing_selected_shapes(const VectorDrawing &drawing);
 int drawing_join_fills(VectorDrawing &drawing);
 /* F on a whole loop (every point of a closed curve selected) with no fill round it, as Blender's F makes a face and
  * Moho's Create Shape: a line all the way round it (and on nothing else) is filled, else a new shape in `style`
- * fills and outlines it. A curve whose last point is its first again (its ends merged) is closed first. Returns how
+ * fills and outlines it. A loop all of whose segments a filled shape takes in (with holes or other loops too) is filled
+ * already. A curve whose last point is its first again (its ends merged) is closed as it is filled. Returns how
  * many loops it filled. */
 int drawing_fill_loops(VectorDrawing &drawing, const Style &style);
-/* After a curve is closed (F on its two ends, Merge): a loop through a selected point with no shape on it at all, which
- * would show nothing, gets a new shape in `style` filling and outlining it, as Moho's auto-fill does. A line along it
- * already runs on round it and is left as it is. Returns how many loops it filled. */
-int drawing_fill_bare_loops(VectorDrawing &drawing, const Style &style);
+/* After a curve is closed (F on its two ends, Merge): each curve `closed` names (by index) that is a loop with no shape
+ * on it at all, which would show nothing, gets a new shape in `style` filling and outlining it, as Moho's auto-fill
+ * does. Loops it didn't close are left as they are, and so is a line along it, which already runs on round it.
+ * Returns how many loops it filled. */
+int drawing_fill_bare_loops(VectorDrawing &drawing, const Style &style, const std::vector<bool> &closed);
 /* Separate Fills: each shape all of whose points are selected and that has several runs of edges becomes
  * a shape per run, each with its look, the first keeping its place and number. Returns how many shapes
  * were made. */

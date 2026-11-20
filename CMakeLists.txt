@@ -468,6 +468,8 @@ add_test(NAME grid
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_grid.py)
 add_test(NAME fill_loop
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_fill_loop.py)
+add_test(NAME gradient_guards
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_gradient_guards.py)
 add_test(NAME gradient_layer
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_gradient_layer.py)
 add_test(NAME extrude_branch
@@ -588,6 +590,8 @@ add_test(NAME timing_chart_rows
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_timing_chart_rows.py)
 add_test(NAME key_together_fold
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_fold.py)
+add_test(NAME key_together_reference
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_reference.py)
 add_test(NAME key_together_copy
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_key_together_copy.py)
 add_test(NAME key_together_reopen

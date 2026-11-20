@@ -897,10 +897,11 @@ static VectorDrawing stack_evaluated(const Document &doc, const Layer &layer, bo
       if (m.type == ModifierType::Mirror) {
         drawing = drawing_mirror(drawing, m, flip);
       }
-      else if (m.type == ModifierType::Bevel) {
+      /* A gradient's points are its stops: nothing adds any (it would show nothing). */
+      else if (m.type == ModifierType::Bevel && !original->is_gradient()) {
         drawing = drawing_bevel(drawing, m);
       }
-      else if (m.type == ModifierType::Resample) {
+      else if (m.type == ModifierType::Resample && !original->is_gradient()) {
         drawing = subdivided(doc, *original, std::move(drawing), m, render);
       }
       else if (m.type == ModifierType::Armature) {
@@ -980,10 +981,11 @@ static VectorDrawing stack_evaluated(const Document &doc, const Layer &layer, bo
     if (m.type == ModifierType::Mirror) {
       drawing = drawing_mirror(drawing, m, flip);
     }
-    else if (m.type == ModifierType::Bevel) {
+    /* A gradient's points are its stops: nothing adds any (it would show nothing). */
+    else if (m.type == ModifierType::Bevel && !layer.is_gradient()) {
       drawing = drawing_bevel(drawing, m);
     }
-    else if (m.type == ModifierType::Resample) {
+    else if (m.type == ModifierType::Resample && !layer.is_gradient()) {
       if (g_resample_left_out != layer.id) {
         drawing = subdivided(doc, layer, std::move(drawing), m, render);
       }

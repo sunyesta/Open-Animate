@@ -1422,7 +1422,26 @@ static void layer_together_channels(Layer &l, std::set<const void *> &seen, F &&
 {
   KeyFilter filter;
   filter.kinds = KEY_LAYER_ANGLE | KEY_LAYER_TRANSFORM | KEY_OPACITY | KEY_BONE_ANGLE | KEY_BONE_TRANSFORM;
+  /* A reference's layer channels it hasn't taken over show its original's: a filler key would take one over at the
+   * frame shown's value, every other frame left at that. */
+  std::set<const void *> followed;
+  if (l.is_reference()) {
+    const std::set<std::string> &own = l.reference.own_channels;
+    auto follow = [&](const char *name, const auto &ch) {
+      if (!ch.animated() && !own.count(name)) {
+        followed.insert(static_cast<const void *>(&ch));
+      }
+    };
+    follow("position", l.position_keys);
+    follow("rotation", l.rotation_keys);
+    follow("scale", l.scale_keys);
+    follow("shear", l.shear_keys);
+    follow("opacity", l.opacity_keys);
+  }
   for (const ChannelRef &ref : layer_filtered_channels(l, filter)) {
+    if (followed.count(ref.scalar) || followed.count(ref.vector)) {
+      continue;
+    }
     if (ref.scalar && ref.scalar_value && seen.insert(ref.scalar).second) {
       f(*ref.scalar, *ref.scalar_value, static_cast<const void *>(ref.scalar));
     }

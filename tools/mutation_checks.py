@@ -35,6 +35,26 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
+    ('src/anim/animation.cc', '      if (!ch.animated() && !own.count(name)) {', '      if (false && !ch.animated() && !own.count(name)) {', 'Key Together on a reference leaves the channels it follows following', 'tests/test_key_together_reference.py'),
+    ('src/data/vector.cc', '    if (size_t(c) >= closed.size() || !closed[size_t(c)] || on_shape[size_t(c)] || !curve.closed ||', '    if ((false && (size_t(c) >= closed.size() || !closed[size_t(c)])) || on_shape[size_t(c)] || !curve.closed ||', 'F and Merge fill only the bare loops they close', 'tests/test_fill_loop.py'),
+    ('src/data/vector.cc', '      if (shape.has_fill) {\n        has_fill = true;\n      }', '      if (shape.has_fill && only_here) {\n        has_fill = true;\n      }', 'A fill joined with others or with a hole is a fill round each loop', 'tests/test_fill_loop.py'),
+    ('src/data/vector.cc', '    if (has_fill) {\n      continue;\n    }\n    curve = std::move(shut);', '    curve = shut;\n    if (has_fill) {\n      continue;\n    }\n    curve = std::move(shut);', 'F on a filled loop ending on its first point changes nothing', 'tests/test_fill_loop.py'),
+    ('src/data/vector.cc', '      curve_fold_repeats(curve, removed);\n    }\n    {', '      (void)0;\n    }\n    {', 'Delete leaves no point twice in a row on a curve', 'tests/test_fill_loop.py'),
+    ('src/data/vector.cc', '    curve_fold_repeats(curve, removed);\n    size_t w = 0;', '    size_t w = 0;', 'Dissolve leaves no point twice in a row on a curve', 'tests/test_fill_loop.py'),
+    ('src/data/gradient.cc', '  if (!std::isfinite(total)) {', '  if (false && !std::isfinite(total)) {', 'A gradient whose path no number reaches shows nothing', 'tests/test_gradient_guards.py'),
+    ('src/data/gradient.cc', '  const float x = std::isnan(a) ? 0.0f : std::clamp(a / L, 0.0f, 1.0f) * float(GRADIENT_LUT_SIZE);', '  const float x = std::clamp(a / L, 0.0f, 1.0f) * float(GRADIENT_LUT_SIZE);', "A gradient sampled at NaN doesn't index past its table", 'tests/test_gradient_guards.py'),
+    ('src/data/layer.cc', '              if (!std::isnan(v)) {', '              if (true) {', "Squash set to NaN isn't stored", 'tests/test_gradient_guards.py'),
+    ('src/anim/gradient_shown.cc', '  return std::isfinite(v) ? std::clamp(v, 0.05f, 20.0f) : g.squash;', '  return std::clamp(v, 0.05f, 20.0f);', 'Squash dragged to NaN stays as it was', 'tests/test_gradient_guards.py'),
+    ('src/io/oanim_file.cc', '    g.squash = std::isfinite(g.squash) ? std::clamp(g.squash, 0.01f, 100.0f) : 1.0f;', '    g.squash = std::max(g.squash, 0.01f);', "A file's Squash out of range opens clamped", 'tests/test_gradient_guards.py'),
+    ('src/anim/deform.cc', '    else if (m.type == ModifierType::Resample && !layer.is_gradient()) {', '    else if (m.type == ModifierType::Resample) {', 'Resample adds no points to a gradient', 'tests/test_gradient_guards.py'),
+    ('src/anim/deform.cc', '    else if (m.type == ModifierType::Bevel && !layer.is_gradient()) {', '    else if (m.type == ModifierType::Bevel) {', 'Bevel adds no points to a gradient', 'tests/test_gradient_guards.py'),
+    ('src/anim/vector_deform.cc', '  const bool cut_self = m.deform_resample_self && !g_shape_read && !layer.is_gradient();', '  const bool cut_self = m.deform_resample_self && !g_shape_read;', 'Resample Self adds no points to a gradient', 'tests/test_gradient_guards.py'),
+    ('src/ops/layer_clipboard.cc', '  if (!target || target->type != LayerType::Vector || target->is_reference() || target->is_gradient()) {', '  if (!target || target->type != LayerType::Vector || target->is_reference()) {', 'Move to Layer into a gradient is refused', 'tests/test_gradient_guards.py'),
+    ('src/ops/layer_clipboard.cc', '    if (layer->type != LayerType::Vector || layer->is_reference() || layer->is_gradient() || layer->id == target->id) {', '    if (layer->type != LayerType::Vector || layer->is_reference() || layer->id == target->id) {', 'Move to Layer out of a gradient moves nothing', 'tests/test_gradient_guards.py'),
+    ('src/ops/gradient_ops.cc', '        drawing_remove_points(layer.drawing, extra);', '        (void)extra;', "A script's extra gradient point is put back on another frame", 'tests/test_gradient_guards.py'),
+    ('src/ops/gradient_ops.cc', '        GradientFalloff falloff = s.falloff;', '        s.midpoint = std::clamp(op_arg_float(C, "midpoint", s.midpoint), 0.02f, 0.98f); GradientFalloff falloff = s.falloff;', 'Span Set with a bad falloff changes nothing', 'tests/test_gradient_guards.py'),
+    ('src/ops/gradient_ops.cc', '        if ((op_has_arg(C, "stop") && (stop < 0 || stop >= n)) || (op_has_arg(C, "span") && (span < 0 || span >= n - 1))) {', '        if (op_has_arg(C, "stop") && (stop < 0 || stop >= n)) {', 'Pick with a bad span changes nothing', 'tests/test_gradient_guards.py'),
+    ('src/ops/gradient_ops.cc', '    if (!std::all_of(text.begin() + 1, text.end(), [](char ch) { return std::isxdigit(static_cast<unsigned char>(ch)); }))', '    if (false && !std::all_of(text.begin() + 1, text.end(), [](char ch) { return std::isxdigit(static_cast<unsigned char>(ch)); }))', 'A hex colour is hex digits only', 'tests/test_gradient_guards.py'),
 ]
 
 def build(root):

@@ -270,3 +270,15 @@ not a bug, check the times against the shutdown before shrinking.
   fuzzer kept sending refine=: its "Collapse" strokes only added points, then were checked against strokes without
   Dyntopo (seed 33's Twist "0.018 off"). When a check fails on a setting, first see that the operator reads it
   (`op_arg` / `op_has_arg` in its exec).
+- **The checkout mixes CRLF and LF** (core.autocrlf): a Python edit that reads a file in text mode and writes it back
+  turns an LF file CRLF on Windows (git hides it), and a mutation entry's exact string then matches nothing ("found 0
+  times"). Read and write with `newline=''`, replace on the LF form, and write back each file's own line ending; keep
+  mutation strings to one line.
+- **A Key Together filler on a reference takes over what it follows.** A reference's move, turn, size and opacity it
+  hasn't taken over show its original's; a channel keyed on it is its own. Folding a reference's row (fuzz seed 4,
+  `fold-moves` on frame 0) or any keying feature that keys "every channel" must leave such channels out.
+- **Adding a point to a bent path reshapes it.** A deformed gradient's or curve's path is fitted per segment, so a new
+  stop put exactly where the tick showed lands ~0.05 off it: the fit follows the bend better with one more point.
+  Measure along the path (the drag hook `gradient_handle_drag` gives the nearest place on a span), not the distance.
+- **Gradients: a number no place reaches** (NaN, inf, a file's 1e39) must show nothing, never index the colour table;
+  try every float a gradient takes (stops, Squash, a drag) at NaN, inf and 1e30, in a script and in a hand-edited file.

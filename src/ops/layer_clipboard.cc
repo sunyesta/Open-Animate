@@ -775,16 +775,19 @@ static OpStatus move_to_layer(Context &C)
 {
   Document &doc = *C.document;
   Layer *target = layer_by_name_or_id(doc, op_arg(C, "target"));
-  if (!target || target->type != LayerType::Vector || target->is_reference()) {
+  if (!target || target->type != LayerType::Vector || target->is_reference() || target->is_gradient()) {
     report(ReportType::Warning, target && target->is_reference()
                                     ? "A copy (reference layer) can't get new shapes: pick a drawing layer to move into"
+                                : target && target->is_gradient()
+                                    ? "A gradient's points are its stops: pick a drawing layer to move into"
                                     : "Pick a drawing layer to move the selection into");
     return OpStatus::Cancelled;
   }
   /* What goes, worked out before anything changes. */
   std::vector<std::pair<uint64_t, VectorDrawing>> pieces;
   for (Layer *layer : editable_layers(C)) {
-    if (layer->type != LayerType::Vector || layer->is_reference() || layer->id == target->id) {
+    /* A gradient's stops stay with it (taken, they'd be put back: a copy). */
+    if (layer->type != LayerType::Vector || layer->is_reference() || layer->is_gradient() || layer->id == target->id) {
       continue;
     }
     VectorDrawing piece = layer->drawing;

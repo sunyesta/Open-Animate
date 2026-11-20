@@ -6792,7 +6792,7 @@ void vector_deform_apply(const Document &doc, const Layer &layer, const Modifier
   /* Resample Self splits the drawing as the modifier called Resample does and bends the pieces, here so that it can be
    * left out by what reads this drawing sample for sample: a cage's or a mesh's shape gets the points it was
    * drawn with, each segment fitted to the bend instead. */
-  const bool cut_self = m.deform_resample_self && !g_shape_read;
+  const bool cut_self = m.deform_resample_self && !g_shape_read && !layer.is_gradient();
   /* The same with the wire or without it, and kept for both, or the edit wire and the render would each split and bend
    * every segment each time. */
   struct WireLeft {
@@ -6903,7 +6903,7 @@ void vector_deform_apply(const Document &doc, const Layer &layer, const Modifier
     }
   } edges{by_edges, d, strength, edges_from, edges_rest, drawing};
   std::vector<float> scratch;
-  const bool resample = m.deform_resample_self;
+  const bool resample = m.deform_resample_self && !layer.is_gradient();
   /* What the weights go by, with the cuts' own as they are made. */
   const PointGroup *weighed = group;
   PointGroup cut_group;

@@ -171,4 +171,107 @@ assert layer.shape_count == 1 and layer.shape_style(0)["has_fill"] and closed(la
 assert len(layer.curve_points(0)) == 4, layer.curve_points(0)
 assert layer.shape_contains(0, (0.5, 0.5))
 
+# --- F and Merge fill only the loops they close -----------------------------------------------------------------------
+layer = scene()
+layer.add_curve(SQUARE, closed=True)
+layer.add_curve([(2.0, 0.0), (3.0, 0.0)])
+ops.mesh.select_all()
+assert ops.mesh.delete_shape() == {'FINISHED'} and layer.shape_count == 0
+ops.mesh.select_none()
+layer.select_points([0, 4])
+assert ops.mesh.make_segment() == {'FINISHED'}
+assert not [s for s in layer.shapes if 0 in s[1]], ("F closed nothing: the bare loop stays bare", layer.shapes)
+# Merge welding two bare loops at a point closes neither.
+layer = scene()
+bare_curve(layer, [(0.0, 0.0), (1.0, 1.0), (1.0, -1.0)], closed=True)
+layer.add_curve([(-0.01, 0.0), (-1.0, 1.0), (-1.0, -1.0)], closed=True)
+ops.mesh.select_all()
+ops.mesh.delete_shape()
+ops.mesh.select_none()
+layer.select_points([0, 3])
+assert ops.mesh.merge() == {'FINISHED'}
+assert layer.shape_count == 0, layer.shapes
+# Merge by Distance closing a bare curve's ends fills it, as Merge does.
+layer = scene()
+bare_curve(layer, SQUARE + [(0.0002, 0.0)])
+ops.mesh.select_all()
+assert ops.mesh.merge_by_distance(distance="0.001") == {'FINISHED'}
+assert closed(layer) and layer.shape_count == 1 and layer.shape_style(0)["has_fill"], layer.shapes
+
+# --- A fill joined with others, or with a hole, is a fill round each of its loops ------------------------------------
+layer = scene()
+bare_curve(layer, SQUARE, closed=True)
+layer.add_curve([(0.3, 0.3), (0.7, 0.3), (0.7, 0.7), (0.3, 0.7)], closed=True)
+ops.mesh.select_all()
+ops.mesh.delete_shape()
+ops.mesh.select_all()
+assert ops.mesh.make_segment() == {'FINISHED'} and layer.shape_count == 1
+ops.mesh.select_none()
+layer.select_points(layer.curve_points(0))
+assert ops.mesh.make_segment() == {'CANCELLED'}
+assert layer.shape_count == 1 and not layer.shape_contains(0, (0.5, 0.5)), ("the hole stays open", layer.shapes)
+# Pressed again on both loops of a joined fill: nothing to do, no step.
+layer = scene()
+bare_curve(layer, SQUARE, closed=True)
+layer.add_curve([(2.0, 0.0), (3.0, 0.0), (3.0, 1.0), (2.0, 1.0)], closed=True)
+ops.mesh.select_all()
+ops.mesh.delete_shape()
+ops.mesh.select_all()
+assert ops.mesh.make_segment() == {'FINISHED'} and layer.shape_count == 1
+at = oanim.wm.undo_history()[1]
+ops.mesh.select_all()
+assert ops.mesh.make_segment() == {'CANCELLED'} and oanim.wm.undo_history()[1] == at and layer.shape_count == 1
+
+# --- A saved curve ending on its first point, filled already: F changes nothing -------------------------------------
+layer = scene()
+layer.add_curve(SQUARE + [(0.05, 0.05)])
+layer.set_shape_style(0, has_fill=True)
+folder = tempfile.mkdtemp()
+path = os.path.join(folder, "filled.oanim")
+assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
+with zipfile.ZipFile(path) as z:
+    files = {n: z.read(n) for n in z.namelist()}
+doc = json.loads(files["document.json"])
+drawing = [l for l in doc["document"]["layers"] if l.get("drawing", {}).get("curves")][0]["drawing"]
+drawing["curves"][0]["points"][4]["point"] = drawing["curves"][0]["points"][0]["point"]
+drawing["points"].pop(4)
+files["document.json"] = json.dumps(doc).encode("utf-8")
+with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+    for n, data in files.items():
+        z.writestr(n, data)
+assert ops.wm.open_mainfile(filepath=path) == {'FINISHED'}
+layer = [l for l in L.all() if l.type == 'VECTOR'][0]
+L.active = layer
+before = (layer.curve_points(0), closed(layer))
+ops.mesh.select_all()
+assert ops.mesh.make_segment() == {'CANCELLED'}
+assert (layer.curve_points(0), closed(layer)) == before, ("CANCELLED changes nothing", before, layer.curve_points(0))
+
+# --- Delete or Dissolve leaves no point twice in a row on a curve ---------------------------------------------------
+for how in ("dissolve_points", "delete_points"):
+    layer = scene()
+    layer.add_curve([(0.0, 0.0), (1.0, 0.0), (1.5, 1.0), (1.02, 0.02), (2.0, 0.0)])
+    ops.mesh.select_none()
+    layer.select_points([1, 3])
+    assert ops.mesh.merge() == {'FINISHED'}
+    assert layer.curve_points(0) == [0, 1, 2, 1, 3], layer.curve_points(0)
+    ops.mesh.select_none()
+    layer.select_points([2])
+    assert getattr(ops.mesh, how)() == {'FINISHED'}
+    cp = layer.curve_points(0)
+    assert cp == [0, 1, 2], (how, cp)
+# A loop left through its first point twice, [A B A], is a line.
+for how in ("dissolve_points", "delete_points"):
+    layer = scene()
+    bare_curve(layer, [(0.0, 0.0), (1.0, 0.0), (0.02, 0.0), (0.5, 1.0), (0.0, 0.02)])
+    ops.mesh.select_none()
+    layer.select_points([0, 2, 4])
+    assert ops.mesh.merge() == {'FINISHED'}
+    assert closed(layer) and layer.curve_points(0) == [0, 1, 0, 2], layer.curve_points(0)
+    ops.mesh.select_none()
+    layer.select_points([2])
+    assert getattr(ops.mesh, how)() == {'FINISHED'}
+    cp = layer.curve_points(0)
+    assert cp == [0, 1] and not closed(layer), (how, cp, closed(layer))
+
 print("fill loop: ok")

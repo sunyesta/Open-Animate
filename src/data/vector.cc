@@ -1130,6 +1130,34 @@ static std::vector<int> curve_segment_remap(const std::vector<bool> &removed, bo
   return map;
 }
 
+/* Points gone from a curve can leave two of its points side by side that are one point (a curve through a merged point
+ * twice, what was between gone), or a loop's last on its first: the one after goes as well, the one before taking its
+ * handle out (the first its handle in). `removed` is by place on the curve. */
+static void curve_fold_repeats(Curve &curve, std::vector<bool> &removed)
+{
+  int first = -1;
+  int prev = -1;
+  for (size_t k = 0; k < curve.points.size(); k++) {
+    if (removed[k]) {
+      continue;
+    }
+    if (prev >= 0 && curve.points[k].point == curve.points[size_t(prev)].point) {
+      curve.points[size_t(prev)].handle_out = curve.points[k].handle_out;
+      removed[k] = true;
+      continue;
+    }
+    if (first < 0) {
+      first = int(k);
+    }
+    prev = int(k);
+  }
+  if (curve.closed && first >= 0 && prev > first && curve.points[size_t(prev)].point == curve.points[size_t(first)].point)
+  {
+    curve.points[size_t(first)].handle_in = curve.points[size_t(prev)].handle_in;
+    removed[size_t(prev)] = true;
+  }
+}
+
 void drawing_remove_points(VectorDrawing &drawing, const std::vector<bool> &remove)
 {
   DetailScope detail_scope(drawing);
@@ -1152,7 +1180,18 @@ void drawing_remove_points(VectorDrawing &drawing, const std::vector<bool> &remo
     for (const CurvePoint &cp : curve.points) {
       removed.push_back(remove[cp.point]);
     }
-    std::erase_if(curve.points, [&](const CurvePoint &cp) { return remove[cp.point]; });
+    if (std::find(removed.begin(), removed.end(), true) != removed.end()) {
+      curve_fold_repeats(curve, removed);
+    }
+    {
+      size_t w = 0;
+      for (size_t k = 0; k < curve.points.size(); k++) {
+        if (!removed[k]) {
+          curve.points[w++] = curve.points[k];
+        }
+      }
+      curve.points.resize(w);
+    }
     for (CurvePoint &cp : curve.points) {
       cp.point = point_remap[cp.point];
     }
@@ -1177,7 +1216,8 @@ void drawing_remove_points(VectorDrawing &drawing, const std::vector<bool> &remo
   drawing_groups_prune(drawing);
 }
 
-int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<int>> &groups)
+int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<int>> &groups,
+                         std::vector<bool> *r_closed)
 {
   DetailScope detail_scope(drawing);
   drawing_ensure_ids(drawing);
@@ -1199,6 +1239,9 @@ int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<i
     drawing.points[size_t(keep)].pos = middle / float(group.size());
     drawing.points[size_t(keep)].selected = true;
     merged += int(group.size()) - 1;
+  }
+  if (r_closed) {
+    r_closed->clear();
   }
   if (merged == 0) {
     return 0;
@@ -1272,6 +1315,9 @@ int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<i
     }
     if (curve.points.size() >= 2) {
       curve_remap[c] = int(curves.size());
+      if (r_closed) {
+        r_closed->push_back(curve.closed && !closed_before);
+      }
       curves.push_back(std::move(curve));
     }
   }
@@ -2020,6 +2066,7 @@ static void dissolve_marked(VectorDrawing &drawing, const std::vector<bool> &gon
     }
     any = true;
     const bool closed_before = curve.closed;
+    curve_fold_repeats(curve, removed);
     size_t w = 0;
     for (size_t k = 0; k < curve.points.size(); k++) {
       if (!removed[k]) {
@@ -2810,7 +2857,7 @@ static void loop_shape_add(VectorDrawing &drawing, int c, const Style &style)
   drawing.shapes.push_back(std::move(shape));
 }
 
-int drawing_fill_bare_loops(VectorDrawing &drawing, const Style &style)
+int drawing_fill_bare_loops(VectorDrawing &drawing, const Style &style, const std::vector<bool> &closed)
 {
   std::vector<bool> on_shape(drawing.curves.size(), false);
   for (const Shape &shape : drawing.shapes) {
@@ -2823,9 +2870,8 @@ int drawing_fill_bare_loops(VectorDrawing &drawing, const Style &style)
   int filled = 0;
   for (int c = 0; c < int(drawing.curves.size()); c++) {
     const Curve &curve = drawing.curves[size_t(c)];
-    if (on_shape[size_t(c)] || !curve.closed || curve.points.size() < 3 ||
-        std::none_of(curve.points.begin(), curve.points.end(),
-                     [&](const CurvePoint &cp) { return drawing.points[size_t(cp.point)].selected; }))
+    if (size_t(c) >= closed.size() || !closed[size_t(c)] || on_shape[size_t(c)] || !curve.closed ||
+        curve.points.size() < 3)
     {
       continue;
     }
@@ -2848,41 +2894,47 @@ int drawing_fill_loops(VectorDrawing &drawing, const Style &style)
     {
       continue;
     }
-    /* Ends merged before merging closed loops: its last point its first again. Its segments keep their numbers. */
-    if (!curve.closed && curve.points.size() >= 4 && curve.points.back().point == curve.points.front().point) {
-      curve.points.front().handle_in = curve.points.back().handle_in;
-      curve.points.pop_back();
-      curve.closed = true;
+    /* Ends merged before merging closed loops: its last point its first again. Closed only as it is filled (with
+     * nothing to fill, F changes nothing); its segments keep their numbers. */
+    Curve shut = curve;
+    if (!shut.closed && shut.points.size() >= 4 && shut.points.back().point == shut.points.front().point) {
+      shut.points.front().handle_in = shut.points.back().handle_in;
+      shut.points.pop_back();
+      shut.closed = true;
     }
-    if (!curve.closed || curve.points.size() < 3) {
+    if (!shut.closed || shut.points.size() < 3) {
       continue;
     }
-    const int segments = curve.segment_count();
-    /* A shape all the way round it, on nothing else: filled already, or a line to fill. */
+    const int segments = shut.segment_count();
+    /* A filled shape all the way round it (a fill joined with others, or with holes, too) has it filled already; a
+     * line all the way round it, on nothing else, is filled. */
     int round = -1;
     bool has_fill = false;
-    for (int s = 0; s < int(drawing.shapes.size()); s++) {
+    for (int s = 0; s < int(drawing.shapes.size()) && !has_fill; s++) {
       const Shape &shape = drawing.shapes[size_t(s)];
       std::vector<bool> on(size_t(segments), false);
       bool only_here = !shape.edges.empty();
       for (const ShapeEdge &e : shape.edges) {
         if (e.curve != c || e.segment < 0 || e.segment >= segments) {
           only_here = false;
-          break;
+          continue;
         }
         on[size_t(e.segment)] = true;
       }
-      if (only_here && std::all_of(on.begin(), on.end(), [](bool b) { return b; })) {
-        if (shape.has_fill) {
-          has_fill = true;
-          break;
-        }
+      if (!std::all_of(on.begin(), on.end(), [](bool b) { return b; })) {
+        continue;
+      }
+      if (shape.has_fill) {
+        has_fill = true;
+      }
+      else if (only_here) {
         round = s;
       }
     }
     if (has_fill) {
       continue;
     }
+    curve = std::move(shut);
     if (round >= 0) {
       drawing.shapes[size_t(round)].has_fill = true;
       filled++;

@@ -1215,9 +1215,20 @@ void vector_operators_register()
                     const Style style = C.wm ? C.wm->tool_settings.style : Style();
                     for (Layer *layer : editable_layers(C)) {
                       const std::vector<int> picked = drawing_selected_points(layer->drawing);
+                      std::vector<bool> was_closed;
+                      for (const Curve &curve : layer->drawing.curves) {
+                        was_closed.push_back(curve.closed);
+                      }
                       if (picked.size() == 2 && drawing_make_segment(layer->drawing, picked[0], picked[1])) {
-                        /* A curve closed with nothing on it shows as a shape. */
-                        drawing_fill_bare_loops(layer->drawing, style);
+                        /* The curve it closed, with nothing on it, shows as a shape. Joining two curves (their number
+                         * one less) closes none. */
+                        std::vector<bool> closed(layer->drawing.curves.size(), false);
+                        if (was_closed.size() == closed.size()) {
+                          for (size_t c = 0; c < closed.size(); c++) {
+                            closed[c] = layer->drawing.curves[c].closed && !was_closed[c];
+                          }
+                        }
+                        drawing_fill_bare_loops(layer->drawing, style, closed);
                         made++;
                       }
                     }
@@ -1438,10 +1449,11 @@ void vector_operators_register()
                                            std::find(added->second.begin(), added->second.end(), id) != added->second.end();
                         (image ? images : picked).push_back(p);
                       }
-                      const int now = drawing_merge_points(layer->drawing, {picked, images});
+                      std::vector<bool> closed;
+                      const int now = drawing_merge_points(layer->drawing, {picked, images}, &closed);
                       if (now > 0) {
                         /* Ends merged into a loop with nothing on it: it shows as a shape. */
-                        drawing_fill_bare_loops(layer->drawing, C.wm ? C.wm->tool_settings.style : Style());
+                        drawing_fill_bare_loops(layer->drawing, C.wm ? C.wm->tool_settings.style : Style(), closed);
                       }
                       merged += now;
                     }
@@ -1463,7 +1475,13 @@ void vector_operators_register()
                       if (layer->is_reference() && !layer->reference.edit_points) {
                         continue;
                       }
-                      merged += drawing_merge_points(layer->drawing, drawing_points_within(layer->drawing, distance));
+                      std::vector<bool> closed;
+                      const int now = drawing_merge_points(layer->drawing, drawing_points_within(layer->drawing, distance),
+                                                           &closed);
+                      if (now > 0) {
+                        drawing_fill_bare_loops(layer->drawing, C.wm ? C.wm->tool_settings.style : Style(), closed);
+                      }
+                      merged += now;
                     }
                     report(ReportType::Info, "Removed " + std::to_string(merged) + (merged == 1 ? " point" : " points"));
                     return OpStatus::Finished;

@@ -1,6 +1,7 @@
 #include "anim/gradient_shown.hh"
 
 #include <algorithm>
+#include <cmath>
 
 #include "anim/deform.hh"
 #include "data/camera.hh"
@@ -15,17 +16,21 @@ float gradient_handle_value(const Document &doc, const Layer &layer, int span, f
   const GradientField &f = shown.field;
   const GradientSettings &g = layer.gradient;
   if (span >= 0) {
+    const float was = span + 1 < int(g.stops.size()) ? g.stops[size_t(span)].midpoint : 0.5f;
     if (!f.valid || span + 1 >= int(g.stops.size())) {
-      return span + 1 < int(g.stops.size()) ? g.stops[size_t(span)].midpoint : 0.5f;
+      return was;
     }
-    return gradient_span_fraction_nearest(f, span, shown.to_document.inverted().apply(at));
+    /* A drag to a place no number reaches leaves it where it was. */
+    const float v = gradient_span_fraction_nearest(f, span, shown.to_document.inverted().apply(at));
+    return std::isfinite(v) ? v : was;
   }
   if (!f.valid) {
     return g.squash;
   }
   const float2 p = shown.to_document.inverted().apply(at);
   const float2 across(-f.start_dir.y, f.start_dir.x);
-  return std::clamp(dot(p - f.start, across) / f.total, 0.05f, 20.0f);
+  const float v = dot(p - f.start, across) / f.total;
+  return std::isfinite(v) ? std::clamp(v, 0.05f, 20.0f) : g.squash;
 }
 
 GradientShown gradient_shown(const Document &doc, const Layer &layer, bool render)
