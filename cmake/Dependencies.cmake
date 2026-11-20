@@ -79,13 +79,21 @@ FetchContent_Declare(qrcodegen
   SOURCE_SUBDIR do-not-build
 )
 
+# --- NanoSVG: reads and draws the interface's icons (scripts/icons/*.svg) at the size shown --------
+# Header only, used from src; SOURCE_SUBDIR points nowhere so nothing is built. No releases: pinned to a commit.
+FetchContent_Declare(nanosvg
+  GIT_REPOSITORY https://github.com/memononen/nanosvg.git
+  GIT_TAG 239e102ec2c691f2902e20ace2ed36ee4a35cfe6
+  SOURCE_SUBDIR do-not-build
+)
+
 # The Python installation to embed. Its DLL is copied next to the executable.
 set(OANIM_PYTHON_ROOT "C:/Python314" CACHE PATH "Root of the Python installation to embed")
 set(Python_ROOT_DIR ${OANIM_PYTHON_ROOT})
 find_package(Python 3.14 EXACT REQUIRED COMPONENTS Interpreter Development.Embed)
 set(PYBIND11_FINDPYTHON ON)
 
-FetchContent_MakeAvailable(SDL3 imgui pybind11 earcut miniz json Clipper2 qrcodegen)
+FetchContent_MakeAvailable(SDL3 imgui pybind11 earcut miniz json Clipper2 qrcodegen nanosvg)
 
 # Blender's number fields: Shift while dragging is precise (a tenth of the speed). ImGui makes
 # Shift ten times faster and has no setting for it, so its fetched copy is changed here (the same

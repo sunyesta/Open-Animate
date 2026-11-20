@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -33,6 +34,7 @@
 #include "anim/dynamics.hh"
 #include "anim/reference.hh"
 #include "core/log.hh"
+#include "ui/icons.hh"
 #include "data/camera.hh"
 #include "data/detail.hh"
 #include "data/bones.hh"
@@ -11154,6 +11156,99 @@ std::vector<PropertiesTabEntry> properties_tabs(Document &doc)
   return tabs;
 }
 
+/* A tab's icon (scripts/icons), by what it shows. */
+static const char *tab_icon(const PropertiesTabEntry &tab)
+{
+  switch (tab.id) {
+    case TAB_DOCUMENT:
+      return "tab_document";
+    case TAB_CAMERA:
+      return "tab_camera";
+    case TAB_LAYER:
+      return "tab_layer";
+    case TAB_MASKING:
+      return "tab_masking";
+    case TAB_MODIFIERS:
+      return "tab_modifiers";
+    case TAB_DRAWING:
+      return std::strcmp(tab.label, "Armature") == 0 ? "tab_armature" : "tab_vector";
+    case TAB_MEDIA:
+      return "tab_media";
+    case TAB_TEXT:
+      return "tab_text";
+    case TAB_GRADIENT:
+      return "tab_gradient";
+    case TAB_SHAPE:
+      return "tab_shape";
+    case TAB_BONE:
+      return std::strcmp(tab.label, "Drawing") == 0 ? "tab_drawing" : "tab_bone";
+    case TAB_CONSTRAINTS:
+      return "tab_constraints";
+    case TAB_REFERENCE:
+      return "tab_reference";
+  }
+  return "tab_document";
+}
+
+/* A tab's colour, Blender's: the document's grey, blue for what every layer has (Layer, Masking, Modifiers), green
+ * for what its kind has. Tabs of one colour stand together, set apart from the next. */
+static ImU32 tab_color(int id)
+{
+  switch (id) {
+    case TAB_DOCUMENT:
+    case TAB_CAMERA:
+      return ICON_COL_DOCUMENT;
+    case TAB_LAYER:
+    case TAB_MASKING:
+    case TAB_MODIFIERS:
+      return ICON_COL_LAYER;
+    default:
+      return ICON_COL_DATA;
+  }
+}
+
+/* The tabs down the editor's left side, as Blender's: a dark strip of icons from `top` to the bottom, grouped by
+ * colour, the shown one in the panels' shade and joined to them. Returns the strip's width. */
+static float properties_tab_strip(const std::vector<PropertiesTabEntry> &tabs, int &shown, Area &area, float top)
+{
+  const ImVec2 wpos = ImGui::GetWindowPos(), wsize = ImGui::GetWindowSize();
+  const float strip_w = std::round(ui_space(30.0f)), side = std::round(ui_space(2.0f));
+  const float tab_h = std::round(ui_space(24.0f)), tab_gap = std::max(1.0f, std::round(ui_space(1.0f)));
+  const float group_gap = std::round(ui_space(16.0f)), icon = std::round(ui_space(14.0f));
+  const float rounding = std::round(ui_space(4.0f));
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  dl->AddRectFilled(ImVec2(wpos.x, top), ImVec2(wpos.x + strip_w, wpos.y + wsize.y), IM_COL32(0x1d, 0x1d, 0x1d, 255));
+  float y = top + std::round(ui_space(6.0f));
+  for (size_t i = 0; i < tabs.size(); i++) {
+    if (i > 0) {
+      y += tab_color(tabs[i].id) == tab_color(tabs[i - 1].id) ? tab_gap : group_gap;
+    }
+    const ImVec2 min(wpos.x + side, y);
+    ImGui::SetCursorScreenPos(min);
+    ImGui::PushID(tabs[i].id);
+    if (ImGui::InvisibleButton("##tab", ImVec2(strip_w - side * 2.0f, tab_h))) {
+      area.properties_tab = shown = tabs[i].id;
+    }
+    const bool hovered = ImGui::IsItemHovered();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("%s", tabs[i].label);
+    }
+    ImGui::PopID();
+    if (shown == tabs[i].id) {
+      /* Out to the strip's edge, where the panels start: one piece with them. */
+      dl->AddRectFilled(min, ImVec2(wpos.x + strip_w, y + tab_h), ImGui::GetColorU32(ImGuiCol_WindowBg), rounding,
+                        ImDrawFlags_RoundCornersLeft);
+    }
+    else if (hovered) {
+      dl->AddRectFilled(min, ImVec2(wpos.x + strip_w - side, y + tab_h), IM_COL32(0x2b, 0x2b, 0x2b, 255), rounding);
+    }
+    ui_icon_centered(dl, tab_icon(tabs[i]), ImVec2(min.x + (strip_w - side * 2.0f) * 0.5f, y + tab_h * 0.5f), icon,
+                     tab_color(tabs[i].id));
+    y += tab_h;
+  }
+  return strip_w;
+}
+
 void properties_draw(Area &area, Context &C)
 {
   OANIM_PROFILE("properties_draw");
@@ -11164,8 +11259,26 @@ void properties_draw(Area &area, Context &C)
     explicit FlashBinding(WindowManager *wm) { ui_flash_bind(wm); }
     ~FlashBinding() { ui_flash_bind(nullptr); }
   } flash_binding(C.wm);
+  /* The area draws edge to edge (area_draw): the header has half the window's padding above and below it, the tabs
+   * run down the left edge, and the panels keep the padding inside their own child. */
+  const ImGuiStyle &st = ImGui::GetStyle();
+  const ImVec2 wpos = ImGui::GetWindowPos(), wsize = ImGui::GetWindowSize();
+  const float header_pad = std::round(st.WindowPadding.y * 0.5f);
+  ImGui::SetCursorScreenPos(ImVec2(wpos.x, wpos.y + header_pad));
   area_editor_type_menu(area);
   ImGui::SameLine();
+  /* Blender's search box at the header's right: only the panels whose name has the text show. */
+  static std::map<int, std::string> searches;
+  std::string &search = searches[area.id];
+  {
+    const float right = wpos.x + wsize.x - std::round(ui_space(6.0f));
+    const float search_w = std::min(std::round(ui_space(120.0f)), std::max(ui_space(60.0f), right - ImGui::GetCursorScreenPos().x));
+    ImGui::SetCursorScreenPos(ImVec2(std::max(ImGui::GetCursorScreenPos().x, right - search_w), ImGui::GetCursorScreenPos().y));
+    ui_search_field("##properties_search", &search, search_w);
+  }
+  const float header_bottom = std::round(wpos.y + header_pad * 2.0f + ImGui::GetFrameHeight());
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(wpos.x, header_bottom + 0.5f), ImVec2(wpos.x + wsize.x, header_bottom + 0.5f),
+                                      IM_COL32(0x1f, 0x1f, 0x1f, 255));
   if (C.wm->properties_tab_request >= 0) {
     area.properties_tab = C.wm->properties_tab_request;
     C.wm->properties_tab_request = -1;
@@ -11183,23 +11296,11 @@ void properties_draw(Area &area, Context &C)
   if (std::none_of(tabs.begin(), tabs.end(), [&](const PropertiesTabEntry &t) { return t.id == shown; })) {
     shown = TAB_LAYER;
   }
-  for (size_t i = 0; i < tabs.size(); i++) {
-    if (i > 0) {
-      ImGui::SameLine(0, 2);
-    }
-    const bool active = shown == tabs[i].id;
-    if (active) {
-      ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    }
-    if (ImGui::Button(tabs[i].label)) {
-      area.properties_tab = shown = tabs[i].id;
-    }
-    if (active) {
-      ImGui::PopStyleColor();
-    }
-  }
-  ImGui::Separator();
-  if (ImGui::BeginChild("##properties", ImVec2(0, 0))) {
+  const float body_top = header_bottom + 1.0f;
+  const float strip_w = properties_tab_strip(tabs, shown, area, body_top);
+  ImGui::SetCursorScreenPos(ImVec2(wpos.x + strip_w, body_top));
+  ui_panel_filter(search);
+  if (ImGui::BeginChild("##properties", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding)) {
     /* Each tab's panels in boxes, in the order kept for that tab. */
     std::string tab_name = "Document";
     for (const PropertiesTabEntry &t : tabs) {
@@ -11285,6 +11386,7 @@ void properties_draw(Area &area, Context &C)
     ui_boxes_end();
   }
   ImGui::EndChild();
+  ui_panel_filter(std::string());
 }
 
 }  // namespace oanim

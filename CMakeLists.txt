@@ -138,6 +138,7 @@ set(OANIM_SOURCES
   src/ops/vector_ops.cc
   src/python/py_runtime.cc
   src/rna/rna.cc
+  src/ui/icons.cc
   src/ui/theme.cc
   src/wm/app.cc
   src/wm/event_system.cc
@@ -155,13 +156,13 @@ set(OANIM_SOURCES
 
 add_executable(OpenAnimate ${OANIM_SOURCES})
 # Clipper2's inline code, optimized in here, has unreachable code of its own (C4702 comes from the
-# optimizer, past any pragma).
-set_source_files_properties(src/anim/merge.cc src/anim/shape_tree.cc src/data/fill_area.cc PROPERTIES COMPILE_OPTIONS "/wd4702")
+# optimizer, past any pragma), as has NanoSVG's in the icons.
+set_source_files_properties(src/anim/merge.cc src/anim/shape_tree.cc src/data/fill_area.cc src/ui/icons.cc PROPERTIES COMPILE_OPTIONS "/wd4702")
 
 target_include_directories(OpenAnimate PRIVATE src)
 # Header-only libraries as system headers, so /W4 doesn't report their warnings.
 target_include_directories(OpenAnimate SYSTEM PRIVATE ${earcut_SOURCE_DIR}/include ${json_SOURCE_DIR}/single_include
-  ${qrcodegen_SOURCE_DIR}/cpp)
+  ${qrcodegen_SOURCE_DIR}/cpp ${nanosvg_SOURCE_DIR}/src)
 # The QR code maker is someone else's code: built, not held to /W4.
 set_source_files_properties(${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp PROPERTIES COMPILE_OPTIONS "/W0")
 target_link_libraries(OpenAnimate PRIVATE oanim_imgui SDL3::SDL3 pybind11::embed miniz Clipper2 opengl32 ws2_32 bcrypt dbghelp dwrite

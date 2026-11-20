@@ -1149,6 +1149,12 @@ static void layers_settings_button(Area &area)
       ImGui::SetTooltip("Keep the groups folded except those holding the selected layers, and scroll to the active "
                         "layer. A group opened by hand stays open until the selection changes");
     }
+    /* The draw-order view: this frame's draw order instead of the tree. */
+    ImGui::Checkbox("Draw Order View", &area.layers_draw_order_view);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Show the layers in this frame's draw order (Draw Order rules applied), top first: drag one "
+                        "onto another to draw it in front of or behind it");
+    }
     ImGui::EndPopup();
   }
 }
@@ -1163,7 +1169,7 @@ void layers_draw(Area &area, Context &C)
   /* M and Shift M over the Layers editor: the picked drawings' bone collections. */
   ui_bone_collection_menus(C, ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows), true);
 
-  /* Header buttons: add, duplicate as reference, delete, and move up/down. */
+  /* The header's add button: duplicating and deleting are in the layers' right-click menu and keys, moving is by dragging. */
   ImGui::SameLine();
   if (ImGui::Button("+")) {
     ImGui::OpenPopup("##add_layer");
@@ -1182,39 +1188,6 @@ void layers_draw(Area &area, Context &C)
     ImGui::Separator();
     menu_op(C, "Reference of Active Layer", "layer.make_reference");
     ImGui::EndPopup();
-  }
-  const auto op_button = [&](const char *label, const char *idname, const char *tooltip) {
-    ImGui::SameLine(0, 2);
-    const OperatorType *ot = operators().find(idname);
-    ImGui::BeginDisabled(!ot || !operator_poll(C, *ot));
-    if (ImGui::Button(label)) {
-      operator_call(C, idname);
-    }
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
-      ImGui::SetTooltip("%s", tooltip);
-    }
-  };
-  op_button("Dup", "layer.duplicate", "Duplicate the active layer");
-  op_button("Ref", "layer.make_reference", "Duplicate the active layer as a reference");
-  op_button("Del", "layer.delete", "Delete the active layer");
-  op_button("Up", "layer.move_up", "Move the active layer up");
-  op_button("Down", "layer.move_down", "Move the active layer down");
-  /* The draw-order view: this frame's draw order instead of the tree. */
-  ImGui::SameLine(0, 8);
-  if (area.layers_draw_order_view) {
-    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  }
-  const bool order_clicked = ImGui::Button("Order");
-  if (area.layers_draw_order_view) {
-    ImGui::PopStyleColor();
-  }
-  if (order_clicked) {
-    area.layers_draw_order_view = !area.layers_draw_order_view;
-  }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-    ImGui::SetTooltip("Show the layers in this frame's draw order (Draw Order rules applied), top first: drag one "
-                      "onto another to draw it in front of or behind it");
   }
   layers_settings_button(area);
   ImGui::Separator();

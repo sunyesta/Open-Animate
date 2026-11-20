@@ -118,6 +118,9 @@ bool ui_collapsing_header(const char *label, bool default_open);
  * Shape": Document::ui_panel_order, once one was dragged). A box runs to the next one. */
 void ui_boxes_begin(const std::string &scope);
 void ui_boxes_end();
+/* Panels shown from here on: only those whose title has `text` in it (any case), as Blender's Properties search
+ * keeps; empty shows every one. Properties sets it from its search box around its boxes. */
+void ui_panel_filter(const std::string &text);
 /* A sub-panel inside a panel (Blender's): a folding row (a table row, inside a panel's table) whose
  * rows, while open, sit on a darker band. `key` keeps its fold; call ui_subpanel_end() when it's open. */
 bool ui_subpanel_begin(const std::string &key, const std::string &label, bool default_open);
@@ -202,6 +205,8 @@ void ui_join_in_row(int i, int n);
 /* A text field as Blender's: darker than a number field, so typing into it reads apart from dragging. */
 bool ui_input_text(const char *id, std::string *text, int flags = 0);
 bool ui_input_text_hint(const char *id, const char *hint, std::string *text, int flags = 0);
+/* Blender's search box: a dark text field `width` wide with a magnifying glass before the text. */
+bool ui_search_field(const char *id, std::string *text, float width);
 /* A field drawn by `draw` (ImGui's, sized by the next item width) on Blender's dark text-field background,
  * keeping ui_join_next's corners. */
 bool ui_field_dark(const char *id, const std::function<bool()> &draw);

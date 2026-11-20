@@ -26,6 +26,7 @@
 #include "core/log.hh"
 #include "editors/statistics.hh"
 #include "editors/ui.hh"
+#include "ui/icons.hh"
 #include "ui/theme.hh"
 #include "data/bones.hh"
 #include "data/document.hh"
@@ -407,11 +408,12 @@ static bool box_header(const char *label, const std::string &id)
     open = !open;
   }
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const float font = ImGui::GetFontSize();
   const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
-  /* ImGui's arrow sits a fifth of its box in: its left point the margin in, as the grip's last dot is. */
-  ImGui::RenderArrow(dl, ImVec2(h.Min.x + margin - font * 0.2f, h.Min.y + (height - font) * 0.5f), text,
-                     open ? ImGuiDir_Down : ImGuiDir_Right, 1.0f);
+  /* Blender's rounded arrow, open or folded in the same square: the open one's left point the margin in, as the
+   * grip's last dot is (it starts an eighth of its square in). */
+  const float arrow = std::round(ui_space(12.0f));
+  ui_icon(dl, open ? "arrow_down" : "arrow_right",
+          ImVec2(h.Min.x + margin - std::round(arrow * 0.12f), h.Min.y + std::round((height - arrow) * 0.5f)), arrow, text);
   const char *end = ImGui::FindRenderedTextEnd(label);
   const ImVec2 text_size = ImGui::CalcTextSize(label, end);
   const ImVec2 text_at(box_title_x(h), h.Min.y + (height - text_size.y) * 0.5f);
@@ -446,6 +448,35 @@ static bool box_header(const char *label, const std::string &id)
   /* The rows start the margin under the header (the line's spacing and a table row's padding make the rest). */
   ImGui::SetCursorScreenPos(after + ImVec2(0.0f, box_body_extra()));
   return open;
+}
+
+static std::string g_panel_filter;
+
+void ui_panel_filter(const std::string &text)
+{
+  g_panel_filter = text;
+}
+
+/* Whether a panel titled `title` (or showing `header`) is left out by the search (ui_panel_filter). */
+static bool panel_filtered_out(const char *title, const std::string &header)
+{
+  if (g_panel_filter.empty()) {
+    return false;
+  }
+  const auto has = [](std::string text) {
+    std::string find = g_panel_filter;
+    if (const size_t hash = text.find("###"); hash != std::string::npos) {
+      text = text.substr(0, hash);
+    }
+    for (char &c : text) {
+      c = char(std::tolower(static_cast<unsigned char>(c)));
+    }
+    for (char &c : find) {
+      c = char(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return text.find(find) != std::string::npos;
+  };
+  return !has(title) && (header.empty() || !has(header));
 }
 
 void ui_boxes_begin(const std::string &scope)
@@ -538,6 +569,9 @@ bool ui_collapsing_header(const char *label, bool default_open)
     id = id.substr(hash + 3);
   }
   const std::string key = ui_fold_scope() + "/" + id;
+  if (g_box.active && panel_filtered_out(label, std::string())) {
+    return false;
+  }
   /* The box first: closing the one before submits items, which would use up the fold. */
   const bool boxed = box_open(id);
   ui_fold_next(key, default_open);
@@ -574,6 +608,9 @@ static bool panel_begin(const char *title, const std::string &header, unsigned i
                         bool *check, bool *r_toggled, const char *check_tooltip, const char *menu_popup)
 {
   const std::string key = ui_fold_scope() + "/" + title;
+  if (g_box.active && panel_filtered_out(title, header)) {
+    return false;
+  }
   /* A property being shown (ui_flash_bind) opens its panel. */
   if (g_flash_wm && g_flash_wm->properties_flash.layer != 0 && g_flash_wm->properties_flash.start < 0.0 &&
       g_flash_wm->properties_flash.panel == title)
@@ -642,8 +679,8 @@ static bool panel_begin(const char *title, const std::string &header, unsigned i
         ImGui::SetTooltip("%s", check_tooltip);
       }
     }
-    ImGui::RenderArrow(dl, ImVec2(at.x + hh * 0.22f, at.y + hh * 0.22f), ImGui::GetColorU32(ImGuiCol_Text),
-                       ImGuiDir_Down, 0.75f);
+    ui_icon_centered(dl, "arrow_down", ImVec2(at.x + hh * 0.5f, at.y + hh * 0.5f), std::round(ImGui::GetFontSize() * 0.7f),
+                     ImGui::GetColorU32(ImGuiCol_Text));
     ImGui::PopID();
     ImGui::SetCursorScreenPos(after);
   }
@@ -1000,6 +1037,32 @@ bool ui_input_text_hint(const char *id, const char *hint, std::string *text, int
 {
   return field_with_corners(id, TEXT_FIELD_BG, TEXT_FIELD_HOVER,
                             [&] { return ImGui::InputTextWithHint(id, hint, text, ImGuiInputTextFlags(flags)); });
+}
+
+bool ui_search_field(const char *id, std::string *text, float width)
+{
+  /* The field's shade drawn here, the glass on it, and the text typed past the glass on no shade of its own. */
+  const ImGuiStyle &st = ImGui::GetStyle();
+  const float h = ImGui::GetFrameHeight();
+  const ImVec2 at = ImFloor(ImGui::GetCursorScreenPos());
+  const ImGuiID input_id = ImGui::GetID(id);
+  const ImGuiContext &g = *GImGui;
+  const bool hot = g.HoveredIdPreviousFrame == input_id || g.ActiveId == input_id;
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  dl->AddRectFilled(at, ImVec2(at.x + width, at.y + h), hot ? TEXT_FIELD_HOVER : TEXT_FIELD_BG, st.FrameRounding);
+  const float glass = std::round(ui_space(14.0f)), glass_x = std::round(ui_space(9.0f));
+  ui_icon(dl, "search", ImVec2(at.x + glass_x, at.y + std::round((h - glass) * 0.5f)), glass,
+          IM_COL32(0xd9, 0xd9, 0xd9, 255));
+  /* The text starts as far past the glass as the glass is from the edge, less the field's own padding. */
+  const float text_x = std::max(0.0f, glass_x + glass + std::round(ui_space(7.0f)) - st.FramePadding.x);
+  ImGui::SetCursorScreenPos(ImVec2(at.x + text_x, at.y));
+  ImGui::SetNextItemWidth(std::max(1.0f, width - text_x));
+  ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgActive, IM_COL32(0, 0, 0, 0));
+  const bool changed = ImGui::InputTextWithHint(id, "Search", text);
+  ImGui::PopStyleColor(3);
+  return changed;
 }
 
 bool ui_button(const char *label, float width, float height)
@@ -2901,17 +2964,17 @@ static void area_grip_drag_start(const ImRect &grip_rect)
   g.ActiveIdClickOffset.y = std::min(g.ActiveIdClickOffset.y, ImGui::GetFrameHeight() - 1.0f);
 }
 
-/* Two horizontal lines to grab the area by, with Blender's area options on right-click.
- * The grip starts at the area's left edge and holds equal margins on both sides of the lines,
+/* Three horizontal bars to grab the area by, with Blender's area options on right-click.
+ * The grip starts at the area's left edge and holds equal margins on both sides of the bars,
  * so they sit centred between the edge and the dropdown that follows, and centred vertically
- * on the header row. Sizes are whole pixels so both lines stay crisp. */
+ * on the header row. Bars and gaps are the same whole number of pixels, so they stay crisp and even. */
 static void area_grip(Area &area)
 {
   const float h = ImGui::GetFrameHeight();
   const float margin = std::round(ImGui::GetStyle().ItemSpacing.x);
-  const float line_w = std::round(h * 0.45f);
-  const float thickness = std::max(1.0f, std::round(h * 0.07f));
-  const float line_gap = std::max(2.0f, std::round(h * 0.16f));
+  const float line_w = std::round(ui_space(10.0f));
+  const float thickness = std::max(1.0f, std::round(ui_space(2.0f)));
+  const float line_gap = thickness;
   const ImVec2 size(margin * 2.0f + line_w, h);
 
   const ImVec2 p(std::round(ImGui::GetWindowPos().x), std::round(ImGui::GetCursorScreenPos().y));
@@ -2936,11 +2999,13 @@ static void area_grip(Area &area)
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImU32 col = hovered || ImGui::IsItemActive() ? IM_COL32(0xff, 0xff, 0xff, 255)
                                                      : IM_COL32(0x8c, 0x8c, 0x8c, 255);
-  const float block_h = thickness * 2.0f + line_gap;
+  const float block_h = thickness * 3.0f + line_gap * 2.0f;
   const float x0 = p.x + margin;
   const float y0 = p.y + std::round((h - block_h) * 0.5f);
-  dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + line_w, y0 + thickness), col);
-  dl->AddRectFilled(ImVec2(x0, y0 + thickness + line_gap), ImVec2(x0 + line_w, y0 + block_h), col);
+  for (int i = 0; i < 3; i++) {
+    const float y = y0 + float(i) * (thickness + line_gap);
+    dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + line_w, y + thickness), col);
+  }
 
   if (ui_menu_begin("##area_menu")) {
     ImGui::TextDisabled("Area");
@@ -2959,26 +3024,90 @@ static void area_grip(Area &area)
   }
 }
 
-/* Blender puts an editor-type menu at the start of every area header. */
+/* Each editor type's icon (scripts/icons). */
+static const char *editor_type_icon(EditorType type)
+{
+  switch (type) {
+    case EditorType::Viewport:
+      return "editor_viewport";
+    case EditorType::Properties:
+      return "editor_properties";
+    case EditorType::Layers:
+      return "editor_layers";
+    case EditorType::Timeline:
+      return "editor_timeline";
+    case EditorType::TextEditor:
+      return "editor_texteditor";
+    case EditorType::Console:
+      return "editor_console";
+    case EditorType::Info:
+      return "editor_info";
+    case EditorType::AssetShelf:
+      return "editor_assetshelf";
+    case EditorType::PathTiming:
+      return "editor_pathtiming";
+  }
+  return "editor_viewport";
+}
+
+/* Blender puts an editor-type menu at the start of every area header: the editor's icon and a small arrow on a dark
+ * button, the name in its tooltip; the menu lists every type with its icon and name. */
 void area_editor_type_menu(Area &area)
 {
   area_grip(area);
   ImGui::SameLine(0.0f, 0.0f);
-  ImGui::SetNextItemWidth(ImGui::CalcTextSize("Python Console").x + ImGui::GetFrameHeight() * 1.5f);
-  if (ImGui::BeginCombo("##editor_type", editor_type_label(area.type))) {
+  const float h = ImGui::GetFrameHeight();
+  const float icon = std::round(ui_space(14.0f)), arrow = std::round(ui_space(8.0f));
+  const float pad_l = std::round(ui_space(6.0f)), pad_r = std::round(ui_space(5.0f)), gap = std::round(ui_space(3.0f));
+  const ImVec2 at = ImFloor(ImGui::GetCursorScreenPos());
+  ImGui::SetCursorScreenPos(at);
+  const bool pressed = ImGui::InvisibleButton("##editor_type", ImVec2(pad_l + icon + gap + arrow + pad_r, h));
+  const bool hovered = ImGui::IsItemHovered();
+  const ImRect r(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("%s", editor_type_label(area.type));
+  }
+  const ImGuiID popup = ImGui::GetID("##editor_type_menu");
+  if (pressed) {
+    ImGui::OpenPopup(popup);
+  }
+  const bool open = ImGui::IsPopupOpen(popup, 0);
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  dl->AddRectFilled(r.Min, r.Max, open ? IM_COL32(0x47, 0x72, 0xb3, 255) : hovered ? IM_COL32(0x32, 0x32, 0x32, 255)
+                                                                          : IM_COL32(0x28, 0x28, 0x28, 255),
+                    ImGui::GetStyle().FrameRounding);
+  const ImU32 text = IM_COL32(0xe6, 0xe6, 0xe6, 255);
+  ui_icon(dl, editor_type_icon(area.type), ImVec2(r.Min.x + pad_l, r.Min.y + std::round((h - icon) * 0.5f)), icon, text);
+  ui_icon(dl, "arrow_down", ImVec2(r.Min.x + pad_l + icon + gap, r.Min.y + std::round((h - arrow) * 0.5f)), arrow, text);
+
+  ImGui::SetNextWindowPos(ImVec2(r.Min.x, r.Max.y));
+  if (ImGui::BeginPopupEx(popup, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar |
+                                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove))
+  {
+    const float row_w = icon + gap * 2.0f + ImGui::CalcTextSize("Python Console").x;
     for (EditorType type : EDITOR_TYPES) {
-      if (ImGui::Selectable(editor_type_label(type), type == area.type)) {
+      ImGui::PushID(int(type));
+      const ImVec2 row = ImGui::GetCursorScreenPos();
+      if (ImGui::Selectable("##type", type == area.type, 0, ImVec2(row_w, 0.0f))) {
         area.type = type;
       }
+      const float row_h = ImGui::GetItemRectSize().y;
+      ImDrawList *mdl = ImGui::GetWindowDrawList();
+      ui_icon(mdl, editor_type_icon(type), ImVec2(row.x, row.y + std::round((row_h - icon) * 0.5f)), icon, text);
+      mdl->AddText(ImVec2(row.x + icon + gap * 2.0f, row.y + (row_h - ImGui::GetFontSize()) * 0.5f), text,
+                   editor_type_label(type));
+      ImGui::PopID();
     }
-    ImGui::EndCombo();
+    ImGui::EndPopup();
   }
 }
 
 bool area_draw(Area &area, Context &C)
 {
-  /* The viewport and timeline draw edge to edge with their own header layout. */
-  const bool full_bleed = area.type == EditorType::Viewport || area.type == EditorType::Timeline;
+  /* The viewport, timeline and Properties (its tabs down the left edge) draw edge to edge with their own header
+   * layout. */
+  const bool full_bleed = area.type == EditorType::Viewport || area.type == EditorType::Timeline ||
+                          area.type == EditorType::Properties;
   if (full_bleed) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   }

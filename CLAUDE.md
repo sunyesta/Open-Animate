@@ -79,6 +79,9 @@ remove them when the checks are done.
   content region narrowed in `box_open`). Text is Blender's: Inter (`data/fonts`, copied next to the exe) at an 11 pixel
   em, rows kept 21 tall (`UI_FONT_SIZE`, `UI_FRAME_HEIGHT` in `src/ui/theme.hh`), with its shadow (ImGui's text drawing
   patched in `cmake/Dependencies.cmake`, `GOAnimTextShadowAlpha`).
+- Icons are SVGs in `scripts/icons` on a 16 grid (white draws, black cuts out), drawn by `ui_icon` (`src/ui/icons.*`,
+  NanoSVG) into a texture at the size shown and tinted; Properties' tabs run down its left side in Blender's colours
+  (`properties_tab_strip` in `src/editors/properties.cc`: grey document, blue for every layer, green for its kind).
 - Use ImGui wherever it can do the job; write custom widgets on top of it only where Blender's look
   or behaviour differs.
 - ImGui gotcha: in a docked window `SetCursorPos()` is measured from above the tab bar and gets
