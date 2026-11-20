@@ -55,6 +55,18 @@ PENDING = [
     ('src/ops/gradient_ops.cc', '        GradientFalloff falloff = s.falloff;', '        s.midpoint = std::clamp(op_arg_float(C, "midpoint", s.midpoint), 0.02f, 0.98f); GradientFalloff falloff = s.falloff;', 'Span Set with a bad falloff changes nothing', 'tests/test_gradient_guards.py'),
     ('src/ops/gradient_ops.cc', '        if ((op_has_arg(C, "stop") && (stop < 0 || stop >= n)) || (op_has_arg(C, "span") && (span < 0 || span >= n - 1))) {', '        if (op_has_arg(C, "stop") && (stop < 0 || stop >= n)) {', 'Pick with a bad span changes nothing', 'tests/test_gradient_guards.py'),
     ('src/ops/gradient_ops.cc', '    if (!std::all_of(text.begin() + 1, text.end(), [](char ch) { return std::isxdigit(static_cast<unsigned char>(ch)); }))', '    if (false && !std::all_of(text.begin() + 1, text.end(), [](char ch) { return std::isxdigit(static_cast<unsigned char>(ch)); }))', 'A hex colour is hex digits only', 'tests/test_gradient_guards.py'),
+    ('src/data/vector.cc', '  if (moved && order.size() == drawing.shapes.size()) {', '  if (false && moved && order.size() == drawing.shapes.size()) {', 'A shape tree split in the stacking order stands together again', 'tests/test_shape_tree.py'),
+    ('src/data/vector.cc', '  drawing_shapes_copied(drawing, size_t(old_shape_count), copied_from, true);', '  (void)copied_from;', 'Duplicate puts a copied sub shape under the copied parent', 'tests/test_shape_tree.py'),
+    ('src/anim/deform.cc', '        copy.parent = shape.parent | (uint64_t(1) << 63);', '        copy.parent = shape.parent;', "The Mirror modifier's image of a shape tree is a tree of its own", 'tests/test_shape_tree.py'),
+    ('src/ops/shape_tree_ops.cc', '              anchor = std::max(anchor, m);', '              (void)m;', 'A shape moved above another goes above its whole tree', 'tests/test_shape_tree.py'),
+    ('src/anim/shape_tree.cc', '      int point = node.point;', '      int point = -1;', 'Apply keeps the points the outline still runs through', 'tests/test_shape_tree.py'),
+    ('src/anim/shape_tree.cc', '  drawing_remove_curves(drawing, old_curve);', '  (void)0;', 'Apply takes away the curves no shape is on any more', 'tests/test_shape_tree.py'),
+    ('src/ops/shape_tree_ops.cc', '        if (C.document->frame_current != 0) {', '        if (false && C.document->frame_current != 0) {', 'Apply works on Setup only', 'tests/test_shape_tree.py'),
+    ('src/editors/viewport.cc', '        choice = (k + 1) % hits.size();\n        break;\n      }\n    }\n  }\n  if (!shift && !ctrl) {', '        choice = k;\n        break;\n      }\n    }\n  }\n  if (!shift && !ctrl) {', 'A click again in the same place picks the next shape there', 'tests/test_shape_tree.py'),
+    ('src/editors/viewport.cc', '      if (points_all_selected(hit.layer->drawing, shape_hit_points(C, hit))) {', '      if (false && points_all_selected(hit.layer->drawing, shape_hit_points(C, hit))) {', 'A press on the shape picked grabs it under the others', 'tests/test_shape_tree.py'),
+    ('src/editors/viewport.cc', '  const std::vector<int> members = C.wm->tool_settings.select_mode == SelectMode::ShapeGroup', '  const std::vector<int> members = C.wm->tool_settings.select_mode == SelectMode::Point', 'Shape Group mode picks the whole tree', 'tests/test_shape_tree.py'),
+    ('src/ops/operator.cc', '      document_shape_trees_mend(*C.document);', '      (void)0;', 'A sub shape whose parent went goes back into the list', 'tests/test_shape_tree.py'),
+    ('src/ops/vector_ops.cc', '      whole[size_t(s)] = true;\n      continue;', '      continue;', 'Points picked in Shape mode grow to the whole shape', 'tests/test_shape_tree.py'),
 ]
 
 def build(root):

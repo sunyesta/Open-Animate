@@ -27,7 +27,8 @@ namespace oanim {
  * knob is keyed as far as any bone's Transform (before, in frames of its actions: those times its Frame Size now), and
  * so are poses kept in the file. 10: a bone bends along its curve only with "bendy" (before, every regular bone did: on
  * opening, those bent or keyed, or carrying a drawing with Deform: Curve, get it). 11: a group's Parent Bone Deform
- * counts (Points and Curve bend every drawing inside; before, a group moved as a whole: on opening, groups are Layer). */
+ * counts (Points and Curve bend every drawing inside; before, a group moved as a whole: on opening, groups are Layer).
+ * 12: a shape can be under another (the shape tree: its parent, Operation, Smoothing and eye); older files have none. */
 inline constexpr int OANIM_FILE_VERSION = 12;
 
 /* Writes through a temporary file and renames it into place, so a failed save never damages

@@ -6,8 +6,10 @@ outlines cross. Sub shapes draw nothing of their own; an eye closed stops a shap
 Run with:  OpenAnimate --background --python tests/test_shape_tree.py
 """
 
+import json
 import os
 import tempfile
+import zipfile
 
 import oanim
 
@@ -47,6 +49,24 @@ def fills(layer, shape, point):
 
 def close(a, b, eps=1e-4):
     return all(abs(x - y) < eps for x, y in zip(a, b))
+
+
+def on_curve(layer, curve):
+    return next(i for i in range(layer.shape_count) if layer.shape_runs(i)[0][0][0] == curve)
+
+
+def names(layer):
+    """Each shape (bottom first) by the curve it is on: a, b, c, d for curves 0 to 3."""
+    return ["abcd"[layer.shape_runs(i)[0][0][0]] for i in range(layer.shape_count)]
+
+
+def point_at(layer, pos, eps=1e-3):
+    found = [i for i, p in enumerate(layer.points) if close(p[:2], pos, eps)]
+    return found[0] if found else -1
+
+
+def picked_points(layer):
+    return sorted(i for i, p in enumerate(layer.points) if p[2])
 
 
 # --- Putting a shape under another: Union until changed ------------------------------------------------------------
@@ -100,10 +120,6 @@ assert ops.mesh.shape_op_set(shape=str(ids(layer)[1]), op="SIDEWAYS") == {'CANCE
 # --- Subtract cuts a hole through the middle: the result has two loops ---------------------------------------------
 layer = scene()
 assert layer.add_primitive("CIRCLE", [(0.4, 0.4), (0.6, 0.6)], fill=True)
-def on_curve(layer, curve):
-    return next(i for i in range(layer.shape_count) if layer.shape_runs(i)[0][0][0] == curve)
-
-
 ops.mesh.shape_parent_set(shape=str(ids(layer)[on_curve(layer, 2)]), parent=str(ids(layer)[on_curve(layer, 0)]))
 ops.mesh.shape_op_set(shape=str(ids(layer)[on_curve(layer, 2)]), op="SUBTRACT")
 square = on_curve(layer, 0)
@@ -184,14 +200,16 @@ layer = scene()
 under(layer, 1, 0)
 assert ops.mesh.delete_shapes(shapes=str(ids(layer)[0])) == {'FINISHED'}
 assert layer.shape_count == 1 and layer.shape_style(0)["parent"] == -1
+shown = layer.evaluated_shape(0, (1.3, 0.5))
+assert shown["contains"] and not shown["merged"], ("the circle draws as itself again", shown)
+# Saved, it is under nothing.
+path = os.path.join(tempfile.mkdtemp(), "orphan.oanim")
+assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
+with zipfile.ZipFile(path) as z:
+    assert '"parent"' not in z.read("document.json").decode(), "no parent saved for it"
 
 
 # --- The list's drops: above, below and into a row, each tree moving whole ------------------------------------------
-def names(layer):
-    """Each shape (bottom first) by the curve it is on: a, b, c, d for curves 0 to 3."""
-    return ["abcd"[layer.shape_runs(i)[0][0][0]] for i in range(layer.shape_count)]
-
-
 layer = scene()
 assert layer.add_primitive("BOX", [(3.0, 0.0), (4.0, 1.0)], fill=True)
 assert layer.add_primitive("BOX", [(3.5, 0.5), (4.5, 1.5)], fill=True)
@@ -227,6 +245,43 @@ assert ops.mesh.shape_move(shape=sid("b"), target=sid("a"), place="SIDEWAYS") ==
 ops.ed.undo()
 assert names(layer) == ["b", "c", "d", "a"], names(layer)
 
+# --- A file whose tree stands in two pieces opens with it whole ------------------------------------------------------
+layer = scene()
+under(layer, 1, 0)
+assert layer.add_primitive("BOX", [(3.0, 0.0), (4.0, 1.0)], fill=True)
+path = os.path.join(tempfile.mkdtemp(), "split.oanim")
+assert ops.wm.save_as_mainfile(filepath=path) == {'FINISHED'}
+with zipfile.ZipFile(path) as z:
+    entries = {n: z.read(n) for n in z.namelist()}
+doc_json = json.loads(entries["document.json"])
+
+
+def shape_lists(node):
+    if isinstance(node, dict):
+        if isinstance(node.get("shapes"), list) and node["shapes"] and isinstance(node["shapes"][0], dict):
+            yield node["shapes"]
+        for v in node.values():
+            yield from shape_lists(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from shape_lists(v)
+
+
+shapes = next(l for l in shape_lists(doc_json) if len(l) == 3)
+# The new box (on curve 2) put between the square and the circle under it.
+box = next(x for x in shapes if not x.get("parent") and x is not shapes[0] and shapes.index(x) != 0
+           and all(e[0] == 2 if isinstance(e, list) else True for e in x.get("edges", [])))
+shapes.remove(box)
+shapes.insert(1, box)
+entries["document.json"] = json.dumps(doc_json).encode()
+with zipfile.ZipFile(path, "w") as z:
+    for n, data in entries.items():
+        z.writestr(n, data)
+assert ops.wm.open_mainfile(filepath=path) == {'FINISHED'}
+layer = L.active
+order = [(layer.shape_runs(i)[0][0][0], layer.shape_style(i)["parent"]) for i in range(layer.shape_count)]
+assert order[0] == (0, -1) and order[1][1] == 0 and order[2][1] == -1, ("the circle back on top of its square", order)
+
 # --- Copies: a duplicated tree is a tree of its own; the Mirror modifier's image too -------------------------------
 layer = scene()
 under(layer, 1, 0)
@@ -244,11 +299,6 @@ assert layer.evaluated_shape(1, (-1.3, 0.5))["contains"], "the circle's image jo
 assert layer.evaluated_shape(2)["merged"] and layer.evaluated_shape(3)["merged"]
 
 # --- Apply: the sub shape baked into its parent, the points it still runs through kept ------------------------------
-def point_at(layer, pos, eps=1e-3):
-    found = [i for i, p in enumerate(layer.points) if close(p[:2], pos, eps)]
-    return found[0] if found else -1
-
-
 layer = scene()
 under(layer, 1, 0)
 corner_ids = [layer.point_ids[point_at(layer, c)] for c in ((0, 0), (1, 0), (1, 1), (0, 1))]
@@ -301,10 +351,6 @@ assert ops.mesh.shape_apply(shape=str(ids(layer)[0])) == {'CANCELLED'}
 assert layer.shape_count == 2
 
 # --- Selection modes 3 and 4: whole shapes, and shapes with their sub shapes ------------------------------------------
-def picked_points(layer):
-    return sorted(i for i, p in enumerate(layer.points) if p[2])
-
-
 layer = scene()
 under(layer, 1, 0)
 square_points = sorted(layer.curve_points(0))
