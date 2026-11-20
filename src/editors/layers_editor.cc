@@ -80,7 +80,12 @@ static void order_marker(Context &C, const Layer &layer, float x, float y, float
 static constexpr ImU32 COL_ICON = IM_COL32(0xc8, 0xc8, 0xc8, 255);
 static constexpr ImU32 COL_ICON_OFF = IM_COL32(0x70, 0x70, 0x70, 255);
 static constexpr ImU32 COL_ACTIVE_ROW = IM_COL32(0x33, 0x4d, 0x80, 255);
-static constexpr ImU32 COL_SELECTED_ROW = IM_COL32(0x33, 0x4d, 0x80, 130);
+static constexpr ImU32 COL_SELECTED_ROW = IM_COL32(0x1d, 0x31, 0x4d, 255);
+/* Blender's Outliner: rows on a dark ground, every other one a little lighter. */
+static constexpr ImU32 COL_LIST_BG = IM_COL32(0x28, 0x28, 0x28, 255);
+static constexpr ImU32 COL_LIST_ALT = IM_COL32(0x2b, 0x2b, 0x2b, 255);
+/* The line down an open group's children, under its arrow. */
+static constexpr ImU32 COL_TREE_LINE = IM_COL32(0x66, 0x66, 0x66, 255);
 static constexpr ImU32 COL_REFERENCE = IM_COL32(0x6f, 0xb8, 0xff, 255);
 
 /* --- Icons. --- */
@@ -365,10 +370,10 @@ static void camera_row(Context &C)
     ImGui::SetTooltip("The camera: what renders show. Picked, the viewport looks through it");
   }
   if (camera.selected) {
-    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), COL_ACTIVE_ROW, 3.0f);
+    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), COL_ACTIVE_ROW);
   }
   else if (hovered) {
-    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), IM_COL32(0xff, 0xff, 0xff, 14), 3.0f);
+    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), IM_COL32(0xff, 0xff, 0xff, 14));
   }
   const float cy = row_min.y + h * 0.5f;
   const float x = row_min.x + 8.0f + h * 0.7f;
@@ -651,7 +656,7 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
   }
   else if (doc.active_layer == layer.id) {
     /* While the camera is picked the active layer waits, shown lighter. */
-    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), doc.camera.selected ? COL_SELECTED_ROW : COL_ACTIVE_ROW, 3.0f);
+    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), doc.camera.selected ? COL_SELECTED_ROW : COL_ACTIVE_ROW);
   }
   /* Just shown with Show Active: a white outline fading over a second. */
   if (area.show_active_layer == layer.id) {
@@ -661,10 +666,10 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
     }
   }
   else if (layer.selected) {
-    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), COL_SELECTED_ROW, 3.0f);
+    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), COL_SELECTED_ROW);
   }
   else if (row_hovered) {
-    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), IM_COL32(0xff, 0xff, 0xff, 14), 3.0f);
+    dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), IM_COL32(0xff, 0xff, 0xff, 14));
   }
   const Color label = label_color_value(layer.label_color);
   if (label.a > 0.0f) {
@@ -685,13 +690,14 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
                           ImVec2(hx + icon * 0.4f, row_min.y + h - icon * 0.6f), ImVec2(hx, row_min.y + h), hook);
     x += h * 0.6f;
   }
+  const float arrow_x = std::floor(x + h * 0.35f) + 0.5f;
   if (layer.is_group()) {
     ImGui::SetCursorScreenPos(ImVec2(x, row_min.y));
     if (ImGui::InvisibleButton("##expand", ImVec2(h * 0.7f, h))) {
       layer.expanded = !layer.expanded;
     }
     /* Blender's rounded arrow, as the panels'. */
-    ui_icon_centered(dl, layer.expanded ? "arrow_down" : "arrow_right", ImVec2(x + h * 0.35f, cy),
+    ui_icon_centered(dl, layer.expanded ? "arrow_down" : "arrow_right", ImVec2(arrow_x, cy),
                      std::round(ui_space(12.0f)), COL_ICON);
   }
   x += h * 0.7f;
@@ -849,6 +855,13 @@ static void layer_row(Context &C, Area &area, Layer &layer, int depth, DropReque
     for (Layer &child : layer.children) {
       layer_row(C, area, child, depth + 1, drop, r_context_open);
     }
+    if (!layer.children.empty()) {
+      /* Blender's Outliner: a line from under the arrow down beside what is inside, over the rows' shades. */
+      const float inset = std::round(h * 0.2f);
+      const float bottom = ImGui::GetCursorScreenPos().y - inset;
+      ImGui::GetWindowDrawList()->AddLine(ImVec2(arrow_x, row_min.y + h + inset), ImVec2(arrow_x, bottom),
+                                          COL_TREE_LINE, 1.0f);
+    }
   }
 }
 
@@ -1001,10 +1014,10 @@ static void draw_order_view(Context &C)
       ui_menu_end();
     }
     if (doc.active_layer == layer.id) {
-      dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), COL_ACTIVE_ROW, 3.0f);
+      dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), COL_ACTIVE_ROW);
     }
     else if (row_hovered) {
-      dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), IM_COL32(0xff, 0xff, 0xff, 14), 3.0f);
+      dl->AddRectFilled(row_min, row_min + ImVec2(row_w, h), IM_COL32(0xff, 0xff, 0xff, 14));
     }
     const float cy = row_min.y + h * 0.5f;
     float x = row_min.x + 8.0f;
@@ -1147,6 +1160,17 @@ void layers_draw(Area &area, Context &C)
   DropRequest drop;
   bool context_open = false;
   if (ImGui::BeginChild("##layers", ImVec2(0, 0))) {
+    {
+      /* Striped as Blender's Outliner, on to the bottom: the camera's row dark, the first layer's lighter. */
+      ImDrawList *dl = ImGui::GetWindowDrawList();
+      const ImVec2 wmin = ImGui::GetWindowPos(), wmax = wmin + ImGui::GetWindowSize();
+      const float h = ImGui::GetFrameHeight(), first = ImGui::GetCursorScreenPos().y + h + 3.0f;
+      dl->AddRectFilled(wmin, wmax, COL_LIST_BG);
+      const float skip = std::max(0.0f, std::floor((wmin.y - first) / (h * 2.0f)));
+      for (float y = first + skip * h * 2.0f; y < wmax.y; y += h * 2.0f) {
+        dl->AddRectFilled(ImVec2(wmin.x, y), ImVec2(wmax.x, y + h), COL_LIST_ALT);
+      }
+    }
     camera_row(C);
     for (Layer &layer : doc.layers) {
       layer_row(C, area, layer, 0, drop, context_open);
