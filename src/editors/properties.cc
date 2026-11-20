@@ -11266,14 +11266,18 @@ void properties_draw(Area &area, Context &C)
   const float header_pad = std::round(st.WindowPadding.y * 0.5f);
   ImGui::SetCursorScreenPos(ImVec2(wpos.x, wpos.y + header_pad));
   area_editor_type_menu(area);
+  /* Where the shown tab's name goes, past the editor-type button (drawn once the tab is known). */
+  const ImVec2 name_at(ImGui::GetItemRectMax().x + std::round(ui_space(10.0f)), ImGui::GetItemRectMin().y);
   ImGui::SameLine();
   /* Blender's search box at the header's right: only the panels whose name has the text show. */
   static std::map<int, std::string> searches;
   std::string &search = searches[area.id];
+  float search_x;
   {
     const float right = wpos.x + wsize.x - std::round(ui_space(6.0f));
     const float search_w = std::min(std::round(ui_space(120.0f)), std::max(ui_space(60.0f), right - ImGui::GetCursorScreenPos().x));
-    ImGui::SetCursorScreenPos(ImVec2(std::max(ImGui::GetCursorScreenPos().x, right - search_w), ImGui::GetCursorScreenPos().y));
+    search_x = std::max(ImGui::GetCursorScreenPos().x, right - search_w);
+    ImGui::SetCursorScreenPos(ImVec2(search_x, ImGui::GetCursorScreenPos().y));
     ui_search_field("##properties_search", &search, search_w);
   }
   const float header_bottom = std::round(wpos.y + header_pad * 2.0f + ImGui::GetFrameHeight());
@@ -11295,6 +11299,15 @@ void properties_draw(Area &area, Context &C)
   }
   if (std::none_of(tabs.begin(), tabs.end(), [&](const PropertiesTabEntry &t) { return t.id == shown; })) {
     shown = TAB_LAYER;
+  }
+  for (const PropertiesTabEntry &t : tabs) {
+    if (t.id == shown) {
+      /* The shown tab's name in the header, as the tabs carry only icons. */
+      const float y = name_at.y + std::round((ImGui::GetFrameHeight() - ImGui::GetFontSize()) * 0.5f);
+      const ImVec4 clip(name_at.x, name_at.y, search_x - std::round(ui_space(8.0f)), name_at.y + ImGui::GetFrameHeight());
+      ImGui::GetWindowDrawList()->AddText(nullptr, 0.0f, ImVec2(name_at.x, y), IM_COL32(0xe6, 0xe6, 0xe6, 255), t.label,
+                                          nullptr, 0.0f, &clip);
+    }
   }
   const float body_top = header_bottom + 1.0f;
   const float strip_w = properties_tab_strip(tabs, shown, area, body_top);

@@ -3080,24 +3080,31 @@ void area_editor_type_menu(Area &area)
   ui_icon(dl, editor_type_icon(area.type), ImVec2(r.Min.x + pad_l, r.Min.y + std::round((h - icon) * 0.5f)), icon, text);
   ui_icon(dl, "arrow_down", ImVec2(r.Min.x + pad_l + icon + gap, r.Min.y + std::round((h - arrow) * 0.5f)), arrow, text);
 
+  /* Blender's menu: a margin round the rows, each row a field tall with the icon and name set in from its edges. */
+  const float menu_pad = std::round(ui_space(5.0f)), row_pad = std::round(ui_space(6.0f));
+  const float icon_gap = std::round(ui_space(7.0f));
   ImGui::SetNextWindowPos(ImVec2(r.Min.x, r.Max.y));
-  if (ImGui::BeginPopupEx(popup, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar |
-                                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove))
-  {
-    const float row_w = icon + gap * 2.0f + ImGui::CalcTextSize("Python Console").x;
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(menu_pad, menu_pad));
+  const bool menu = ImGui::BeginPopupEx(popup, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar |
+                                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove);
+  ImGui::PopStyleVar();
+  if (menu) {
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
+    const float row_w = row_pad + icon + icon_gap + ImGui::CalcTextSize("Python Console").x + row_pad;
     for (EditorType type : EDITOR_TYPES) {
       ImGui::PushID(int(type));
       const ImVec2 row = ImGui::GetCursorScreenPos();
-      if (ImGui::Selectable("##type", type == area.type, 0, ImVec2(row_w, 0.0f))) {
+      if (ImGui::Selectable("##type", type == area.type, 0, ImVec2(row_w, h))) {
         area.type = type;
       }
-      const float row_h = ImGui::GetItemRectSize().y;
       ImDrawList *mdl = ImGui::GetWindowDrawList();
-      ui_icon(mdl, editor_type_icon(type), ImVec2(row.x, row.y + std::round((row_h - icon) * 0.5f)), icon, text);
-      mdl->AddText(ImVec2(row.x + icon + gap * 2.0f, row.y + (row_h - ImGui::GetFontSize()) * 0.5f), text,
+      ui_icon(mdl, editor_type_icon(type), ImVec2(row.x + row_pad, row.y + std::round((h - icon) * 0.5f)), icon, text);
+      mdl->AddText(ImVec2(row.x + row_pad + icon + icon_gap, row.y + std::round((h - ImGui::GetFontSize()) * 0.5f)), text,
                    editor_type_label(type));
       ImGui::PopID();
     }
+    ImGui::PopStyleVar(2);
     ImGui::EndPopup();
   }
 }
