@@ -51,18 +51,21 @@ assert len(layer.curve_points(0)) == 4, ("its last point its first, once", layer
 # Nothing was on it: it shows as a shape now, filled and outlined.
 assert layer.shape_count == 1 and layer.shape_style(0)["has_fill"] and layer.shape_style(0)["has_outline"], layer.shapes
 assert layer.shape_contains(0, (0.5, 0.5))
-# A line along it goes round with it, the segment into the merged end too: F fills that line.
+# A line along it goes round with it, the segment into the merged end too, and with its ends joined it is filled in
+# its line's colour; F then has nothing to fill.
 layer = scene()
 layer.add_curve(SQUARE + [(0.05, 0.05)])
 assert layer.shape_count == 1
+layer.set_shape_style(0, has_fill=False)
 ops.mesh.select_none()
 layer.select_points([0, 4])
 assert ops.mesh.merge() == {'FINISHED'}
 assert closed(layer) and layer.shape_count == 1
-ops.mesh.select_all()
-assert ops.mesh.make_segment() == {'FINISHED'}
-assert layer.shape_count == 1 and layer.shape_style(0)["has_fill"], layer.shapes
+assert layer.shape_style(0)["has_fill"], layer.shapes
+assert close(layer.shape_style(0)["fill"], layer.shape_style(0)["line"]), layer.shape_style(0)
 assert layer.shape_contains(0, (0.5, 0.5))
+ops.mesh.select_all()
+assert ops.mesh.make_segment() == {'CANCELLED'}
 # A short one (two points left) can't go round.
 layer = scene()
 bare_curve(layer, [(0.0, 0.0), (1.0, 0.0), (0.02, 0.0)])

@@ -414,6 +414,9 @@ struct VectorDrawing {
   std::vector<DrawingGrid> grids;
   /* The next point or shape id to give out. */
   uint64_t next_id = 1;
+  /* The active point's id: the last point clicked, drawn white, whose shape joins take their look from. It counts
+   * only while that point is there and selected (drawing_active_point), so a deselect or delete lets it go. */
+  uint64_t active_point = 0;
 
   bool empty() const { return points.empty(); }
   bool operator==(const VectorDrawing &) const = default;
@@ -531,6 +534,8 @@ void drawing_groups_prune(VectorDrawing &drawing);
 
 /* The index of the point or shape with `id`, or -1. */
 int drawing_point_index(const VectorDrawing &drawing, uint64_t id);
+/* The active point's index, or -1 when there is none (not set, gone, or not selected). */
+int drawing_active_point(const VectorDrawing &drawing);
 int drawing_shape_index(const VectorDrawing &drawing, uint64_t id);
 
 /* The drawing as it is on the setup frame (0): every animated point, radius, curvature and
@@ -737,6 +742,27 @@ int drawing_fill_bare_loops(VectorDrawing &drawing, const Style &style, const st
  * a shape per run, each with its look, the first keeping its place and number. Returns how many shapes
  * were made. */
 int drawing_separate_fills(VectorDrawing &drawing);
+
+/* A shape is a set of connected points (joined by curves). Each point's connected part, by its id: points joined by
+ * curves share a number. */
+std::map<uint64_t, int> drawing_point_parts(const VectorDrawing &drawing);
+/* Joining (Merge, F): shapes on connected points, under the same parent, become one. Its fill (colour, rule, material)
+ * comes from shape `look` (an id: the one the active point is on) where that is one of them and has a fill, else from
+ * the lowest of them that has one; its line likewise; it keeps the place, name and number of `look`, or else the
+ * lowest. Their sub shapes go under it. `at_selected`: only those of them on a selected point (the points just joined),
+ * so shapes that share points otherwise (a Stroke Pen line welded to another) stay apart. Returns how many shapes went
+ * into others. */
+int drawing_shapes_join(VectorDrawing &drawing, uint64_t look = 0, bool at_selected = false);
+/* After a delete: a shape whose points were connected (`before`, from drawing_point_parts) and are now apart keeps its
+ * biggest part, each other part becoming a copy with its look named .001 on, just above it. Parts it had apart before
+ * (a hole) stay with it. Returns how many shapes were made. */
+int drawing_shapes_split(VectorDrawing &drawing, const std::map<uint64_t, int> &before);
+/* Connecting a line's ends: each shape with no fill that now goes all the way round a curve `closed` names (just closed)
+ * is filled in its line's colour. Returns how many. */
+int drawing_fill_closed_lines(VectorDrawing &drawing, const std::vector<bool> &closed);
+/* The shape the active point is on (its id), whose look joins take: `active_shape` (an id) when it is on it, else the
+ * top one it is on; 0 with no active point. */
+uint64_t drawing_active_point_shape(const VectorDrawing &drawing, uint64_t active_shape);
 
 /* The selected points, and the points a shape runs through (each once). */
 std::vector<int> drawing_selected_points(const VectorDrawing &drawing);

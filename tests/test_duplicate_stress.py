@@ -517,7 +517,17 @@ for seed in range(SEED0, SEED0 + SEEDS):
                             break
             if variant == "detail":
                 d = l.detail
+                # An open curve's ends are never detail (it needs parents both sides): a copy that ends its run is
+                # level 0 whatever its original was.
+                shown = l.shown()[1]
+                ends = set()
+                for c in range(l.curve_count):
+                    if not shown[c][1]:
+                        cps = l.curve_points(c)
+                        ends.update((cps[0], cps[-1]))
                 for p, o in orig.items():
+                    if p in ends and o not in ends:
+                        continue
                     if d["levels"][p] != d["levels"][o]:
                         say(seed, tag, "copy %d at detail level %d, original %d" % (p, d["levels"][p], d["levels"][o]))
                         break

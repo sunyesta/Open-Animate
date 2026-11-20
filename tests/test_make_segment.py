@@ -30,10 +30,11 @@ oanim.ops.mesh.select_all()  # an undo step to come back to
 assert counts() == (8, 2, 2)
 assert [art.shape_style(i)["has_fill"] for i in range(2)] == [False, False]
 
-# Not two ends (Blender's F between any two vertices): a segment of their own, welded to both.
+# Not two ends (Blender's F between any two vertices): a segment of their own, welded to both. The two lines are
+# joined by it now, so they are one shape.
 pick(1, 5)
 assert oanim.ops.mesh.make_segment() == {'FINISHED'}
-assert counts() == (8, 3, 2), counts()
+assert counts() == (8, 3, 1), counts()
 oanim.ops.ed.undo()
 assert counts() == (8, 2, 2), counts()
 # One point: nothing, and the status bar says why.

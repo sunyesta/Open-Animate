@@ -56,13 +56,14 @@ assert l.shape_count == 1, "the line's shape draws it"
 sel(3, 2)
 assert ops.mesh.make_segment() == {'CANCELLED'}
 
-# Next to a filled shape: the new segment gets a line of the same look, and the fill keeps going round.
+# Across a filled shape: the new segment is part of it (its points are joined to the box's), drawn in its line, and
+# the fill keeps going round.
 ops.layer.new()
 l = layers.active
 assert l.add_primitive("BOX", [(-1, -1), (1, 1)], fill=True)
 sel(0, 2)
 assert ops.mesh.make_segment() == {'FINISHED'}
-assert l.shape_count == 2 and l.shape_style(0)["has_fill"] and not l.shape_style(1)["has_fill"]
+assert l.shape_count == 1 and l.shape_style(0)["has_fill"]
 assert l.shape_outline(0)[1], "the box still goes all the way round"
 assert unstroked() == []
 

@@ -1010,3 +1010,5 @@ add_test(NAME apply_rest_copy
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_apply_rest_copy.py)
 add_test(NAME shape_tree
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_shape_tree.py)
+add_test(NAME shape_joins
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_shape_joins.py)

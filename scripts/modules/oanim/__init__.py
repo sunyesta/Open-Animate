@@ -753,6 +753,11 @@ class _Layer:
         for a plain line."""
         return _oanim.layer_shape_brush(self._id, index)
 
+    @property
+    def active_shape(self):
+        """The active shape's index (the one the panels show), or -1 when it is on another layer or none."""
+        return _oanim.layer_active_shape(self._id)
+
     def set_active_shape(self, index):
         """Make shape `index` the active shape, as clicking it does (the one Link Materials passes on)."""
         _oanim.layer_set_active_shape(self._id, int(index))
@@ -797,6 +802,15 @@ class _Layer:
     def point_ids(self):
         """Each point's id, kept for good whatever happens to the points around it."""
         return list(_oanim.layer_point_ids(self._id))
+
+    @property
+    def active_point(self):
+        """The active point's index (the last point clicked, drawn white), or -1: none, or not selected."""
+        return _oanim.layer_active_point(self._id)
+
+    @active_point.setter
+    def active_point(self, index):
+        _oanim.layer_set_active_point(self._id, index)
 
     @property
     def shape_ids(self):

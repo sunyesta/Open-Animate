@@ -8230,15 +8230,23 @@ static void select_click_shapes(Context &C, const ViewMapping &view, float2 mous
     C.document->active_shape_layer = hit.layer->id;
     C.document->active_shape = d.shapes[size_t(hit.shape)].id;
     C.document->picked_drawing = hit.layer->id;
+    /* One of its points is the active one, so joins take this shape's look. */
+    if (!points.empty()) {
+      d.active_point = d.points[size_t(points.front())].id;
+    }
   }
   camera.selected &= shift || ctrl;
 }
+
+/* Shift held for select_click_test's click (a background run has no ImGui to hold it). */
+static bool g_click_shift_test = false;
 
 static void select_click(Context &C, const ViewMapping &view, float2 mouse_document, HandleDisplay handles)
 {
   /* Shift adds, Ctrl takes away (none in a background run, which has no ImGui: the Motion Path tool's test hook). */
   const bool has_io = ImGui::GetCurrentContext() != nullptr;
-  const bool shift = has_io && ImGui::GetIO().KeyShift, ctrl = has_io && ImGui::GetIO().KeyCtrl;
+  const bool shift = (has_io && ImGui::GetIO().KeyShift) || g_click_shift_test;
+  const bool ctrl = has_io && ImGui::GetIO().KeyCtrl;
   if (select_mode_shapes(C.wm->tool_settings.select_mode)) {
     select_click_shapes(C, view, mouse_document, shift, ctrl);
     return;
@@ -8367,8 +8375,10 @@ static void select_click(Context &C, const ViewMapping &view, float2 mouse_docum
       point.selected = ctrl ? false : (shift && picked.size() == 1 ? !point.selected : true);
     }
     drawing_expand_selection_by_mode(C, hit_layer->drawing);
-    /* The shape clicked becomes the active one (its panels show it), unless the click took it out. */
+    /* The point clicked becomes the active one (drawn white; joins take its shape's look) and its shape the active
+     * shape (its panels show it), unless the click took it out. */
     if (!picked.empty() && hit_layer->drawing.points[size_t(picked.front())].selected) {
+      hit_layer->drawing.active_point = hit_layer->drawing.points[size_t(picked.front())].id;
       document_set_active_shape(*C.document, *hit_layer, picked.front(), hit_edge);
       C.document->picked_drawing = hit_layer->id;
     }
@@ -8488,6 +8498,9 @@ static Layer *select_press_grab_pick(Context &C, const PressGrab &grab)
       }
     }
     drawing_expand_selection_by_mode(C, drawing);
+    if (grab.points.front() < int(drawing.points.size())) {
+      drawing.active_point = drawing.points[size_t(grab.points.front())].id;
+    }
     document_set_active_shape(*C.document, *layer, grab.points.front(), grab.edge);
     C.document->picked_drawing = layer->id;
     document_camera(*C.document).selected = false;
@@ -8556,11 +8569,13 @@ const char *select_press_takes_test(Context &C, float2 at, float zoom)
   return press_handle(C, view, view.to_screen(at), grab).layer ? "HANDLE" : grab.layer ? "POINT" : "";
 }
 
-void select_click_test(Context &C, float2 at, float zoom)
+void select_click_test(Context &C, float2 at, float zoom, bool shift)
 {
   reach_update(C);
   const ViewMapping view{{0.0f, 0.0f}, {1000.0f, 1000.0f}, {0.0f, 0.0f}, zoom};
+  g_click_shift_test = shift;
   select_click(C, view, at, handles_shown(C.document->overlays, C.wm->tool_settings));
+  g_click_shift_test = false;
 }
 
 std::vector<std::pair<uint64_t, std::vector<int>>> select_press_grab_test(Context &C, float2 at, float zoom,
@@ -9264,6 +9279,7 @@ static uint64_t overlay_selection_hash(const VectorDrawing &d)
       add(cp.select_out);
     }
   }
+  h = overlay_mix(h, uint64_t(int64_t(drawing_active_point(d))));
   return overlay_mix(h, bits ^ uint64_t(n) << 56);
 }
 
@@ -9474,17 +9490,20 @@ static OverlayGeometry overlay_geometry(const VectorDrawing &drawing, const Vect
       }
     }
   }
-  for (int pass = 0; pass < 2; pass++) {
+  /* The active point white, as Blender draws it, over the other picked ones. */
+  const int active = drawing_active_point(drawing);
+  for (int pass = 0; pass < 3; pass++) {
     for (size_t i = 0; i < drawing.points.size(); i++) {
       const MeshPoint &p = drawing.points[i];
-      if (p.selected != (pass == 1) || p.detail.hidden) {
+      if (p.detail.hidden || (pass == 2 ? int(i) != active : (p.selected != (pass == 1) || int(i) == active))) {
         continue;
       }
       /* Coarser points a third bigger. */
       const float r = point_size * (coarse[i] ? 0.667f : 0.5f);
       /* The wire's colour, or the one that reads on what is under the point. */
       Color c;
-      const ImU32 fill = p.selected      ? point_picked
+      const ImU32 fill = pass == 2         ? IM_COL32_WHITE
+                         : p.selected      ? point_picked
                          : under_at(p.pos, c) ? contrast_u32(wire.of(contrast_pick(c, wire.base)), 1.0f)
                                               : contrast_u32(wire.base, 1.0f);
       g.marks.push_back({p.pos, fill, p.selected ? 0u : IM_COL32(0x10, 0x10, 0x10, 170), r, 1.0f});

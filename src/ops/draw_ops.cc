@@ -322,9 +322,10 @@ static std::vector<FillPiece> pieces_moved(std::vector<FillPiece> pieces, const 
   return pieces;
 }
 
-/* The Fill Eraser's stroke, on the active drawing or every one being edited. */
+/* The Fill Eraser's stroke, from the shape it starts on (`start`, the active layer's space), on the active drawing or
+ * every one being edited. */
 static bool stroke_erase(Context &C, Layer &layer, const std::vector<FillPiece> &area, float pixel, float tolerance,
-                         bool quiet = false)
+                         float2 start)
 {
   Document &doc = *C.document;
   const ToolSettings &ts = C.wm->tool_settings;
@@ -333,16 +334,11 @@ static bool stroke_erase(Context &C, Layer &layer, const std::vector<FillPiece> 
     layers = editable_layers(C);
   }
   bool cut = false;
-  int skipped = 0;
   const Transform2D from = layer_world_transform(doc, layer.id);
   for (Layer *other : layers) {
     const Transform2D to = layer_world_transform(doc, other->id).inverted() * from;
     cut |= drawing_fill_erase(other->drawing, other == &layer ? area : pieces_moved(area, to), pixel / to.scale(), tolerance,
-                              ts.draw_erase_selected, &skipped);
-  }
-  if (skipped > 0 && !quiet) {
-    report(ReportType::Info, skipped == 1 ? "A shape with keys wasn't cut: cutting rebuilds its points" :
-                                            std::to_string(skipped) + " shapes with keys weren't cut: cutting rebuilds their points");
+                              to.apply(start), ts.draw_erase_selected);
   }
   return cut;
 }
@@ -386,10 +382,11 @@ bool draw_stroke_commit(Context &C, Layer &layer, InkStroke &ink, DrawMode mode)
   if (area.empty()) {
     return false;
   }
+  const float2 start = ink.points().front().pos;
   if (mode == DrawMode::FillEraser) {
-    return stroke_erase(C, layer, area, pixel, tolerance);
+    return stroke_erase(C, layer, area, pixel, tolerance, start);
   }
-  drawing_fill_paint(layer.drawing, area, ts.style, pixel, tolerance);
+  drawing_fill_paint(layer.drawing, area, ts.style, pixel, tolerance, start);
   return true;
 }
 
@@ -404,7 +401,7 @@ bool draw_stroke_cut_so_far(Context &C, Layer &layer, InkStroke ink, DrawMode mo
   }
   const float tolerance = ink_tolerance(ink.settings().fidelity) * 0.6f;
   const std::vector<FillPiece> area = ink_area(ink.points(), ink.settings(), ink.view());
-  return !area.empty() && stroke_erase(C, layer, area, ink.view().pixel, tolerance, true);
+  return !area.empty() && stroke_erase(C, layer, area, ink.view().pixel, tolerance, ink.points().front().pos);
 }
 
 /* "x,y,pressure,seconds;...": the stroke's samples in the active layer's space. */

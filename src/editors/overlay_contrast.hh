@@ -107,7 +107,7 @@ const char *select_press_takes_test(Context &C, float2 at, float zoom);
 std::vector<std::pair<float2, float2>> handle_ends_shown_test(Context &C, const Layer &layer, int curve);
 /* Test hook: where the viewport draws each of a layer's points, in layer space as posed. */
 std::vector<float2> points_shown_test(Context &C, const Layer &layer);
-void select_click_test(Context &C, float2 at, float zoom);
+void select_click_test(Context &C, float2 at, float zoom, bool shift = false);
 /* Test hook: the Select tool's press on a bone layer's controller knob (true when it was on one), or the Transform
  * tool's click on its bones (Shift adds), at a document point, on the active bone layer. */
 bool bone_press_test(Context &C, float2 at, float zoom, bool transform_tool, bool shift);

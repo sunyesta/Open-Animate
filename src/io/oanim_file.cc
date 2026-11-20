@@ -474,6 +474,9 @@ static json drawing_to_json(const VectorDrawing &drawing)
               {"curves", std::move(curves)},
               {"shapes", std::move(shapes)},
               {"next_id", drawing.next_id}};
+  if (drawing.active_point != 0) {
+    out["active_point"] = drawing.active_point;
+  }
   if (!drawing.groups.empty()) {
     /* Point groups: each member as [point id, weight]. */
     json groups = json::array();
@@ -2460,6 +2463,7 @@ static VectorDrawing drawing_from_json(const json &j)
   }
   /* Older files' points and shapes get their ids now. */
   drawing.next_id = std::max<uint64_t>(1, get_id(j, "next_id"));
+  drawing.active_point = get_id(j, "active_point");
   for (const json &gj : get_array(j, "groups")) {
     if (!gj.is_object()) {
       continue;
@@ -3722,6 +3726,14 @@ static Layer layer_from_json(const json &j, int depth)
     if (rig) {
       g_old_collection_maps.pop_back();
     }
+  }
+  /* Before format 13 shapes could share points (a fill and its outline on one curve, Moho's way): a shape is a set of
+   * connected points now, so those become one, the fill of the lowest with a fill and the line of the lowest with a
+   * line. */
+  if (g_loading_version < 13 && layer.has_shapes() && !layer.is_gradient() && !layer.is_reference() &&
+      drawing_shapes_join(layer.drawing) > 0)
+  {
+    drawing_shape_tree_mend(layer.drawing);
   }
   return layer;
 }

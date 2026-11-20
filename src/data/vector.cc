@@ -708,6 +708,15 @@ int drawing_point_index(const VectorDrawing &drawing, uint64_t id)
   return -1;
 }
 
+int drawing_active_point(const VectorDrawing &drawing)
+{
+  if (drawing.active_point == 0) {
+    return -1;
+  }
+  const int p = drawing_point_index(drawing, drawing.active_point);
+  return p >= 0 && drawing.points[size_t(p)].selected ? p : -1;
+}
+
 int drawing_shape_index(const VectorDrawing &drawing, uint64_t id)
 {
   for (int i = 0; i < int(drawing.shapes.size()); i++) {
@@ -797,6 +806,11 @@ bool shape_chain(const VectorDrawing &drawing, const Shape &shape, std::vector<O
       }
       used[i] = true;
       grew = true;
+      /* Round to its start: a loop, which a line running on from it (a joined shape's) doesn't take open. */
+      if (first_from == last_to && chain.size() > 1) {
+        grew = false;
+        break;
+      }
     }
   }
   const bool connected = std::all_of(used.begin(), used.end(), [](bool u) { return u; });
@@ -1418,6 +1432,10 @@ int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<i
     for (const int p : group) {
       middle = middle + drawing.points[size_t(p)].pos;
       into[size_t(p)] = keep;
+      /* The active point merged: the point they became is the active one. */
+      if (drawing.points[size_t(p)].id == drawing.active_point) {
+        drawing.active_point = drawing.points[size_t(keep)].id;
+      }
     }
     drawing.points[size_t(keep)].pos = middle / float(group.size());
     drawing.points[size_t(keep)].selected = true;
@@ -1428,20 +1446,6 @@ int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<i
   }
   if (merged == 0) {
     return 0;
-  }
-
-  /* The shapes each merged point was on, by id, to put together the ones that met only at some of them. */
-  std::vector<std::vector<uint64_t>> on_shapes(static_cast<size_t>(n_points));
-  for (const Shape &shape : drawing.shapes) {
-    for (const ShapeEdge &e : shape.edges) {
-      int a, b;
-      curve_segment_points(drawing.curves[size_t(e.curve)], e.segment, &a, &b);
-      for (const int p : {a, b}) {
-        if (std::find(on_shapes[size_t(p)].begin(), on_shapes[size_t(p)].end(), shape.id) == on_shapes[size_t(p)].end()) {
-          on_shapes[size_t(p)].push_back(shape.id);
-        }
-      }
-    }
   }
 
   /* Curves run through the kept point; where two of a group came one after the other, the one after goes, the
@@ -1506,50 +1510,6 @@ int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<i
   }
   shapes_remap_curves(drawing, curve_remap, segment_remap);
   drawing.curves = std::move(curves);
-
-  /* Shapes that met only at some of a group's points become one: a line with a line, a fill with a fill (a shape
-   * on all of them, as a fill and its outline on one curve, stays as it is). */
-  for (const std::vector<int> &group : groups) {
-    if (group.size() < 2) {
-      continue;
-    }
-    std::vector<uint64_t> all;
-    for (const int p : group) {
-      for (const uint64_t id : on_shapes[size_t(p)]) {
-        if (std::find(all.begin(), all.end(), id) == all.end()) {
-          all.push_back(id);
-        }
-      }
-    }
-    const auto on_every = [&](uint64_t id) {
-      return std::all_of(group.begin(), group.end(), [&](int p) {
-        return std::find(on_shapes[size_t(p)].begin(), on_shapes[size_t(p)].end(), id) != on_shapes[size_t(p)].end();
-      });
-    };
-    for (const bool fill : {true, false}) {
-      std::vector<size_t> together;
-      for (size_t s = 0; s < drawing.shapes.size(); s++) {
-        const Shape &shape = drawing.shapes[s];
-        if (shape.has_fill == fill && std::find(all.begin(), all.end(), shape.id) != all.end() && !on_every(shape.id)) {
-          together.push_back(s);
-        }
-      }
-      if (together.size() < 2) {
-        continue;
-      }
-      Shape &first = drawing.shapes[together.front()];
-      for (size_t k = 1; k < together.size(); k++) {
-        for (const ShapeEdge &e : drawing.shapes[together[k]].edges) {
-          if (std::find(first.edges.begin(), first.edges.end(), e) == first.edges.end()) {
-            first.edges.push_back(e);
-          }
-        }
-      }
-      for (size_t k = together.size() - 1; k >= 1; k--) {
-        drawing.shapes.erase(drawing.shapes.begin() + std::ptrdiff_t(together[k]));
-      }
-    }
-  }
 
   /* The points that went (no curve uses them now). */
   std::vector<bool> gone(drawing.points.size(), false);
@@ -3138,6 +3098,360 @@ int drawing_fill_loops(VectorDrawing &drawing, const Style &style)
     drawing_ensure_ids(drawing);
   }
   return filled;
+}
+
+/* Union-find over a drawing's points: those a curve runs through are one part. */
+static std::vector<int> point_part_roots(const VectorDrawing &drawing)
+{
+  std::vector<int> up(drawing.points.size());
+  std::iota(up.begin(), up.end(), 0);
+  const auto find = [&](int i) {
+    while (up[size_t(i)] != i) {
+      up[size_t(i)] = up[size_t(up[size_t(i)])];
+      i = up[size_t(i)];
+    }
+    return i;
+  };
+  for (const Curve &curve : drawing.curves) {
+    for (size_t k = 1; k < curve.points.size(); k++) {
+      const int a = find(curve.points[0].point), b = find(curve.points[k].point);
+      if (a != b) {
+        up[size_t(std::max(a, b))] = std::min(a, b);
+      }
+    }
+  }
+  for (int i = 0; i < int(up.size()); i++) {
+    up[size_t(i)] = find(i);
+  }
+  return up;
+}
+
+std::map<uint64_t, int> drawing_point_parts(const VectorDrawing &drawing)
+{
+  const std::vector<int> roots = point_part_roots(drawing);
+  std::map<uint64_t, int> parts;
+  for (size_t i = 0; i < drawing.points.size(); i++) {
+    parts[drawing.points[i].id] = roots[i];
+  }
+  return parts;
+}
+
+/* The point a shape's edge starts at (-1 for an edge off its curve). */
+static int edge_first_point(const VectorDrawing &drawing, const ShapeEdge &e)
+{
+  if (e.curve < 0 || e.curve >= int(drawing.curves.size()) || e.segment < 0 ||
+      e.segment >= drawing.curves[size_t(e.curve)].segment_count())
+  {
+    return -1;
+  }
+  int a, b;
+  curve_segment_points(drawing.curves[size_t(e.curve)], e.segment, &a, &b);
+  return a;
+}
+
+int drawing_shapes_join(VectorDrawing &drawing, uint64_t look, bool at_selected)
+{
+  if (drawing.shapes.size() < 2) {
+    return 0;
+  }
+  const std::vector<int> part = point_part_roots(drawing);
+  /* Shapes sharing a part, under the same parent, by union-find. */
+  std::vector<int> up(drawing.shapes.size());
+  std::iota(up.begin(), up.end(), 0);
+  const auto find = [&](int i) {
+    while (up[size_t(i)] != i) {
+      up[size_t(i)] = up[size_t(up[size_t(i)])];
+      i = up[size_t(i)];
+    }
+    return i;
+  };
+  std::map<std::pair<uint64_t, int>, int> first;
+  for (int s = 0; s < int(drawing.shapes.size()); s++) {
+    for (const ShapeEdge &e : drawing.shapes[size_t(s)].edges) {
+      const int p = edge_first_point(drawing, e);
+      if (p < 0) {
+        continue;
+      }
+      const auto [it, added] = first.try_emplace({drawing.shapes[size_t(s)].parent, part[size_t(p)]}, s);
+      if (!added) {
+        const int a = find(s), b = find(it->second);
+        if (a != b) {
+          up[size_t(std::max(a, b))] = std::min(a, b);
+        }
+      }
+    }
+  }
+  std::map<int, std::vector<int>> groups;
+  for (int s = 0; s < int(drawing.shapes.size()); s++) {
+    groups[find(s)].push_back(s);
+  }
+  std::vector<bool> gone(drawing.shapes.size(), false);
+  std::map<uint64_t, uint64_t> into;
+  int joined = 0;
+  /* Whether shape `m` runs through a selected point. */
+  const auto at_pick = [&](int m) {
+    for (const ShapeEdge &e : drawing.shapes[size_t(m)].edges) {
+      if (e.curve < 0 || e.curve >= int(drawing.curves.size())) {
+        continue;
+      }
+      int a, b;
+      curve_segment_points(drawing.curves[size_t(e.curve)], e.segment, &a, &b);
+      if (drawing.points[size_t(a)].selected || drawing.points[size_t(b)].selected) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (const auto &[root, all] : groups) {
+    std::vector<int> members;
+    for (const int m : all) {
+      if (!at_selected || at_pick(m)) {
+        members.push_back(m);
+      }
+    }
+    if (members.size() < 2) {
+      continue;
+    }
+    int looked = -1;
+    for (const int m : members) {
+      looked = drawing.shapes[size_t(m)].id == look && look != 0 ? m : looked;
+    }
+    const int owner = looked >= 0 ? looked : members.front();
+    const auto source = [&](bool fill) {
+      const auto has = [&](int m) {
+        return fill ? drawing.shapes[size_t(m)].has_fill : drawing.shapes[size_t(m)].has_outline;
+      };
+      if (looked >= 0 && has(looked)) {
+        return looked;
+      }
+      for (const int m : members) {
+        if (has(m)) {
+          return m;
+        }
+      }
+      return -1;
+    };
+    const int fill_from = source(true), line_from = source(false);
+    /* Its loops first, so each still goes round when chained (a line running on from one doesn't take it open). */
+    std::vector<int> order = {owner};
+    for (const int m : members) {
+      if (m != owner) {
+        order.push_back(m);
+      }
+    }
+    std::vector<ShapeEdge> loops, rest;
+    for (const int m : order) {
+      for (const Shape &run : shape_runs(drawing, drawing.shapes[size_t(m)])) {
+        std::vector<OrientedEdge> chain;
+        bool closed = false;
+        shape_chain(drawing, run, chain, &closed);
+        std::vector<ShapeEdge> &to = closed ? loops : rest;
+        to.insert(to.end(), run.edges.begin(), run.edges.end());
+      }
+    }
+    Shape merged = drawing.shapes[size_t(owner)];
+    merged.edges.clear();
+    for (const std::vector<ShapeEdge> *list : {&loops, &rest}) {
+      for (const ShapeEdge &e : *list) {
+        if (std::find(merged.edges.begin(), merged.edges.end(), e) == merged.edges.end()) {
+          merged.edges.push_back(e);
+        }
+      }
+    }
+    merged.has_fill = fill_from >= 0;
+    if (fill_from >= 0) {
+      merged.style.fill = drawing.shapes[size_t(fill_from)].style.fill;
+      merged.fill_rule = drawing.shapes[size_t(fill_from)].fill_rule;
+    }
+    merged.has_outline = line_from >= 0;
+    if (line_from >= 0) {
+      const Style &line = drawing.shapes[size_t(line_from)].style;
+      merged.style.line = line.line;
+      merged.style.line_width = line.line_width;
+      merged.style.brush = line.brush;
+    }
+    /* A material is the whole look: the active point's shape's, else the fill's, else the line's. */
+    const int material_from = looked >= 0 ? looked : fill_from >= 0 ? fill_from : line_from >= 0 ? line_from : owner;
+    merged.material = drawing.shapes[size_t(material_from)].material;
+    merged.material_last = drawing.shapes[size_t(material_from)].material_last;
+    drawing.shapes[size_t(owner)] = std::move(merged);
+    for (const int m : members) {
+      if (m != owner) {
+        gone[size_t(m)] = true;
+        into[drawing.shapes[size_t(m)].id] = drawing.shapes[size_t(owner)].id;
+        joined++;
+      }
+    }
+  }
+  if (joined == 0) {
+    return 0;
+  }
+  for (Shape &shape : drawing.shapes) {
+    const auto it = into.find(shape.parent);
+    if (it != into.end()) {
+      shape.parent = it->second;
+    }
+  }
+  size_t w = 0;
+  for (size_t s = 0; s < drawing.shapes.size(); s++) {
+    if (!gone[s]) {
+      if (w != s) {
+        drawing.shapes[w] = std::move(drawing.shapes[s]);
+      }
+      w++;
+    }
+  }
+  drawing.shapes.resize(w);
+  return joined;
+}
+
+/* A shape name not taken in the drawing: `name` without its number, then .001 on. */
+static std::string shape_copy_name(const VectorDrawing &drawing, const std::string &name)
+{
+  std::string base = name;
+  const size_t dot = base.rfind('.');
+  if (dot != std::string::npos && dot + 4 == base.size() &&
+      std::all_of(base.begin() + std::ptrdiff_t(dot) + 1, base.end(), [](char c) { return c >= '0' && c <= '9'; }))
+  {
+    base.resize(dot);
+  }
+  for (int n = 1;; n++) {
+    char suffix[16];
+    std::snprintf(suffix, sizeof(suffix), ".%03d", n);
+    const std::string candidate = base + suffix;
+    if (std::none_of(drawing.shapes.begin(), drawing.shapes.end(),
+                     [&](const Shape &s) { return s.name == candidate; }))
+    {
+      return candidate;
+    }
+  }
+}
+
+int drawing_shapes_split(VectorDrawing &drawing, const std::map<uint64_t, int> &before)
+{
+  const std::vector<int> part = point_part_roots(drawing);
+  int made = 0;
+  for (int s = int(drawing.shapes.size()) - 1; s >= 0; s--) {
+    /* Its edges by the part they are on now, in the order they first come; each part's part before. */
+    std::vector<int> roots;
+    std::vector<std::vector<ShapeEdge>> parts;
+    std::vector<int> was;
+    for (const ShapeEdge &e : drawing.shapes[size_t(s)].edges) {
+      const int p = edge_first_point(drawing, e);
+      if (p < 0) {
+        continue;
+      }
+      const auto at = std::find(roots.begin(), roots.end(), part[size_t(p)]);
+      if (at == roots.end()) {
+        roots.push_back(part[size_t(p)]);
+        parts.push_back({e});
+        const auto b = before.find(drawing.points[size_t(p)].id);
+        was.push_back(b == before.end() ? -1 : b->second);
+      }
+      else {
+        parts[size_t(at - roots.begin())].push_back(e);
+      }
+    }
+    if (parts.size() < 2) {
+      continue;
+    }
+    /* Of the parts that were one before, all but the biggest go (the first of the biggest stays). */
+    std::vector<size_t> off;
+    for (size_t i = 0; i < parts.size(); i++) {
+      if (was[i] < 0) {
+        continue;
+      }
+      size_t keep = parts.size();
+      for (size_t j = 0; j < parts.size(); j++) {
+        if (was[j] == was[i] && (keep == parts.size() || parts[j].size() > parts[keep].size())) {
+          keep = j;
+        }
+      }
+      if (keep != i) {
+        off.push_back(i);
+      }
+    }
+    if (off.empty()) {
+      continue;
+    }
+    Shape &shape = drawing.shapes[size_t(s)];
+    std::vector<Shape> copies;
+    for (const size_t i : off) {
+      std::erase_if(shape.edges, [&](const ShapeEdge &e) {
+        return std::find(parts[i].begin(), parts[i].end(), e) != parts[i].end();
+      });
+      Shape copy = drawing.shapes[size_t(s)];
+      copy.edges = parts[i];
+      copy.id = 0;
+      copies.push_back(std::move(copy));
+    }
+    for (size_t k = 0; k < copies.size(); k++) {
+      copies[k].name = shape_copy_name(drawing, drawing.shapes[size_t(s)].name);
+      drawing.shapes.insert(drawing.shapes.begin() + std::ptrdiff_t(s) + 1 + std::ptrdiff_t(k), std::move(copies[k]));
+      made++;
+    }
+  }
+  if (made > 0) {
+    drawing_ensure_ids(drawing);
+  }
+  return made;
+}
+
+int drawing_fill_closed_lines(VectorDrawing &drawing, const std::vector<bool> &closed)
+{
+  int filled = 0;
+  for (Shape &shape : drawing.shapes) {
+    if (shape.has_fill) {
+      continue;
+    }
+    for (int c = 0; c < int(std::min(closed.size(), drawing.curves.size())); c++) {
+      if (!closed[size_t(c)] || !drawing.curves[size_t(c)].closed) {
+        continue;
+      }
+      bool all = true;
+      for (int seg = 0; seg < drawing.curves[size_t(c)].segment_count() && all; seg++) {
+        all = std::find(shape.edges.begin(), shape.edges.end(), ShapeEdge{c, seg}) != shape.edges.end();
+      }
+      if (all) {
+        shape.has_fill = true;
+        shape.style.fill = shape.style.line;
+        filled++;
+        break;
+      }
+    }
+  }
+  return filled;
+}
+
+uint64_t drawing_active_point_shape(const VectorDrawing &drawing, uint64_t active_shape)
+{
+  const int p = drawing_active_point(drawing);
+  if (p < 0) {
+    return 0;
+  }
+  const auto on = [&](const Shape &shape) {
+    for (const ShapeEdge &e : shape.edges) {
+      if (e.curve < 0 || e.curve >= int(drawing.curves.size())) {
+        continue;
+      }
+      int a, b;
+      curve_segment_points(drawing.curves[size_t(e.curve)], e.segment, &a, &b);
+      if (a == p || b == p) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const int active = active_shape ? drawing_shape_index(drawing, active_shape) : -1;
+  if (active >= 0 && on(drawing.shapes[size_t(active)])) {
+    return active_shape;
+  }
+  for (int s = int(drawing.shapes.size()) - 1; s >= 0; s--) {
+    if (on(drawing.shapes[size_t(s)])) {
+      return drawing.shapes[size_t(s)].id;
+    }
+  }
+  return 0;
 }
 
 int drawing_separate_fills(VectorDrawing &drawing)

@@ -319,9 +319,12 @@ stroke(blob)
 ops.wm.tool_draw(mode="FILL_ERASER")
 painted = points()
 canvas_before = page["svg"]
-messages({"t": "down", "zoom": 1, "s": cross[:20]})
+# It cuts from the shape it starts on: from on the painted ring, down across it.
+out = [[W * 0.45 + 30, H * 0.5 - H * 0.1 + i * H * 0.01, 0.8, 0, 0, i / 100] for i in range(40)]
+out = [[W * 0.45 + 30, H * 0.5, 0.8, 0, 0, 0]] + out
+messages({"t": "down", "zoom": 1, "s": out[:20]})
 time.sleep(ipad.ERASE_INTERVAL + 0.01)
-got = messages({"t": "move", "s": cross[20:]})
+got = messages({"t": "move", "s": out[20:]})
 assert of("canvas", got) and page["svg"] != canvas_before and points() == painted, "the fill cut as it goes"
 assert of("done", messages({"t": "up", "s": []}))[0]["undo"] == "Erase Fill"
 ops.wm.tool_draw(mode="FILL_PEN")

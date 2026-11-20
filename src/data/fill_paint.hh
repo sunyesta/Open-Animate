@@ -1,10 +1,10 @@
 #pragma once
 
-/* The Fill Pen and Fill Eraser: painting a brushed area into a drawing's fills, and cutting one out of them.
+/* The Fill Pen and Fill Eraser: growing the shape a stroke starts on by a brushed area, and cutting one out of it.
  *
- * Both work on what the fills cover rather than on their points: the area is merged or cut with Clipper2 and
- * the outcome fitted back to Bezier curves, so what comes out is ordinary shapes. Lines are left alone: a fill
- * cut under an outline stays an outline, with what is left of the fill just below it. */
+ * Both work the area into that shape as the shape tree's Apply does (Clipper2 on its outline and the area): the points
+ * its outline still runs through stay, with their keys, and new ones fitted to Bezier curves go in only where it
+ * changed. */
 
 #include <vector>
 
@@ -12,17 +12,21 @@
 
 namespace oanim {
 
-/* Paints `area` (layer space) in `style`'s fill, as Illustrator's Blob Brush. It merges with the fills it overlaps
- * that look the same, have no outline and are free to rebuild (no keys, not sharing a curve), down the stack as
- * far as a different fill it overlaps; the blob stays where the topmost of them was, so lines drawn over a colour
- * stay over it. Nothing to merge with: a new shape on top. `pixel`: layer units a screen pixel stands for;
- * `tolerance`: how far (screen pixels) the curves may be off. */
-void drawing_fill_paint(VectorDrawing &drawing, const std::vector<FillPiece> &area, const Style &style, float pixel,
-                        float tolerance);
+/* The shape a Fill Pen or Fill Eraser stroke starting at `start` (layer space) works on: the top shown one it starts
+ * inside (its own outline, a sub shape's too) or on the line of (within `reach`, or the line's half width), -1 for
+ * none. */
+int drawing_fill_start_shape(const VectorDrawing &drawing, float2 start, float reach);
 
-/* Cuts `area` out of the drawing's fills (`selected_only`: of the selected shapes'). A shape with keys can't be
- * rebuilt without losing them: it is left, and counted in `r_skipped`. False: nothing was cut. */
+/* The Fill Pen: grows the fill of the shape the stroke starts on by `area` (layer space), that shape keeping its points
+ * where its outline doesn't change and its line following the new outline, and gaining a fill in `style`'s colour if
+ * it had none (a line that doesn't go round takes the area in as a loop of its own). Started on nothing, a new shape
+ * on top. `pixel`: layer units a screen pixel stands for; `tolerance`: how far (screen pixels) new curves may be off. */
+void drawing_fill_paint(VectorDrawing &drawing, const std::vector<FillPiece> &area, const Style &style, float pixel,
+                        float tolerance, float2 start);
+
+/* The Fill Eraser: cuts `area` out of the fill of the shape the stroke starts on (`selected_only`: if it is selected),
+ * keeping its points where its outline doesn't change; all of it cut, it goes. False: nothing was cut. */
 bool drawing_fill_erase(VectorDrawing &drawing, const std::vector<FillPiece> &area, float pixel, float tolerance,
-                        bool selected_only, int *r_skipped);
+                        float2 start, bool selected_only);
 
 }  // namespace oanim

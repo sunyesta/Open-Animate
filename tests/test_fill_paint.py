@@ -1,4 +1,6 @@
-"""The Fill Pen and Fill Eraser (data/fill_paint): painted areas, merging, cutting, and lines left alone.
+"""The Fill Pen and Fill Eraser (data/fill_paint): each works on the shape its stroke starts on (inside its fill, or on
+its line). The Fill Pen grows that shape (its points kept where its outline doesn't change, its line following, a fill
+in the pen's colour if it had none; started on nothing, a new shape); the Fill Eraser cuts from it.
 
 The live preview and Ctrl with a real press need the window: checked live on a private copy.
 
@@ -85,59 +87,111 @@ assert layer.shape_count == 1 and layer.curve_count == 2, (layer.shape_count, la
 assert covers(layer, 0, 0.3, 0.0) and covers(layer, 0, -0.3, 0.0)
 assert not covers(layer, 0, 0.0, 0.0), "the hole"
 
-# Overlapping the same colour, it merges; a stroke elsewhere stays its own shape.
+
+
+def ids_of(layer):
+    return set(layer.point_ids)
+
+
+def through(x, top=0.4):
+    """Down and up across y = 0 at `x`, starting there (so it starts on what is there)."""
+    return lambda u: (x, top * math.sin(u * 2.0 * math.pi))
+
+
+# --- The Fill Pen grows the shape it starts on ---------------------------------------------------------------------
 layer = fresh()
+ops.wm.tool_draw(mode="FILL_PEN")
 wm.set_draw(fill_size=0.1)
 stroke(line(-0.5, 0.0, 0.0, 0.0))
 stroke(line(0.5, 0.5, 0.8, 0.5))
 assert layer.shape_count == 2
-stroke(line(-0.1, 0.0, 0.4, 0.0))
-assert layer.shape_count == 2, ("merged", layer.shape_count)
-merged = [i for i in range(layer.shape_count) if covers(layer, i, -0.4, 0.0)][0]
-assert covers(layer, merged, 0.35, 0.0), "one area"
-# Bridging two: three become one area.
+first = [i for i in range(2) if covers(layer, i, -0.4, 0.0)][0]
+kept = ids_of(layer)
+assert stroke(line(-0.1, 0.0, 0.4, 0.0)) == {"FINISHED"}
+assert layer.shape_count == 2, ("grown, not a new one", layer.shape_count)
+assert covers(layer, first, -0.4, 0.0) and covers(layer, first, 0.35, 0.0), "one area"
+left_end = [i for i, p in enumerate(layer.points) if p[0] < -0.45]
+assert left_end and all(layer.point_ids[i] in kept for i in left_end), "its points where its outline didn't change"
+assert not layer.shape_style(first)["has_outline"]
+# Over another shape on the way, that one stays as it is: only the shape it starts on grows.
+other = 1 - first
+before_other = layer.shape_runs(other)
 stroke(line(0.35, 0.0, 0.6, 0.5))
-assert layer.shape_count == 1, layer.shape_count
-assert covers(layer, 0, -0.4, 0.0) and covers(layer, 0, 0.75, 0.5)
+assert layer.shape_count == 2, layer.shape_count
+assert covers(layer, first, 0.55, 0.45), "grown over it"
+assert layer.shape_runs(other) == before_other, "the other shape untouched"
+ops.ed.undo()
+assert covers(layer, first, 0.35, 0.0) and not covers(layer, first, 0.55, 0.45), "one undo step"
 
-# Another colour goes on top, unmerged.
+# Started on nothing it makes a new shape on top, in the pen's colour; started on a shape, that shape keeps its colour.
 layer = fresh()
 stroke(line(-0.5, 0.0, 0.5, 0.0))
+colour = layer.shape_style(0)["fill"]
 wm.set_draw(fill_color=(0.2, 0.4, 0.8, 1.0))
-stroke(line(0.0, -0.3, 0.0, 0.3))
-assert layer.shape_count == 2
-assert layer.shape_style(1)["fill"] != layer.shape_style(0)["fill"]
-# And painting the first colour over that doesn't merge under it.
+stroke(line(0.0, 0.0, 0.0, 0.3))
+assert layer.shape_count == 1 and layer.shape_style(0)["fill"] == colour, "grown in its own colour"
+assert covers(layer, 0, 0.0, 0.28)
+stroke(line(0.0, -0.6, 0.0, -0.4))
+assert layer.shape_count == 2 and layer.shape_style(1)["fill"] != colour, "a new one on top"
 wm.set_draw(fill_color=(0.95, 0.85, 0.7, 1.0))
-stroke(line(-0.2, 0.0, 0.2, 0.0))
-assert layer.shape_count == 3, layer.shape_count
 
-# Merging keeps its place: a line drawn over a colour stays over it.
+# Started on a line (just outside the fill): the shape grows, its line going round the new outline.
 layer = fresh()
-stroke(line(-0.5, 0.0, 0.0, 0.0))
-ops.draw.preset_load(name="Ink")
-ops.wm.tool_draw(mode="FREEHAND")
-stroke(line(-0.6, 0.1, 0.6, 0.1))
+ops.mesh.primitive_box_add(x=0.0, y=0.0, width=0.8, height=0.8, fill="1")
+corners = ids_of(layer)
+assert not covers(layer, 0, 0.403, 0.0)
+assert stroke(line(0.403, 0.0, 0.7, 0.0)) == {"FINISHED"}
+assert layer.shape_count == 1, layer.shape_count
+look = layer.shape_style(0)
+assert look["has_fill"] and look["has_outline"]
+assert covers(layer, 0, 0.6, 0.0) and covers(layer, 0, -0.3, 0.0)
+assert len(corners & ids_of(layer)) >= 3, "the corners the outline still runs through"
+assert layer.shape_outline(0)[1], "still going all the way round"
+
+# A line round with no fill gains one, in the pen's colour.
+layer = fresh()
+layer.add_curve([(-0.3, -0.3), (0.3, -0.3), (0.3, 0.3), (-0.3, 0.3)], closed=True)
+layer.set_shape_style(0, has_fill=False)
+ops.mesh.select_none()
+wm.set_draw(fill_color=(0.2, 0.4, 0.8, 1.0))
+assert stroke(line(0.0, 0.0, 0.2, 0.0)) == {"FINISHED"}
+assert layer.shape_count == 1 and layer.shape_style(0)["has_fill"] and layer.shape_style(0)["has_outline"]
+assert layer.shape_style(0)["fill"][2] > 0.7, layer.shape_style(0)["fill"]
+wm.set_draw(fill_color=(0.95, 0.85, 0.7, 1.0))
+
+# A sub shape grows itself, its parent's points staying.
+layer = fresh()
+assert layer.add_primitive("BOX", [(-0.5, -0.5), (0.5, 0.5)], fill=True)
+assert layer.add_primitive("CIRCLE", [(-0.2, -0.2), (0.2, 0.2)], fill=True)
+box = [i for i in range(2) if covers(layer, i, 0.4, 0.4)][0]
+circle = 1 - box
+ops.mesh.select_none()
+assert ops.mesh.shape_parent_set(shape=str(layer.shape_ids[circle]), parent=str(layer.shape_ids[box])) == {"FINISHED"}
+circle = [i for i in range(2) if layer.shape_style(i)["parent"] >= 0][0]
+box = 1 - circle
+box_curves = layer.shape_runs(box)
+assert stroke(line(0.0, 0.0, 0.0, 0.35)) == {"FINISHED"}
+assert layer.shape_count == 2
+circle = [i for i in range(2) if layer.shape_style(i)["parent"] >= 0][0]
+assert covers(layer, circle, 0.0, 0.33), "the sub shape grew"
+assert layer.shape_runs(1 - circle) == box_curves, "its parent as it was"
+
+# --- The Fill Eraser cuts from the shape it starts on ---------------------------------------------------------------
+layer = fresh()
 ops.wm.tool_draw(mode="FILL_PEN")
-assert layer.shape_count == 2 and layer.shape_style(1)["has_outline"]
-stroke(line(-0.1, 0.0, 0.4, 0.0))
-assert layer.shape_count == 2, layer.shape_count
-assert layer.shape_style(1)["has_outline"], "the line is still on top"
-assert layer.shape_style(0)["has_fill"] and covers(layer, 0, 0.35, 0.0)
-
-# --- The Fill Eraser cuts fills ------------------------------------------------------------------------------------
-layer = fresh()
 wm.set_draw(fill_size=0.2)
 stroke(line(-0.5, 0.0, 0.5, 0.0))
 ops.wm.tool_draw(mode="FILL_ERASER")
 wm.set_draw(fill_size=0.1)
-assert stroke(line(0.0, -0.4, 0.0, 0.4)) == {"FINISHED"}
-assert layer.shape_count == 2, ("in two", layer.shape_count)
-assert not any(covers(layer, i, 0.0, 0.0) for i in range(2)), "the cut"
-assert any(covers(layer, i, -0.3, 0.0) for i in range(2)) and any(covers(layer, i, 0.3, 0.0) for i in range(2))
+assert stroke(through(0.0)) == {"FINISHED"}
+assert layer.shape_count == 1, ("one shape, in two loops", layer.shape_count)
+assert not covers(layer, 0, 0.0, 0.0), "the cut"
+assert covers(layer, 0, -0.3, 0.0) and covers(layer, 0, 0.3, 0.0)
 ops.ed.undo()
 assert layer.shape_count == 1 and covers(layer, 0, 0.0, 0.0)
 ops.ed.redo()
+# Started on nothing, it cuts nothing: no step at all.
+assert stroke(line(0.0, 0.6, 0.0, -0.6)) == {"CANCELLED"}
 
 # Cutting a hole, and cutting it all away.
 layer = fresh()
@@ -149,50 +203,46 @@ wm.set_draw(fill_size=0.05)
 stroke(line(0.0, 0.0, 0.05, 0.0))
 assert layer.shape_count == 1 and layer.curve_count == 2
 assert not covers(layer, 0, 0.02, 0.0) and covers(layer, 0, 0.3, 0.0)
-wm.set_draw(fill_size=0.8)
-stroke(line(-0.7, 0.0, 0.7, 0.0))
+wm.set_draw(fill_size=0.9)
+stroke(line(0.3, 0.0, -0.7, 0.0))
 assert layer.shape_count == 0 and layer.point_count == 0, (layer.shape_count, layer.point_count)
-# Missing everything is no step at all.
-assert stroke(line(-0.7, 0.0, 0.7, 0.0)) == {"CANCELLED"}
 
-# Lines are left alone: a filled shape keeps its outline whole, with the cut only in its fill.
+# The shape's line follows the cut: one shape, the corners it doesn't reach kept.
 layer = fresh()
 ops.mesh.primitive_box_add(x=0.0, y=0.0, width=0.8, height=0.8, fill="1")
-assert layer.shape_count == 1 and layer.shape_style(0)["has_outline"] and layer.shape_style(0)["has_fill"]
-points_before = layer.point_count
+corners = ids_of(layer)
+right = [layer.point_ids[i] for i, p in enumerate(layer.points) if p[0] > 0.3]
 ops.wm.tool_draw(mode="FILL_ERASER")
 wm.set_draw(fill_size=0.2)
-stroke(line(-0.6, 0.0, 0.0, 0.0))
-assert layer.shape_count == 2, layer.shape_count
-outline = [i for i in range(2) if layer.shape_style(i)["has_outline"]]
-fills = [i for i in range(2) if layer.shape_style(i)["has_fill"]]
-assert len(outline) == 1 and len(fills) == 1 and outline != fills, (outline, fills)
-assert not layer.shape_style(outline[0])["has_fill"]
-assert fills[0] < outline[0], "the line over what is left of the fill"
-assert not covers(layer, fills[0], -0.2, 0.0) and covers(layer, fills[0], 0.2, 0.0)
-assert layer.curve_count == 2
+assert stroke(line(0.0, 0.0, -0.6, 0.0)) == {"FINISHED"}
+assert layer.shape_count == 1, layer.shape_count
+assert layer.shape_style(0)["has_outline"] and layer.shape_style(0)["has_fill"]
+assert not covers(layer, 0, -0.2, 0.0) and covers(layer, 0, 0.2, 0.0)
+assert right and all(i in ids_of(layer) for i in right), "the right corners stay"
 
 # Ctrl with the Fill Pen cuts.
 layer = fresh()
 ops.wm.tool_draw(mode="FILL_PEN")
 wm.set_draw(fill_size=0.2)
 stroke(line(-0.5, 0.0, 0.5, 0.0))
-assert stroke(line(0.0, -0.4, 0.0, 0.4), erase="1") == {"FINISHED"}
-assert layer.shape_count == 2, layer.shape_count
+assert stroke(through(0.0), erase="1") == {"FINISHED"}
+assert layer.shape_count == 1 and not covers(layer, 0, 0.0, 0.0)
 
-# Selected Only.
+# Selected Only: the shape it starts on, if selected.
 layer = fresh()
 stroke(line(-0.5, 0.0, -0.2, 0.0))
 stroke(line(0.2, 0.0, 0.5, 0.0))
 assert layer.shape_count == 2
 ops.wm.tool_draw(mode="FILL_ERASER")
 wm.set_draw(erase_selected=True, fill_size=0.3)
-assert stroke(line(-0.7, 0.0, 0.7, 0.0)) == {"CANCELLED"}, "nothing selected"
-assert layer.shape_count == 2
+assert stroke(line(-0.35, 0.0, 0.7, 0.0)) == {"CANCELLED"}, "nothing selected"
 left = [i for i in range(2) if covers(layer, i, -0.4, 0.0)][0]
+right_points = {layer.point_ids[i]: p for i, p in enumerate(layer.points) if p[0] > 0.0}
 layer.select_points([p for p in range(layer.point_count) if layer.points[p][0] < 0.0], True)
-assert stroke(line(-0.7, 0.0, 0.7, 0.0)) == {"FINISHED"}
-assert layer.shape_count == 1 and covers(layer, 0, 0.3, 0.0), "only the selected one went"
+assert stroke(line(-0.35, 0.0, 0.7, 0.0)) == {"FINISHED"}
+assert layer.shape_count == 2 and not covers(layer, left, -0.3, 0.0), "the left one cut"
+now = {layer.point_ids[i]: p[:2] for i, p in enumerate(layer.points)}
+assert covers(layer, 1 - left, 0.3, 0.0) and all(now.get(i) == p[:2] for i, p in right_points.items()),     "the right one as it was"
 wm.set_draw(erase_selected=False)
 
 # All Layers: the same place on other drawings, through their own transforms.
@@ -207,29 +257,34 @@ above.selected = True
 oanim.data.layers.active = above
 ops.wm.tool_draw(mode="FILL_ERASER")
 wm.set_draw(fill_size=0.1)
-stroke(line(0.0, -0.4, 0.0, 0.4))
-assert above.shape_count == 2 and below.shape_count == 1, "the active one only, at first"
+stroke(through(0.0))
+assert not covers(above, 0, 0.0, 0.0) and covers(below, 0, 0.0, 0.0), "the active one only, at first"
 wm.set_draw(erase_all_layers=True)
-stroke(line(0.2, -0.4, 0.2, 0.4))
-assert below.shape_count == 2 and above.shape_count == 3, (below.shape_count, above.shape_count)
+stroke(through(0.2))
+assert not covers(below, 0, 0.2, 0.0) and not covers(above, 0, 0.2, 0.0)
+assert covers(below, 0, 0.0, 0.0), "below cut only where the second went"
 wm.set_draw(erase_all_layers=False)
 below.selected = False
 
-# A shape with keys is left as it is, rather than losing them.
+# A shape with keys is cut too: the points it keeps keep their keys.
 layer = fresh()
 ops.wm.tool_draw(mode="FILL_PEN")
 wm.set_draw(fill_size=0.2)
 stroke(line(-0.5, 0.0, 0.5, 0.0))
 doc.frame_current = 10
 ops.sculpt.stroke(brush="GRAB", path="-0.5,0.0;-0.5,0.1", radius=0.3, strength=1.0, falloff="CONSTANT")
+moved = {layer.point_ids[i]: p for i, p in enumerate(layer.points) if p[0] < -0.4}
 doc.frame_current = 0
-points = layer.point_count
 ops.wm.tool_draw(mode="FILL_ERASER")
-assert stroke(line(0.0, -0.4, 0.0, 0.4)) == {"CANCELLED"}
-assert layer.shape_count == 1 and layer.point_count == points
-# And painting over it goes on top, rather than merging.
+assert stroke(through(0.3)) == {"FINISHED"}
+assert layer.shape_count == 1 and not covers(layer, 0, 0.3, 0.0)
+doc.frame_current = 10
+now = {layer.point_ids[i]: p for i, p in enumerate(layer.points)}
+assert moved and all(i in now and abs(now[i][1] - moved[i][1]) < 1e-4 for i in moved), "kept with their keys"
+doc.frame_current = 0
+# And painting from it grows it.
 ops.wm.tool_draw(mode="FILL_PEN")
-stroke(line(0.0, 0.0, 0.3, 0.0))
-assert layer.shape_count == 2, layer.shape_count
+stroke(line(0.0, 0.0, 0.0, 0.4))
+assert layer.shape_count == 1, layer.shape_count
 
 print("fill paint: ok")

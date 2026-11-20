@@ -396,6 +396,47 @@ static bool has_selection(const VectorDrawing &drawing)
   return false;
 }
 
+/* Shapes are sets of connected points on drawings of their own (not a gradient's stops, not a reference's). */
+static bool shapes_follow_points(const Layer &layer)
+{
+  return !layer.is_gradient() && !layer.is_reference();
+}
+
+/* The shape whose look a join on `layer` takes: the one its active point is on (0 for none). */
+static uint64_t join_look(const Context &C, const Layer &layer)
+{
+  const uint64_t active = C.document->active_shape_layer == layer.id ? C.document->active_shape : 0;
+  return drawing_active_point_shape(layer.drawing, active);
+}
+
+/* After a join: lines whose ends met are filled (with no fill of their own), and shapes on connected points become
+ * one in the look of `look`; the active shape is then the one the active point is on. */
+static void join_shapes_after(Context &C, Layer &layer, uint64_t look, const std::vector<bool> &closed)
+{
+  if (!shapes_follow_points(layer)) {
+    return;
+  }
+  drawing_fill_closed_lines(layer.drawing, closed);
+  if (drawing_shapes_join(layer.drawing, look, true) > 0) {
+    const int active = drawing_active_point(layer.drawing);
+    if (active >= 0) {
+      document_set_active_shape(*C.document, layer, active);
+    }
+    else if (look != 0 && drawing_shape_index(layer.drawing, look) >= 0) {
+      C.document->active_shape_layer = layer.id;
+      C.document->active_shape = look;
+    }
+  }
+}
+
+/* After a delete: a shape broken apart keeps its biggest part, the others becoming copies of it. */
+static void split_shapes_after(Layer &layer, const std::map<uint64_t, int> &before)
+{
+  if (shapes_follow_points(layer)) {
+    drawing_shapes_split(layer.drawing, before);
+  }
+}
+
 static bool editable_with_selection_poll(Context &C)
 {
   for (const Layer *layer : editable_layers(C)) {
@@ -972,8 +1013,10 @@ void vector_operators_register()
                     const bool edges = C.wm->tool_settings.select_mode == SelectMode::Edge;
                     for (Layer *layer : editable_layers(C)) {
                       VectorDrawing &drawing = layer->drawing;
+                      const std::map<uint64_t, int> parts = drawing_point_parts(drawing);
                       if (edges) {
                         drawing_delete_edges(drawing, drawing_selected_edges(drawing));
+                        split_shapes_after(*layer, parts);
                         continue;
                       }
                       std::vector<bool> remove(drawing.points.size());
@@ -981,6 +1024,7 @@ void vector_operators_register()
                         remove[i] = drawing.points[i].selected;
                       }
                       drawing_remove_points(drawing, remove);
+                      split_shapes_after(*layer, parts);
                     }
                     return OpStatus::Finished;
                   });
@@ -1200,12 +1244,14 @@ void vector_operators_register()
                       if (layer->is_reference()) {
                         continue;
                       }
+                      const std::map<uint64_t, int> parts = drawing_point_parts(layer->drawing);
                       std::vector<bool> remove(layer->drawing.points.size());
                       for (size_t i = 0; i < layer->drawing.points.size(); i++) {
                         remove[i] = layer->drawing.points[i].selected;
                         removed |= remove[i];
                       }
                       drawing_remove_points(layer->drawing, remove);
+                      split_shapes_after(*layer, parts);
                     }
                     return removed ? OpStatus::Finished : OpStatus::Cancelled;
                   });
@@ -1224,6 +1270,7 @@ void vector_operators_register()
                       for (const Curve &curve : layer->drawing.curves) {
                         was_closed.push_back(curve.closed);
                       }
+                      const uint64_t look = join_look(C, *layer);
                       if (picked.size() == 2 && drawing_make_segment(layer->drawing, picked[0], picked[1])) {
                         /* The curve it closed, with nothing on it, shows as a shape. Joining two curves (their number
                          * one less) closes none. */
@@ -1234,6 +1281,7 @@ void vector_operators_register()
                           }
                         }
                         drawing_fill_bare_loops(layer->drawing, style, closed);
+                        join_shapes_after(C, *layer, look, closed);
                         made++;
                       }
                     }
@@ -1290,7 +1338,9 @@ void vector_operators_register()
                       if (layer->is_reference()) {
                         continue;
                       }
+                      const std::map<uint64_t, int> parts = drawing_point_parts(layer->drawing);
                       deleted += drawing_delete_edges(layer->drawing, drawing_selected_edges(layer->drawing));
+                      split_shapes_after(*layer, parts);
                     }
                     return deleted ? OpStatus::Finished : OpStatus::Cancelled;
                   });
@@ -1311,7 +1361,9 @@ void vector_operators_register()
                         }
                       }
                       dissolved |= !selected.empty();
+                      const std::map<uint64_t, int> parts = drawing_point_parts(drawing);
                       drawing_dissolve_points(drawing, selected);
+                      split_shapes_after(*layer, parts);
                     }
                     return dissolved ? OpStatus::Finished : OpStatus::Cancelled;
                   });
@@ -1436,7 +1488,7 @@ void vector_operators_register()
   }
   vector_operator("mesh.merge", "Merge",
                   "Merge the selected points into one, at their middle (Blender's Merge > At Center): curves through "
-                  "them run through it, and shapes that met only there become one",
+                  "them run through it, and shapes joined there become one, in the look of the shape the active point is on",
                   UNDO, editable_with_selection_poll, [](Context &C) {
                     /* With X mirror editing the images merge among themselves, each side at its own middle: all
                      * together, a line's two ends would meet. */
@@ -1455,10 +1507,12 @@ void vector_operators_register()
                         (image ? images : picked).push_back(p);
                       }
                       std::vector<bool> closed;
+                      const uint64_t look = join_look(C, *layer);
                       const int now = drawing_merge_points(layer->drawing, {picked, images}, &closed);
                       if (now > 0) {
                         /* Ends merged into a loop with nothing on it: it shows as a shape. */
                         drawing_fill_bare_loops(layer->drawing, C.wm ? C.wm->tool_settings.style : Style(), closed);
+                        join_shapes_after(C, *layer, look, closed);
                       }
                       merged += now;
                     }
@@ -1481,10 +1535,12 @@ void vector_operators_register()
                         continue;
                       }
                       std::vector<bool> closed;
+                      const uint64_t look = join_look(C, *layer);
                       const int now = drawing_merge_points(layer->drawing, drawing_points_within(layer->drawing, distance),
                                                            &closed);
                       if (now > 0) {
                         drawing_fill_bare_loops(layer->drawing, C.wm ? C.wm->tool_settings.style : Style(), closed);
+                        join_shapes_after(C, *layer, look, closed);
                       }
                       merged += now;
                     }

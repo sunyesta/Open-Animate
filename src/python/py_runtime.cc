@@ -1727,7 +1727,9 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   m.def("select_press_takes", [](float x, float y, float zoom) {
     return std::string(select_press_takes_test(current_context(), {x, y}, zoom));
   });
-  m.def("select_click", [](float x, float y, float zoom) { select_click_test(current_context(), {x, y}, zoom); });
+  m.def("select_click", [](float x, float y, float zoom, bool shift) {
+    select_click_test(current_context(), {x, y}, zoom, shift);
+  }, py::arg("x"), py::arg("y"), py::arg("zoom"), py::arg("shift") = false);
   m.def("move_menu_rows", [](const std::string &search) { return move_menu_rows_test(current_context(), search); },
         py::arg("search") = "");
   m.def("move_pick_click", [](uint64_t layer, uint64_t bone) { return move_pick_test(current_context(), layer, bone); },
@@ -2845,6 +2847,17 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     }
     return ids;
   });
+  m.def("layer_active_point", [layer_or_raise](uint64_t id) {
+    return drawing_active_point(layer_or_raise(id).drawing);
+  });
+  m.def("layer_set_active_point", [layer_or_raise](uint64_t id, int index) {
+    VectorDrawing &drawing = layer_or_raise(id).drawing;
+    if (index >= int(drawing.points.size())) {
+      throw py::index_error("point index out of range");
+    }
+    drawing_ensure_ids(drawing);
+    drawing.active_point = index < 0 ? 0 : drawing.points[size_t(index)].id;
+  });
   m.def("layer_shape_ids", [layer_or_raise](uint64_t id) {
     std::vector<uint64_t> ids;
     for (const Shape &s : layer_drawing(*current_context().document, layer_or_raise(id)).shapes) {
@@ -2854,6 +2867,11 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
   });
   /* A shape's look: {fill, line (r, g, b, a), line_width, has_fill, has_outline, hidden}. */
   /* The active shape (what clicking a shape makes it): the one Link Materials passes on. */
+  m.def("layer_active_shape", [layer_or_raise](uint64_t id) {
+    const Layer &layer = layer_or_raise(id);
+    const Document &doc = *current_context().document;
+    return doc.active_shape_layer == layer.id ? drawing_shape_index(layer.drawing, doc.active_shape) : -1;
+  });
   m.def("layer_set_active_shape", [layer_or_raise](uint64_t id, int index) {
     Layer &layer = layer_or_raise(id);
     if (index < 0 || index >= int(layer.drawing.shapes.size())) {

@@ -1,6 +1,9 @@
 #include "data/fill_paint.hh"
 
 #include <algorithm>
+#include <cfloat>
+
+#include "anim/shape_tree.hh"
 
 #include "data/ink_stroke.hh"
 
@@ -10,41 +13,6 @@ namespace oanim {
 static std::vector<FillPiece> shape_area(const VectorDrawing &drawing, const Shape &shape, float pixel)
 {
   return fill_area(shape_fill_loops(drawing, shape, 12, pixel * 0.1f), shape.fill_rule);
-}
-
-/* Whether rebuilding a shape's curves would lose something: keys, or detail levels' points. */
-static bool shape_keyed(const VectorDrawing &drawing, const Shape &shape)
-{
-  for (const ShapeEdge &edge : shape.edges) {
-    for (const CurvePoint &cp : drawing.curves[edge.curve].points) {
-      const MeshPoint &p = drawing.points[cp.point];
-      if (p.pos_keys.animated() || p.radius_keys.animated() || p.detail.level > 0 || cp.curvature_keys.animated() ||
-          cp.handle_in_keys.animated() || cp.handle_out_keys.animated())
-      {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-/* Whether another shape runs along one of a shape's curves. */
-static bool shape_shares_curve(const VectorDrawing &drawing, size_t index)
-{
-  const Shape &shape = drawing.shapes[index];
-  for (size_t i = 0; i < drawing.shapes.size(); i++) {
-    if (i == index) {
-      continue;
-    }
-    for (const ShapeEdge &other : drawing.shapes[i].edges) {
-      for (const ShapeEdge &edge : shape.edges) {
-        if (other.curve == edge.curve) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
 }
 
 /* The pieces as shapes on new curves, each like `like`, filled and without an outline. */
@@ -103,95 +71,149 @@ static void remove_curves_left(VectorDrawing &drawing, const std::vector<Shape> 
   drawing_remove_unused_points(drawing);
 }
 
-void drawing_fill_paint(VectorDrawing &drawing, const std::vector<FillPiece> &area, const Style &style, float pixel,
-                        float tolerance)
+/* How far `p` is from a shape's outline, and whether it is inside one of its loops. */
+static float outline_distance(const VectorDrawing &drawing, const Shape &shape, float2 p)
 {
-  std::vector<FillPiece> blob = area;
-  std::vector<Shape> merged;
-  /* Where the topmost merged shape was, counted without the merged ones under it. */
-  int place = -1;
-  std::vector<size_t> taken;
-  for (size_t i = drawing.shapes.size(); i-- > 0;) {
-    const Shape &shape = drawing.shapes[i];
-    if (shape.hidden || !shape.has_fill) {
-      continue;
+  float best = FLT_MAX;
+  std::vector<float2> outline;
+  for (const Shape &run : shape_runs(drawing, shape)) {
+    bool closed = false;
+    shape_outline(drawing, run, 12, outline, nullptr, &closed);
+    const size_t n = outline.size();
+    for (size_t i = 0; i + 1 < n + (closed ? 1 : 0); i++) {
+      const float2 a = outline[i], b = outline[(i + 1) % n];
+      const float2 ab = b - a;
+      const float len2 = dot(ab, ab);
+      const float t = len2 > 0.0f ? std::clamp(dot(p - a, ab) / len2, 0.0f, 1.0f) : 0.0f;
+      best = std::min(best, length(p - (a + ab * t)));
     }
-    const std::vector<FillPiece> covers = shape_area(drawing, shape, pixel);
-    if (!fill_overlap(blob, covers)) {
-      continue;
+    if (n == 1) {
+      best = std::min(best, length(p - outline[0]));
     }
-    const bool same = !shape.has_outline && shape.material == 0 && shape.style.fill == style.fill;
-    if (!same || shape_keyed(drawing, shape) || shape_shares_curve(drawing, i)) {
-      break;
-    }
-    blob = fill_boolean(blob, covers, FillBoolean::Union);
-    taken.push_back(i);
   }
+  return best;
+}
+
+int drawing_fill_start_shape(const VectorDrawing &drawing, float2 start, float reach)
+{
+  for (int s = int(drawing.shapes.size()) - 1; s >= 0; s--) {
+    const Shape &shape = drawing.shapes[size_t(s)];
+    if (shape.hidden || !shape.shown || shape.edges.empty()) {
+      continue;
+    }
+    if (shape_fill_contains(drawing, shape, start)) {
+      return s;
+    }
+    if (shape.has_outline && outline_distance(drawing, shape, start) <= std::max(reach, shape.style.line_width * 0.5f)) {
+      return s;
+    }
+  }
+  return -1;
+}
+
+/* Works `area` into shape `s` as a sub shape of it doing `op`, applied: its points stay where its outline doesn't
+ * change, new ones going in where it does. False when that can't be done (it doesn't go round, or nothing is left:
+ * `r_empty`), the drawing left as it was. */
+static bool shape_work_in(VectorDrawing &drawing, int s, const std::vector<FillPiece> &area, ShapeOp op, float pixel,
+                          float tolerance, bool *r_empty)
+{
+  *r_empty = false;
+  if (!shape_closed_all(drawing, drawing.shapes[size_t(s)])) {
+    return false;
+  }
+  const VectorDrawing was = drawing;
+  Shape like;
+  like.name = "Fill";
+  std::vector<Shape> made = pieces_to_shapes(drawing, area, like, pixel, tolerance);
+  if (made.empty()) {
+    drawing = was;
+    return false;
+  }
+  /* Its lowest sub shapes, so they act first and only they are applied. */
+  for (Shape &m : made) {
+    m.parent = drawing.shapes[size_t(s)].id;
+    m.op = op;
+  }
+  const int n = int(made.size());
+  drawing.shapes.insert(drawing.shapes.begin() + s + 1, made.begin(), made.end());
+  drawing_ensure_ids(drawing);
+  bool empty = false;
+  shape_tree_solve(drawing, s, s + n, &empty);
+  if (empty || !drawing_shape_apply(drawing, s + n)) {
+    drawing = was;
+    *r_empty = empty;
+    return false;
+  }
+  return true;
+}
+
+void drawing_fill_paint(VectorDrawing &drawing, const std::vector<FillPiece> &area, const Style &style, float pixel,
+                        float tolerance, float2 start)
+{
+  const int s = drawing_fill_start_shape(drawing, start, pixel * 4.0f);
+  if (s >= 0) {
+    bool empty = false;
+    if (shape_work_in(drawing, s, area, ShapeOp::Union, pixel, tolerance, &empty)) {
+      Shape &grown = drawing.shapes[size_t(s)];
+      if (!grown.has_fill) {
+        grown.has_fill = true;
+        grown.style.fill = style.fill;
+      }
+      return;
+    }
+    /* A line that doesn't go round: the area is a loop of its own in it, filled in the pen's colour (its line going
+     * round that too). */
+    Shape like;
+    std::vector<Shape> made = pieces_to_shapes(drawing, area, like, pixel, tolerance);
+    Shape &line = drawing.shapes[size_t(s)];
+    for (const Shape &m : made) {
+      line.edges.insert(line.edges.end(), m.edges.begin(), m.edges.end());
+    }
+    if (!made.empty() && !line.has_fill) {
+      line.has_fill = true;
+      line.style.fill = style.fill;
+    }
+    return;
+  }
+  /* Started on nothing: a new shape on top. */
   Shape like;
   like.style = style;
   like.name = "Fill " + std::to_string(drawing.shapes.size() + 1);
-  if (!taken.empty()) {
-    like.name = drawing.shapes[taken.front()].name;
-    like.style = drawing.shapes[taken.front()].style;
-    like.id = drawing.shapes[taken.front()].id;
-    place = int(taken.front()) - int(taken.size()) + 1;
-    for (const size_t i : taken) {
-      merged.push_back(drawing.shapes[i]);
-      drawing.shapes.erase(drawing.shapes.begin() + i);
-    }
-  }
-  std::vector<Shape> made = pieces_to_shapes(drawing, blob, like, pixel, tolerance);
-  /* The blob is what the shape it grew from became: references know it by its number. */
-  if (!made.empty() && !taken.empty()) {
-    made.front().id = like.id;
-  }
-  drawing.shapes.insert(place < 0 ? drawing.shapes.end() : drawing.shapes.begin() + place, made.begin(), made.end());
-  remove_curves_left(drawing, merged);
+  std::vector<Shape> made = pieces_to_shapes(drawing, area, like, pixel, tolerance);
+  drawing.shapes.insert(drawing.shapes.end(), made.begin(), made.end());
+  drawing_ensure_ids(drawing);
 }
 
 bool drawing_fill_erase(VectorDrawing &drawing, const std::vector<FillPiece> &area, float pixel, float tolerance,
-                        bool selected_only, int *r_skipped)
+                        float2 start, bool selected_only)
 {
-  const std::vector<bool> selected = drawing_selected_shapes(drawing);
-  std::vector<Shape> kept, gone;
-  bool cut = false;
-  const std::vector<Shape> shapes = drawing.shapes;
-  for (size_t i = 0; i < shapes.size(); i++) {
-    const Shape &shape = shapes[i];
-    if (shape.hidden || !shape.has_fill || (selected_only && !selected[i])) {
-      kept.push_back(shape);
-      continue;
-    }
-    const std::vector<FillPiece> covers = shape_area(drawing, shape, pixel);
-    if (!fill_overlap(covers, area)) {
-      kept.push_back(shape);
-      continue;
-    }
-    if (shape_keyed(drawing, shape)) {
-      *r_skipped += 1;
-      kept.push_back(shape);
-      continue;
-    }
-    cut = true;
-    std::vector<Shape> made = pieces_to_shapes(drawing, fill_boolean(covers, area, FillBoolean::Subtract), shape, pixel,
-                                               tolerance);
-    if (shape.has_outline) {
-      /* The line stays, on its own curves, over what is left of the fill. */
-      kept.insert(kept.end(), made.begin(), made.end());
-      kept.push_back(shape);
-      kept.back().has_fill = false;
-    }
-    else {
-      if (!made.empty()) {
-        made.front().id = shape.id;
-      }
-      kept.insert(kept.end(), made.begin(), made.end());
-      gone.push_back(shape);
+  const int s = drawing_fill_start_shape(drawing, start, pixel * 4.0f);
+  if (s < 0 || !drawing.shapes[size_t(s)].has_fill ||
+      (selected_only && !drawing_selected_shapes(drawing)[size_t(s)]))
+  {
+    return false;
+  }
+  if (!fill_overlap(shape_area(drawing, drawing.shapes[size_t(s)], pixel), area)) {
+    return false;
+  }
+  bool empty = false;
+  if (shape_work_in(drawing, s, area, ShapeOp::Subtract, pixel, tolerance, &empty)) {
+    return true;
+  }
+  if (!empty) {
+    return false;
+  }
+  /* All of it erased: it goes (its sub shapes back into the list, under its parent). */
+  const Shape gone = drawing.shapes[size_t(s)];
+  for (Shape &other : drawing.shapes) {
+    if (other.parent == gone.id) {
+      other.parent = gone.parent;
     }
   }
-  drawing.shapes = std::move(kept);
-  remove_curves_left(drawing, gone);
-  return cut;
+  drawing.shapes.erase(drawing.shapes.begin() + s);
+  remove_curves_left(drawing, {gone});
+  drawing_shape_tree_mend(drawing);
+  return true;
 }
 
 }  // namespace oanim

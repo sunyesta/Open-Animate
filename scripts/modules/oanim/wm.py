@@ -685,10 +685,10 @@ def handle_ends_shown(layer, curve=0):
     return [(tuple(a), tuple(b)) for a, b in _oanim.handle_ends_shown(layer.id, int(curve))]
 
 
-def select_click(x, y, zoom=100.0):
+def select_click(x, y, zoom=100.0, shift=False):
     """Test hook: the Select tool's click at document point (x, y) (zoom pixels per unit): the nearest point within
-    reach is picked, or a shown handle clearly nearer than any point."""
-    _oanim.select_click(float(x), float(y), float(zoom))
+    reach is picked (and made the active point), or a shown handle clearly nearer than any point; shift adds."""
+    _oanim.select_click(float(x), float(y), float(zoom), bool(shift))
 
 
 def points_shown(layer):
