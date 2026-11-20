@@ -4271,6 +4271,69 @@ static bool header_toggle(const char *label, bool on, const char *tooltip)
   return pressed;
 }
 
+/* The Select tool's selection modes, drawn as icons (the shape tree mockup's, on a 16 unit grid). */
+enum class ModeIcon { Point, Edge, Shape, Group };
+
+static void mode_icon_draw(ImDrawList *dl, ImVec2 center, float size, ModeIcon icon, ImU32 col, ImU32 bg)
+{
+  const float k = size / 16.0f;
+  const ImVec2 o(std::round(center.x - size * 0.5f), std::round(center.y - size * 0.5f));
+  const auto p = [&](float x, float y) { return ImVec2(o.x + x * k, o.y + y * k); };
+  const ImU32 faint = (col & ~IM_COL32_A_MASK) | (ImU32((col >> IM_COL32_A_SHIFT & 0xFF) / 2) << IM_COL32_A_SHIFT);
+  switch (icon) {
+    case ModeIcon::Point:
+      /* Two points and the line between them, one picked. */
+      dl->AddLine(p(3.0f, 13.0f), p(13.0f, 3.0f), faint, k);
+      dl->AddRectFilled(p(9.5f, 1.5f), p(14.5f, 6.5f), col);
+      dl->AddRectFilled(p(1.5f, 9.5f), p(6.5f, 14.5f), bg);
+      dl->AddRect(p(1.5f, 9.5f), p(6.5f, 14.5f), col, 0.0f, 0, k);
+      break;
+    case ModeIcon::Edge:
+      /* The line between two points picked. */
+      dl->AddLine(p(3.5f, 12.5f), p(12.5f, 3.5f), col, 2.4f * k);
+      for (const ImVec2 at : {p(1.5f, 10.5f), p(10.5f, 1.5f)}) {
+        dl->AddRectFilled(at, at + ImVec2(4.0f * k, 4.0f * k), bg);
+        dl->AddRect(at, at + ImVec2(4.0f * k, 4.0f * k), col, 0.0f, 0, k);
+      }
+      break;
+    case ModeIcon::Shape:
+      dl->AddCircleFilled(p(8.0f, 8.0f), 6.0f * k, col, 32);
+      break;
+    case ModeIcon::Group:
+      /* A shape and its two sub shapes, each ringed in the button's shade. */
+      dl->AddCircleFilled(p(6.5f, 8.0f), 5.0f * k, col, 32);
+      for (const ImVec2 at : {p(11.5f, 5.0f), p(11.5f, 11.0f)}) {
+        dl->AddCircleFilled(at, 3.6f * k, bg, 24);
+        dl->AddCircleFilled(at, 2.4f * k, col, 24);
+      }
+      break;
+  }
+}
+
+/* One of a joined row of `n` icon toggles (`i` from the left), blue when on. */
+static bool header_mode_toggle(const char *id, ModeIcon icon, int i, int n, bool on, const char *tooltip)
+{
+  if (on) {
+    toggle_on_colors_push();
+  }
+  const float h = ImGui::GetFrameHeight();
+  const float size = std::round(h * 14.0f / 21.0f);
+  ui_join_in_row(i, n);
+  const bool pressed = ui_button(id, size + ImGui::GetStyle().FramePadding.x * 2.0f, h);
+  const ImU32 bg = ImGui::GetColorU32(ImGui::IsItemActive()    ? ImGuiCol_ButtonActive
+                                      : ImGui::IsItemHovered() ? ImGuiCol_ButtonHovered
+                                                               : ImGuiCol_Button);
+  if (on) {
+    ImGui::PopStyleColor(3);
+  }
+  const ImVec2 c = (ImGui::GetItemRectMin() + ImGui::GetItemRectMax()) * 0.5f;
+  mode_icon_draw(ImGui::GetWindowDrawList(), c, size, icon, ImGui::GetColorU32(ImGuiCol_Text), bg);
+  if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+    ImGui::SetTooltip("%s", tooltip);
+  }
+  return pressed;
+}
+
 /* The selected shapes' detail level (data/detail.hh): `r_level` -1 when they differ, `r_top` the
  * highest level among them. False when no shape is selected. */
 static bool selected_shapes_detail(Context &C, int *r_level, int *r_top)
@@ -6874,25 +6937,27 @@ static void header_draw(Area &area, Context &C, ImVec2 origin, float width)
     ImGui::SameLine(0, 4);
   }
   if (ts.tool == Tool::Select && editable_points) {
-    if (header_toggle("Points", ts.select_mode == SelectMode::Point, "Select points (1)")) {
+    if (header_mode_toggle("##mode_point", ModeIcon::Point, 0, 4, ts.select_mode == SelectMode::Point,
+                           "Points: select points (1)"))
+    {
       operator_call(C, "mesh.select_mode_point");
     }
-    ImGui::SameLine(0, 1);
-    if (header_toggle("Edges", ts.select_mode == SelectMode::Edge,
-                      "Select edges: clicking a line selects the segment between two points (2)"))
+    ImGui::SameLine(0, UI_JOIN_GAP);
+    if (header_mode_toggle("##mode_edge", ModeIcon::Edge, 1, 4, ts.select_mode == SelectMode::Edge,
+                           "Edges: clicking a line selects the segment between two points (2)"))
     {
       operator_call(C, "mesh.select_mode_edge");
     }
-    ImGui::SameLine(0, 1);
-    if (header_toggle("Shapes", ts.select_mode == SelectMode::Shape,
-                      "Select whole shapes: a click picks the shape under it, again the next one there; a drag on "
-                      "the picked one moves its points, its sub shapes staying put (3)"))
+    ImGui::SameLine(0, UI_JOIN_GAP);
+    if (header_mode_toggle("##mode_shape", ModeIcon::Shape, 2, 4, ts.select_mode == SelectMode::Shape,
+                           "Shapes: a click picks the shape under it, again the next one there; a drag on the picked "
+                           "one moves its points, its sub shapes staying put (3)"))
     {
       operator_call(C, "mesh.select_mode_shape");
     }
-    ImGui::SameLine(0, 1);
-    if (header_toggle("Groups", ts.select_mode == SelectMode::ShapeGroup,
-                      "Select shape groups: a shape with all its sub shapes, moved together (4)"))
+    ImGui::SameLine(0, UI_JOIN_GAP);
+    if (header_mode_toggle("##mode_group", ModeIcon::Group, 3, 4, ts.select_mode == SelectMode::ShapeGroup,
+                           "Shape Groups: a shape with all its sub shapes, moved together (4)"))
     {
       operator_call(C, "mesh.select_mode_shape_group");
     }

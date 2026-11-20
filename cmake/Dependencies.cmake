@@ -102,6 +102,27 @@ elseif(NOT _oanim_text MATCHES "Open Animate: Shift is precise")
   message(WARNING "ImGui's drag code changed: Shift no longer made precise")
 endif()
 
+# Blender's text shadow (its widget style: black at half the text's opacity, a pixel under it). ImGui
+# draws text plainly, so every text it draws gets a copy under it here, when the app turns it on
+# (GOAnimTextShadowAlpha, set by theme_apply_blender). Light text only: under dark text it smudges.
+set(_oanim_draw "${imgui_SOURCE_DIR}/imgui_draw.cpp")
+file(READ "${_oanim_draw}" _oanim_text)
+# Each piece on one line, so the match doesn't hang on the fetched file's line ends. "begin:" is
+# RenderText's first line, the only label of that name in the file.
+set(_oanim_def "void ImFont::RenderText(ImDrawList* draw_list,")
+set(_oanim_vars "float GOAnimTextShadowAlpha = 0.0f, GOAnimTextShadowOffset = 1.0f; // Open Animate: Blender's text shadow\n${_oanim_def}")
+set(_oanim_label "\nbegin:")
+set(_oanim_shadow "\n    if (GOAnimTextShadowAlpha > 0.0f) { const unsigned int a = (col >> IM_COL32_A_SHIFT) & 0xFF, light = ((col >> IM_COL32_R_SHIFT) & 0xFF) + ((col >> IM_COL32_G_SHIFT) & 0xFF) + ((col >> IM_COL32_B_SHIFT) & 0xFF); if (a > 0 && light > 3 * 128) { const float alpha = GOAnimTextShadowAlpha; GOAnimTextShadowAlpha = 0.0f; RenderText(draw_list, size, ImVec2(pos.x, pos.y + GOAnimTextShadowOffset), (ImU32)((float)a * alpha) << IM_COL32_A_SHIFT, clip_rect, text_begin, text_end, wrap_width, flags); GOAnimTextShadowAlpha = alpha; } }\nbegin:")
+string(FIND "${_oanim_text}" "${_oanim_def}" _oanim_at)
+string(FIND "${_oanim_text}" "Open Animate: Blender's text shadow" _oanim_done)
+if(NOT _oanim_at EQUAL -1 AND _oanim_done EQUAL -1)
+  string(REPLACE "${_oanim_def}" "${_oanim_vars}" _oanim_text "${_oanim_text}")
+  string(REPLACE "${_oanim_label}" "${_oanim_shadow}" _oanim_text "${_oanim_text}")
+  file(WRITE "${_oanim_draw}" "${_oanim_text}")
+elseif(_oanim_done EQUAL -1)
+  message(WARNING "ImGui's text drawing changed: no text shadow")
+endif()
+
 # ImGui has no CMake build of its own; compile the core plus the SDL3 and OpenGL 3 backends.
 add_library(oanim_imgui STATIC
   ${imgui_SOURCE_DIR}/imgui.cpp

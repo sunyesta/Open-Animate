@@ -7,8 +7,11 @@ struct ImFont;
 
 namespace oanim {
 
-/* Base font size in pixels at 100% interface scale. */
-inline constexpr float UI_FONT_SIZE = 15.0f;
+/* Base font size in pixels at 100% interface scale, as ImGui measures it (ascent to descent): Inter's, whose
+ * em is then 11 pixels, as Blender's widget text (11 points at 72 dpi). */
+inline constexpr float UI_FONT_SIZE = 11.0f * (1984.0f + 494.0f) / 2048.0f;
+/* A field's height (the font and its frame padding), kept from the Segoe UI days so rows don't move. */
+inline constexpr float UI_FRAME_HEIGHT = 21.0f;
 
 /* Loads the interface and monospace fonts. Call once after creating the ImGui context. */
 void theme_load_fonts();

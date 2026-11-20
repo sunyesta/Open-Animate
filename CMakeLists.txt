@@ -168,6 +168,7 @@ target_link_libraries(OpenAnimate PRIVATE oanim_imgui SDL3::SDL3 pybind11::embed
   mfplat mfreadwrite mfuuid windowscodecs ole32 propsys shell32)
 target_compile_definitions(OpenAnimate PRIVATE
   OANIM_SCRIPTS_DIR="${CMAKE_SOURCE_DIR}/scripts"
+  OANIM_FONTS_DIR="${CMAKE_SOURCE_DIR}/data/fonts"
   OANIM_PYTHON_HOME="${OANIM_PYTHON_ROOT}"
   NOMINMAX
   WIN32_LEAN_AND_MEAN
@@ -190,6 +191,8 @@ add_custom_command(TARGET OpenAnimate POST_BUILD
     "${OANIM_PYTHON_ROOT}/python${Python_VERSION_MAJOR}${Python_VERSION_MINOR}.dll"
     "${OANIM_PYTHON_ROOT}/python3.dll"
     $<TARGET_FILE_DIR:OpenAnimate>
+  # The interface fonts (Inter), so a copy of the build (tools/run_openanimate.ps1) has them.
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/fonts" $<TARGET_FILE_DIR:OpenAnimate>/fonts
 )
 
 enable_testing()

@@ -177,6 +177,10 @@ struct BoxScope {
   std::string id;
   float top = 0.0f;
   ImRect header;
+  /* The window's lowest content before this box, set aside while the box measures its own. */
+  float max_before = 0.0f;
+  /* The window's right edges for content before this box, which it narrows to its padding. */
+  float region_before = 0.0f, work_before = 0.0f;
   ImDrawListSplitter splitter;
   ImDrawList *dl = nullptr;
 };
@@ -213,11 +217,13 @@ static std::vector<std::string> &box_order()
   return order;
 }
 
-/* The room between a box's edges and what's in it. */
+/* The room between a box's edges and what's in it, each side: Blender's panelspace, as its header's margin. */
 static float box_padding()
 {
-  return ImGui::GetStyle().FramePadding.x;
+  return ui_space(8.0f);
 }
+
+static float box_body_extra();
 
 static void box_close()
 {
@@ -227,12 +233,19 @@ static void box_close()
   }
   b.open = false;
   ImGui::Unindent(box_padding());
+  ImGuiWindow *box_window = ImGui::GetCurrentWindow();
+  box_window->ContentRegionRect.Max.x = b.region_before;
+  box_window->WorkRect.Max.x = b.work_before;
   const float pad = ImGui::GetStyle().ItemSpacing.y;
-  const bool body = ImGui::GetCursorScreenPos().y > b.header.Max.y + 1.0f;
-  if (body) {
-    ImGui::Dummy(ImVec2(0.0f, pad * 0.5f));
-  }
-  const float y1 = body ? ImGui::GetCursorScreenPos().y : b.header.Max.y;
+  /* Its content's bottom: the lowest anything in it reached (a list beside short buttons included). */
+  ImGuiWindow *window = ImGui::GetCurrentWindow();
+  const float last = window->DC.CursorMaxPos.y;
+  window->DC.CursorMaxPos.y = std::max(b.max_before, last);
+  /* Something under the header worth a row (an empty table isn't): a folded or empty box is its header alone. */
+  const bool body = last > b.header.Max.y + pad + box_body_extra() + ImGui::GetFontSize() * 0.5f;
+  /* The bottom the same distance under the last row (its table's padding included) as the first is under
+   * the header. */
+  const float y1 = body ? last + box_body_extra() + pad : b.header.Max.y;
   const ImRect rect(ImVec2(b.x0, b.top), ImVec2(b.x1, y1));
   b.splitter.SetCurrentChannel(b.dl, 0);
   b.dl->AddRectFilled(rect.Min, rect.Max, BOX_BG, ImGui::GetStyle().FrameRounding);
@@ -311,40 +324,110 @@ static bool box_open(const std::string &id)
     }
   }
   ImGui::SetCursorScreenPos(ImVec2(b.x0, y));
-  /* Its content keeps off the box's edges. */
+  /* Its content keeps off the box's edges, both sides: whatever fills the width (a table, a full-width button)
+   * stops the padding short of the right one. */
   ImGui::Indent(box_padding());
+  {
+    ImGuiWindow *w = ImGui::GetCurrentWindow();
+    b.region_before = w->ContentRegionRect.Max.x;
+    b.work_before = w->WorkRect.Max.x;
+    w->ContentRegionRect.Max.x = std::min(b.region_before, b.x1 - box_padding());
+    w->WorkRect.Max.x = std::min(b.work_before, b.x1 - box_padding());
+  }
   b.open = true;
   b.id = id;
   b.top = y;
+  /* Measure this box's content alone (box_close puts the window's lowest back). */
+  ImGuiWindow *window = ImGui::GetCurrentWindow();
+  b.max_before = window->DC.CursorMaxPos.y;
+  window->DC.CursorMaxPos.y = y;
   b.dl = ImGui::GetWindowDrawList();
   b.splitter.Split(b.dl, 3);
   b.splitter.SetCurrentChannel(b.dl, 2);
   return true;
 }
 
-/* The header of a box: ImGui's collapsing header on the box's shade, and the grip at its right. */
+/* A box header's margins, as Blender's panelspace: the arrow this far in from the left edge, the grip
+ * from the right, and the title centred in a header as tall as Blender's (PNL_HEADER, 1.25 of a row). */
+static float box_header_margin()
+{
+  return ui_space(8.0f);
+}
+
+static float box_header_height()
+{
+  return std::round(ImGui::GetFrameHeight() * 1.2f);
+}
+
+/* What a box's body adds above its first row and below its last, so they sit the header's margin from it and
+ * from the bottom: the line's spacing and a table row's padding are the rest. */
+static float box_body_extra()
+{
+  const ImGuiStyle &st = ImGui::GetStyle();
+  return std::max(0.0f, box_header_margin() - st.ItemSpacing.y - st.CellPadding.y);
+}
+
+/* Where a box header's title starts, past its arrow. */
+static float box_title_x(const ImRect &header)
+{
+  return header.Min.x + box_header_margin() + ImGui::GetFontSize() + ImGui::GetStyle().ItemInnerSpacing.x + ui_space(2.0f);
+}
+
+/* The grip's dots: their size and spacing, and the room they take at the header's right with the margin. */
+static float box_grip_dot()
+{
+  return ImGui::GetFontSize() * 0.12f;
+}
+
+static float box_grip_width()
+{
+  const float s = box_grip_dot();
+  return box_header_margin() + s * 11.0f;
+}
+
+/* The header of a box, drawn here rather than by ImGui's collapsing header (which runs past the box on
+ * both sides and shades on hover; Blender's doesn't): the arrow and title on the box's shade, the grip at
+ * its right, the same margin each side. Clicking anywhere but the grip folds it. */
 static bool box_header(const char *label, const std::string &id)
 {
-  ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(0, 0, 0, 0));
-  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0xff, 0xff, 0xff, 0x0c));
-  ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(0xff, 0xff, 0xff, 0x14));
-  ImGui::SetNextItemAllowOverlap();
-  const bool open = ImGui::CollapsingHeader(label);
-  ImGui::PopStyleColor(3);
-  g_box.header = ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-  const ImVec2 after = ImGui::GetCursorScreenPos();
-  /* The grip: 4 x 2 dots, as Blender's. */
+  ImGuiContext &g = *GImGui;
+  /* Its fold, from ui_fold_next. */
+  bool open = true;
+  if (g.NextItemData.HasFlags & ImGuiNextItemDataFlags_HasOpen) {
+    open = g.NextItemData.OpenVal;
+    g.NextItemData.HasFlags &= ~ImGuiNextItemDataFlags_HasOpen;
+  }
+  const float height = box_header_height(), margin = box_header_margin();
+  const ImVec2 top(g_box.x0, ImGui::GetCursorScreenPos().y);
+  g_box.header = ImRect(top, ImVec2(g_box.x1, top.y + height));
   const ImRect &h = g_box.header;
-  const float s = ImGui::GetFontSize() * 0.12f, step = s * 3.0f;
-  const ImVec2 grip_min(h.Max.x - step * 4.0f - s * 4.0f, h.Min.y);
+  ImGui::SetCursorScreenPos(top);
+  ImGui::SetNextItemAllowOverlap();
+  if (ImGui::InvisibleButton((id + "##fold").c_str(), ImVec2(h.GetWidth() - box_grip_width(), height))) {
+    open = !open;
+  }
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const float font = ImGui::GetFontSize();
+  const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
+  /* ImGui's arrow sits a fifth of its box in: its left point the margin in, as the grip's last dot is. */
+  ImGui::RenderArrow(dl, ImVec2(h.Min.x + margin - font * 0.2f, h.Min.y + (height - font) * 0.5f), text,
+                     open ? ImGuiDir_Down : ImGuiDir_Right, 1.0f);
+  const char *end = ImGui::FindRenderedTextEnd(label);
+  const ImVec2 text_size = ImGui::CalcTextSize(label, end);
+  const ImVec2 text_at(box_title_x(h), h.Min.y + (height - text_size.y) * 0.5f);
+  ImGui::RenderTextClipped(text_at, ImVec2(h.Max.x - box_grip_width(), h.Max.y), label, end, &text_size);
+  const ImVec2 after = ImGui::GetCursorScreenPos();
+  /* The grip: 4 x 2 dots, as Blender's, its last dot the margin from the right edge. */
+  const float s = box_grip_dot(), step = s * 3.0f;
+  const ImVec2 grip_min(h.Max.x - box_grip_width(), h.Min.y);
   ImGui::SetCursorScreenPos(grip_min);
   ImGui::InvisibleButton((id + "##grip").c_str(), ImVec2(h.Max.x - grip_min.x, h.GetHeight()));
   const bool hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
-  ImDrawList *dl = ImGui::GetWindowDrawList();
   const float cy = h.GetCenter().y;
+  const float first = h.Max.x - margin - s - step * 3.0f;
   for (int col = 0; col < 4; col++) {
     for (int row = 0; row < 2; row++) {
-      dl->AddCircleFilled(ImVec2(grip_min.x + s * 2.0f + step * float(col), cy + (row == 0 ? -step : step) * 0.5f), s,
+      dl->AddCircleFilled(ImVec2(first + step * float(col), cy + (row == 0 ? -step : step) * 0.5f), s,
                           hot ? ImGui::GetColorU32(ImGuiCol_Text) : BOX_GRIP);
     }
   }
@@ -360,7 +443,8 @@ static bool box_header(const char *label, const std::string &id)
     ImGui::TextUnformatted(shown.c_str());
     ImGui::EndDragDropSource();
   }
-  ImGui::SetCursorScreenPos(after);
+  /* The rows start the margin under the header (the line's spacing and a table row's padding make the rest). */
+  ImGui::SetCursorScreenPos(after + ImVec2(0.0f, box_body_extra()));
   return open;
 }
 
@@ -386,20 +470,15 @@ void ui_boxes_end()
   g_box.active = false;
 }
 
-/* The room a box's right edge keeps from its content. */
-static float box_inset()
-{
-  return g_box.open ? box_padding() : 0.0f;
-}
-
 bool ui_subpanel_begin(const std::string &key, const std::string &label, bool default_open)
 {
   const std::string fold = ui_fold_scope() + "/" + key;
   ui_fold_next(fold, default_open);
   const bool in_table = ImGui::GetCurrentTable() != nullptr;
+  /* No shade on hover or press, as Blender's sub-panel headers. */
   ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(0, 0, 0, 0));
-  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0xff, 0xff, 0xff, 0x0c));
-  ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(0xff, 0xff, 0xff, 0x14));
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(0, 0, 0, 0));
   bool open;
   if (in_table) {
     ImGui::TableNextRow();
@@ -508,7 +587,8 @@ static bool panel_begin(const char *title, const std::string &header, unsigned i
   }
   std::string label = header.empty() ? std::string(title) : header + "###" + title;
   /* A checkbox in the header, as Blender's Deform panel has: between the arrow and the title. */
-  const float check_w = check ? ImGui::GetFrameHeight() : 0.0f;
+  /* Blender's checkbox size (ui_checkbox's), 14 of a 20 pixel row. */
+  const float check_w = check ? std::round(ImGui::GetFrameHeight() * 14.0f / 20.0f) : 0.0f;
   if (check) {
     const float space = std::max(1.0f, ImGui::CalcTextSize(" ").x);
     label = std::string(size_t(std::ceil((check_w + ImGui::GetStyle().ItemInnerSpacing.x) / space)), ' ') + title +
@@ -525,11 +605,13 @@ static bool panel_begin(const char *title, const std::string &header, unsigned i
     const ImVec2 after = ImGui::GetCursorScreenPos();
     const ImRect h = boxed ? g_box.header : ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
     const ImGuiStyle &st = ImGui::GetStyle();
-    /* Past the arrow: CollapsingHeader puts its text after the frame padding, the arrow and the inner spacing. */
-    const float x = h.Min.x + st.FramePadding.x + ImGui::GetFontSize() + st.ItemInnerSpacing.x;
+    /* Past the arrow: where the title starts (CollapsingHeader's: after the frame padding, the arrow and the
+     * inner spacing). */
+    const float x = boxed ? box_title_x(h) : h.Min.x + st.FramePadding.x + ImGui::GetFontSize() + st.ItemInnerSpacing.x;
     ImGui::SetCursorScreenPos(ImVec2(x, h.GetCenter().y - check_w * 0.5f));
     ImGui::PushID(title);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(st.FramePadding.y, st.FramePadding.y));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                        ImVec2(st.FramePadding.y, (check_w - ImGui::GetFontSize()) * 0.5f));
     *r_toggled = ImGui::Checkbox("##header_check", check);
     if (check_tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip("%s", check_tooltip);
@@ -544,7 +626,7 @@ static bool panel_begin(const char *title, const std::string &header, unsigned i
     const ImRect hr = boxed ? g_box.header : ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
     const float hh = hr.GetHeight();
     /* Left of a box's grip. */
-    const float grip_w = boxed ? ImGui::GetFontSize() * 0.12f * 16.0f : 0.0f;
+    const float grip_w = boxed ? box_grip_width() : 0.0f;
     const ImVec2 at(hr.Max.x - grip_w - hh - 2.0f, hr.Min.y);
     ImGui::SetCursorScreenPos(at);
     ImGui::PushID(title);
@@ -569,7 +651,7 @@ static bool panel_begin(const char *title, const std::string &header, unsigned i
   if (!open) {
     return false;
   }
-  if (!ImGui::BeginTable(title, 2, ImGuiTableFlags_SizingStretchProp, ImVec2(-box_inset(), 0.0f))) {
+  if (!ImGui::BeginTable(title, 2, ImGuiTableFlags_SizingStretchProp, ImVec2(0.0f, 0.0f))) {
     return false;
   }
   ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch, 0.4f);

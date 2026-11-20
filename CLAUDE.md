@@ -75,7 +75,10 @@ remove them when the checks are done.
 - Panel spacing comes from rules, not numbers picked at each widget (Blender's; `src/editors/ui.hh`): `ui_row_label`
   right-aligns labels, `ui_group_gap` between groups of rows, `ui_checkbox` (Blender-sized, its name after the box, no
   label in the label column) with `ui_checks_row`, fields that belong together joined `UI_JOIN_GAP` apart with only the
-  outer corners round (`ui_join_next`, `ui_join_in_row`, `ui_button`), typed text in dark fields (`ui_input_text`).
+  outer corners round (`ui_join_next`, `ui_join_in_row`, `ui_button`), typed text in dark fields (`ui_input_text`). A panel's box keeps everything in it 8 pixels off both sides (its
+  content region narrowed in `box_open`). Text is Blender's: Inter (`data/fonts`, copied next to the exe) at an 11 pixel
+  em, rows kept 21 tall (`UI_FONT_SIZE`, `UI_FRAME_HEIGHT` in `src/ui/theme.hh`), with its shadow (ImGui's text drawing
+  patched in `cmake/Dependencies.cmake`, `GOAnimTextShadowAlpha`).
 - Use ImGui wherever it can do the job; write custom widgets on top of it only where Blender's look
   or behaviour differs.
 - ImGui gotcha: in a docked window `SetCursorPos()` is measured from above the tab bar and gets

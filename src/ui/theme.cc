@@ -1,9 +1,19 @@
 #include "ui/theme.hh"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <string>
+
+#include <SDL3/SDL_filesystem.h>
 
 #include "imgui.h"
+
+/* Blender's text shadow, drawn by ImGui's text (patched in cmake/Dependencies.cmake): this much of the text's
+ * opacity in black, this far under it. */
+extern float GOAnimTextShadowAlpha;
+extern float GOAnimTextShadowOffset;
 
 namespace oanim {
 
@@ -16,19 +26,38 @@ static ImVec4 rgb(uint32_t hex, float alpha = 1.0f)
 static ImFont *g_font_mono = nullptr;
 static ImFont *g_font_bold = nullptr;
 
+/* A font of data/fonts: next to the executable in a build (copied there), else in the source tree. */
+static std::string font_file(const char *name)
+{
+  if (const char *base = SDL_GetBasePath()) {
+    const std::filesystem::path next = std::filesystem::path(reinterpret_cast<const char8_t *>(base)) / "fonts" / name;
+    if (std::filesystem::exists(next)) {
+      return next.string();
+    }
+  }
+  return (std::filesystem::path(reinterpret_cast<const char8_t *>(OANIM_FONTS_DIR)) / name).string();
+}
+
+static ImFont *font_add(const std::string &path, ImFont *fallback)
+{
+  return std::filesystem::exists(path) ? ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), UI_FONT_SIZE)
+                                       : fallback;
+}
+
 void theme_load_fonts()
 {
   ImGuiIO &io = ImGui::GetIO();
-  /* Blender uses Inter, but ships it as .woff2, which ImGui can't read. Segoe UI is the
-   * closest font every Windows machine has. The first font added is the default. */
-  const char *font_path = "C:/Windows/Fonts/segoeui.ttf";
-  ImFont *ui_font = std::filesystem::exists(font_path) ? io.Fonts->AddFontFromFileTTF(font_path, UI_FONT_SIZE)
-                                                       : io.Fonts->AddFontDefault();
-  const char *mono_path = "C:/Windows/Fonts/consola.ttf";
-  g_font_mono = std::filesystem::exists(mono_path) ? io.Fonts->AddFontFromFileTTF(mono_path, UI_FONT_SIZE)
-                                                   : ui_font;
-  const char *bold_path = "C:/Windows/Fonts/segoeuib.ttf";
-  g_font_bold = std::filesystem::exists(bold_path) ? io.Fonts->AddFontFromFileTTF(bold_path, UI_FONT_SIZE) : ui_font;
+  /* Blender's interface font, Inter (data/fonts, from its own release: Blender ships it as .woff2, which ImGui
+   * can't read). Segoe UI where it's missing. The first font added is the default. */
+  ImFont *ui_font = font_add(font_file("Inter-Regular.ttf"), nullptr);
+  if (!ui_font) {
+    ui_font = font_add("C:/Windows/Fonts/segoeui.ttf", nullptr);
+  }
+  if (!ui_font) {
+    ui_font = io.Fonts->AddFontDefault();
+  }
+  g_font_mono = font_add("C:/Windows/Fonts/consola.ttf", ui_font);
+  g_font_bold = font_add(font_file("Inter-Bold.ttf"), ui_font);
 }
 
 ImFont *theme_font_mono()
@@ -43,6 +72,9 @@ ImFont *theme_font_bold()
 
 void theme_apply_blender(float ui_scale)
 {
+  /* Blender's widget text: its shadow black at half the text's opacity, a pixel under it (shadow 1, shady -1). */
+  GOAnimTextShadowAlpha = 0.5f;
+  GOAnimTextShadowOffset = std::max(1.0f, std::round(ui_scale));
   ImGuiStyle style;
   ImVec4 *c = style.Colors;
 
@@ -123,6 +155,8 @@ void theme_apply_blender(float ui_scale)
   style.WindowMenuButtonPosition = ImGuiDir_None;
 
   style.ScaleAllSizes(ui_scale);
+  /* Rows UI_FRAME_HEIGHT tall whatever the font's size (set after the scaling, which rounds paddings down). */
+  style.FramePadding.y = (UI_FRAME_HEIGHT - UI_FONT_SIZE) * 0.5f * ui_scale;
   style.FontSizeBase = UI_FONT_SIZE;
   style.FontScaleDpi = ui_scale;
 
