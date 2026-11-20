@@ -760,7 +760,7 @@ void ui_driver_window_draw(Context &C)
     const bool can = d->two_way || driver_two_way_factor(*d, &factor, &why);
     bool linked = d->two_way;
     ImGui::BeginDisabled(!can);
-    if (ImGui::Checkbox("2-Way Linked", &linked)) {
+    if (ui_checkbox("2-Way Linked", &linked)) {
       if (!linked) {
         operator_call(C, "anim.driver_two_way", [&] {
           OpArgs a = target_args;
@@ -821,14 +821,7 @@ void ui_driver_window_draw(Context &C)
     if (ImGui::BeginTable("##link", 2, ImGuiTableFlags_SizingStretchProp)) {
       ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, 90.0f);
       ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
-      const auto row = [](const char *label) {
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(label);
-        ImGui::TableSetColumnIndex(1);
-        ImGui::SetNextItemWidth(-FLT_MIN);
-      };
+      const auto row = [](const char *label) { ui_row_label(label); };
       row("Linked With");
       ImGui::TextUnformatted(driver_ref_label(doc, d->vars.front().source).c_str());
       row("Factor");
@@ -841,7 +834,7 @@ void ui_driver_window_draw(Context &C)
         ImGui::SetTooltip("How far this moves for each step the other side moves, from their rests (never 0)");
       }
       row("");
-      if (ImGui::Checkbox("Flip", &d->flip)) {
+      if (ui_checkbox("Flip", &d->flip)) {
         done = true;
       }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -875,14 +868,7 @@ void ui_driver_window_draw(Context &C)
   if (ImGui::BeginTable("##driver", 2, ImGuiTableFlags_SizingStretchProp)) {
     ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, 90.0f);
     ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
-    const auto row = [](const char *label) {
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted(label);
-      ImGui::TableSetColumnIndex(1);
-      ImGui::SetNextItemWidth(-FLT_MIN);
-    };
+    const auto row = [](const char *label) { ui_row_label(label); };
     row("Type");
     static const char *const TYPES[] = {"Expression", "Average", "Sum", "Min", "Max"};
     int type = int(d->type);
@@ -892,7 +878,7 @@ void ui_driver_window_draw(Context &C)
     }
     if (d->type == DriverType::Expression) {
       row("Expression");
-      ImGui::InputText("##expression", &d->expression);
+      ui_input_text("##expression", &d->expression);
       done = done || ImGui::IsItemDeactivatedAfterEdit();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
         ImGui::SetTooltip("Variables by name, frame, pi; + - * / %% ** ; comparisons, and/or/not, a if test else b;\n"
@@ -920,7 +906,7 @@ void ui_driver_window_draw(Context &C)
     DriverVar &v = d->vars[i];
     ImGui::PushID(int(i));
     ImGui::SetNextItemWidth(70.0f);
-    ImGui::InputText("##name", &v.name);
+    ui_input_text("##name", &v.name);
     done = done || ImGui::IsItemDeactivatedAfterEdit();
     ImGui::SameLine();
     /* The source's dropdowns fill a strip that leaves room for the remove button. */
@@ -969,15 +955,15 @@ void ui_driver_window_draw(Context &C)
 
   /* Remap: a range of the result onto another. */
   ImGui::Spacing();
-  if (ImGui::Checkbox("Remap", &d->remap)) {
+  if (ui_checkbox("Remap", &d->remap)) {
     done = true;
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
     ImGui::SetTooltip("Map a range of the result onto another: an angle of 0..90 onto an opacity of 1..0");
   }
   if (d->remap) {
-    ImGui::SameLine();
-    if (ImGui::Checkbox("Clamp", &d->clamp)) {
+    ImGui::SameLine(0.0f, ui_space(UI_CHECK_GAP));
+    if (ui_checkbox("Clamp", &d->clamp)) {
       done = true;
     }
     const float half = (ImGui::GetContentRegionAvail().x - 60.0f - ImGui::GetStyle().ItemSpacing.x) * 0.5f;

@@ -111,6 +111,7 @@ static void document_tab(Context &C)
       }
     });
     ui_prop(C, ptr, "fps", path);
+    ui_group_gap();
     float rgba[4] = {C.document->background.r, C.document->background.g, C.document->background.b, 1.0f};
     ui_driver_next(0, "background");
     if (ui_color(C, "Background", rgba, "Background Color")) {
@@ -138,6 +139,7 @@ static void document_tab(Context &C)
       key_next(C, document_simulation(*C.document), {setting});
       ui_prop(C, ptr, setting, path);
     }
+    ui_group_gap();
     ui_prop(C, ptr, "simulation_start", path);
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(1);
@@ -263,7 +265,7 @@ static void bone_collections_panel(Context &C, Layer &armature)
       if (ImGui::IsWindowAppearing() || !ImGui::IsAnyItemActive()) {
         ImGui::SetKeyboardFocusHere();
       }
-      ImGui::InputText("##rename", &st.rename_text, ImGuiInputTextFlags_AutoSelectAll);
+      ui_input_text("##rename", &st.rename_text, ImGuiInputTextFlags_AutoSelectAll);
       if (ImGui::IsItemDeactivated()) {
         if (!st.rename_text.empty() && st.rename_text != name) {
           operator_call(C, "armature.collection_set", {{"collection", name}, {"name", st.rename_text}});
@@ -473,7 +475,7 @@ static void bone_collections_panel(Context &C, Layer &armature)
   }
   if (st.filter_open) {
     ImGui::SetNextItemWidth(list_w);
-    ImGui::InputTextWithHint("##filter_text", "Filter by name", &st.filter);
+    ui_input_text_hint("##filter_text", "Filter by name", &st.filter);
   }
 
   ImGui::Spacing();
@@ -515,7 +517,7 @@ static void own_action_row(Context &C, Layer &armature, const std::string &now, 
   const int buttons = now.empty() ? (mirror ? 2 : 1) : 2;
   ImGui::SetNextItemWidth(-(h + spacing) * float(buttons));
   std::string shown = now;
-  ImGui::InputTextWithHint("##action", "None", &shown, ImGuiInputTextFlags_ReadOnly);
+  ui_input_text_hint("##action", "None", &shown, ImGuiInputTextFlags_ReadOnly);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
     ImGui::SetTooltip("%s", field_tip);
   }
@@ -814,14 +816,6 @@ static void bone_relations_panel(Context &C, Layer &armature)
   if (!active || !ui_panel_begin("Relations")) {
     return;
   }
-  const auto label = [](const char *text) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(text);
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-1);
-  };
   const bool setup = doc.frame_current == 0;
   const std::string bone_name = active->name;
   const auto relations_set = [&](const char *key, const std::string &value) {
@@ -841,7 +835,7 @@ static void bone_relations_panel(Context &C, Layer &armature)
                                    : parent     ? parent->name
                                                 : std::string("None");
   /* A controller's parent carries its box. */
-  label(bone_is_controller(*active) ? "Box Parent" : "Parent");
+  ui_row_label(bone_is_controller(*active) ? "Box Parent" : "Parent");
   ImGui::BeginDisabled(!setup);
   ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - 2.0f);
   if (ImGui::BeginCombo("##bone_parent", parent_shown.c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -851,7 +845,7 @@ static void bone_relations_panel(Context &C, Layer &armature)
       ImGui::SetKeyboardFocusHere();
     }
     ImGui::SetNextItemWidth(-1);
-    const bool entered = ImGui::InputTextWithHint("##search", "Search bones", &search, ImGuiInputTextFlags_EnterReturnsTrue);
+    const bool entered = ui_input_text_hint("##search", "Search bones", &search, ImGuiInputTextFlags_EnterReturnsTrue);
     std::string needle = search;
     std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
     const auto matches = [&](const std::string &name) {
@@ -939,10 +933,10 @@ static void bone_relations_panel(Context &C, Layer &armature)
   }
   parent = bone_find(armature, active->parent);
 
-  label("");
+  ui_checks_row();
   ImGui::BeginDisabled(!setup || !parent);
   bool connected = active->connected;
-  if (ImGui::Checkbox("Connected", &connected)) {
+  if (ui_checkbox("Connected", &connected)) {
     relations_set("connected", connected ? "1" : "0");
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -955,10 +949,11 @@ static void bone_relations_panel(Context &C, Layer &armature)
   /* A 2 Axis Controller's knob: riding the box, or independent, keeping its place or riding its Knob Parent. */
   if (bone_is_controller(*active)) {
     active = bone_find(armature, own);
-    label("");
+    ui_group_gap();
+    ui_checks_row();
     ImGui::BeginDisabled(!setup);
     bool independent = active->controller_knob_independent;
-    if (ImGui::Checkbox("Knob Is Independent", &independent)) {
+    if (ui_checkbox("Knob Is Independent", &independent)) {
       relations_set("knob_independent", independent ? "1" : "0");
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -971,7 +966,7 @@ static void bone_relations_panel(Context &C, Layer &armature)
     active = bone_find(armature, own);
     if (active && active->controller_knob_independent) {
       const Bone *knob_parent = bone_find(armature, active->controller_knob_parent);
-      label("Knob Parent");
+      ui_row_label("Knob Parent");
       ImGui::BeginDisabled(!setup);
       ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - 2.0f);
       if (ImGui::BeginCombo("##knob_parent", knob_parent ? knob_parent->name.c_str() : "None", ImGuiComboFlags_HeightLarge)) {
@@ -981,7 +976,7 @@ static void bone_relations_panel(Context &C, Layer &armature)
           ImGui::SetKeyboardFocusHere();
         }
         ImGui::SetNextItemWidth(-1);
-        const bool entered = ImGui::InputTextWithHint("##search", "Search bones", &search, ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool entered = ui_input_text_hint("##search", "Search bones", &search, ImGuiInputTextFlags_EnterReturnsTrue);
         std::string needle = search;
         std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
         if (needle.empty() && ImGui::Selectable("None", knob_parent == nullptr)) {
@@ -1041,12 +1036,13 @@ static void bone_relations_panel(Context &C, Layer &armature)
     }
   }
 
+  ui_group_gap();
   /* Under a 2 Axis Controller: from its knob (moving and turning with it), or riding the box. */
   if (parent && bone_is_controller(*parent)) {
     active = bone_find(armature, own);
-    label("");
+    ui_checks_row();
     bool follow = active->follow_knob;
-    if (ImGui::Checkbox("Follow Knob", &follow)) {
+    if (ui_checkbox("Follow Knob", &follow)) {
       relations_set("follow_knob", follow ? "1" : "0");
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -1058,9 +1054,9 @@ static void bone_relations_panel(Context &C, Layer &armature)
   /* Its parent stretched (Alt, or scaled along its length): it keeps its distance from the parent's nearer end. */
   active = bone_find(armature, own);
   if (parent && !bone_is_controller(*parent)) {
-    label("");
+    ui_checks_row();
     bool keep_end = active->keep_end_distance;
-    if (ImGui::Checkbox("Keep End Distance", &keep_end)) {
+    if (ui_checkbox("Keep End Distance", &keep_end)) {
       relations_set("keep_end_distance", keep_end ? "1" : "0");
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -1070,9 +1066,9 @@ static void bone_relations_panel(Context &C, Layer &armature)
   }
 
   active = bone_find(armature, own);
-  label("");
+  ui_checks_row();
   bool local_location = active->local_location;
-  if (ImGui::Checkbox("Local Location", &local_location)) {
+  if (ui_checkbox("Local Location", &local_location)) {
     relations_set("local_location", local_location ? "1" : "0");
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -1081,11 +1077,11 @@ static void bone_relations_panel(Context &C, Layer &armature)
   }
 
   active = bone_find(armature, own);
-  label("");
+  ui_checks_row();
   ImGui::BeginDisabled(!parent);
   bool inherit_rotation = active->inherit_rotation;
   bool *keep = nullptr;
-  if (ImGui::Checkbox("Inherit Rotation", &inherit_rotation)) {
+  if (ui_checkbox("Inherit Rotation", &inherit_rotation)) {
     keep = relations_set("inherit_rotation", inherit_rotation ? "1" : "0");
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -1093,7 +1089,7 @@ static void bone_relations_panel(Context &C, Layer &armature)
                       "Independent Angle). Its head still goes where the parent takes it");
   }
   active = bone_find(armature, own);
-  label("Inherit Scale");
+  ui_row_label("Inherit Scale");
   const char *scales[] = {"Full", "Uniform", "None"};
   const char *scale_ids[] = {"FULL", "UNIFORM", "NONE"};
   const int scale = int(active->inherit_scale);
@@ -1113,9 +1109,9 @@ static void bone_relations_panel(Context &C, Layer &armature)
   (void)keep;
   /* Keep Animation for the two above: off by default, kept while Open Animate is open. */
   bool *keep_animation = relations_set_keep_flag();
-  label("");
+  ui_checks_row();
   ImGui::BeginDisabled(!parent);
-  ImGui::Checkbox("Keep Animation##relations", keep_animation);
+  ui_checkbox("Keep Animation##relations", keep_animation);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
     ImGui::SetTooltip("Changing Inherit Rotation or Scale keeps every keyed frame of every action looking as it did:\n"
                       "the bone's angle and scale are keyed back there");
@@ -1130,7 +1126,8 @@ static void bone_relations_panel(Context &C, Layer &armature)
     const Layer *swap_layer = active->swap_layer ? layer_find(doc, active->swap_layer) : nullptr;
     const Bone *swap_bone = swap_layer ? bone_find(*swap_layer, active->swap_bone) : nullptr;
     const std::string now = swap_bone ? swap_layer->name + ": " + swap_bone->name : "None";
-    label("Stands In For");
+    ui_group_gap();
+    ui_row_label("Stands In For");
     std::string pick_layer, pick_bone;
     bool picked = false;
     if (ImGui::BeginCombo("##stands_in_for", now.c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -1162,7 +1159,7 @@ static void bone_relations_panel(Context &C, Layer &armature)
       operator_call(C, "armature.bone_swap_set", {{"bone", bone_name}, {"layer", pick_layer}, {"target", pick_bone}});
     }
     if (swap_bone) {
-      label("");
+      ui_row_label("");
       if (ImGui::Button("Link All Channels")) {
         operator_call(C, "armature.bone_link_all", {{"bone", bone_name}});
       }
@@ -1402,7 +1399,7 @@ static void controller_spots_panel_body(Context &C, Layer &armature, const Bone 
       if (ImGui::IsWindowAppearing()) {
         ImGui::SetKeyboardFocusHere();
       }
-      if (ImGui::InputText("##rename", &st.rename_text, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+      if (ui_input_text("##rename", &st.rename_text, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
         operator_call(C, "armature.controller_spot_rename", {bone_arg, {"name", st.menu}, {"to", st.rename_text}});
         ImGui::CloseCurrentPopup();
       }
@@ -1425,7 +1422,7 @@ static void controller_spots_panel_body(Context &C, Layer &armature, const Bone 
       st.name_text = on;
       st.name_of = on;
     }
-    ImGui::InputText("##spot_name", &st.name_text);
+    ui_input_text("##spot_name", &st.name_text);
     st.editing_name = ImGui::IsItemActive();
     if (ImGui::IsItemDeactivatedAfterEdit() && st.name_text != on) {
       operator_call(C, "armature.controller_spot_rename", {bone_arg, {"name", on}, {"to", st.name_text}});
@@ -1543,17 +1540,9 @@ static void bone_actions_panel(Context &C, Layer &armature)
   if (!active || !ui_panel_begin("Actions")) {
     return;
   }
-  const auto label = [](const char *text) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(text);
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-1);
-  };
   if (bone_is_controller(*active)) {
     for (int side = 0; side < CONTROLLER_SIDES; side++) {
-      label(controller_side_name(side));
+      ui_row_label(controller_side_name(side));
       controller_side_row(C, armature, *active, side);
     }
     ui_panel_end();
@@ -1561,7 +1550,7 @@ static void bone_actions_panel(Context &C, Layer &armature)
   }
   const Document &doc = *C.document;
   const BoneTurnSlots slots = bone_turn_slots(doc, armature, *active);
-  label("Turns");
+  ui_row_label("Turns");
   if (ImGui::BeginCombo("##turns", slots.full_turn ? "Full Turn" : "Both Ways")) {
     if (ImGui::Selectable("Both Ways", !slots.full_turn)) {
       operator_call(C, "armature.bone_turns", {{"mode", "BOTH"}});
@@ -1581,7 +1570,7 @@ static void bone_actions_panel(Context &C, Layer &armature)
     ImGui::EndCombo();
   }
   for (int slot = 0; slot < (slots.full_turn ? 1 : 2); slot++) {
-    label(slots.full_turn ? "Full Turn" : slot == 0 ? "Counterclockwise" : "Clockwise");
+    ui_row_label(slots.full_turn ? "Full Turn" : slot == 0 ? "Counterclockwise" : "Clockwise");
     bone_turn_row(C, armature, slots, slot);
   }
   ui_panel_end();
@@ -1654,7 +1643,7 @@ static void bone_fixes_panel(Context &C, Layer &armature)
       if (ImGui::IsWindowAppearing() || !ImGui::IsAnyItemActive()) {
         ImGui::SetKeyboardFocusHere();
       }
-      ImGui::InputText("##rename", &st.rename_text, ImGuiInputTextFlags_AutoSelectAll);
+      ui_input_text("##rename", &st.rename_text, ImGuiInputTextFlags_AutoSelectAll);
       if (ImGui::IsItemDeactivated()) {
         if (!st.rename_text.empty() && st.rename_text != name) {
           operator_call(C, "anim.action_rename", {layer_arg, {"name", name}, {"to", st.rename_text}});
@@ -1771,13 +1760,6 @@ static void bone_fixes_panel(Context &C, Layer &armature)
     const std::string name = fix->name;
     ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, h * 3.6f);
     ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
-    const auto label = [](const char *text) {
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted(text);
-      ImGui::TableSetColumnIndex(1);
-    };
     /* The bones it follows, each with the ways it goes; x lets go of one. */
     const std::vector<uint64_t> follows = fix->follows;
     bool first = true;
@@ -1786,7 +1768,7 @@ static void bone_fixes_panel(Context &C, Layer &armature)
       if (!b) {
         continue;
       }
-      label(first ? "Follows" : "");
+      ui_row_label(first ? "Follows" : "");
       first = false;
       ImGui::PushID(int(id));
       const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1812,7 +1794,7 @@ static void bone_fixes_panel(Context &C, Layer &armature)
                              : "Stop following it (its keys in the fix go with it)");
       ImGui::PopID();
     }
-    label(first ? "Follows" : "");
+    ui_row_label(first ? "Follows" : "");
     const bool can_add = std::any_of(selected.begin(), selected.end(), [&](uint64_t id) {
       return std::find(follows.begin(), follows.end(), id) == follows.end();
     });
@@ -1825,7 +1807,7 @@ static void bone_fixes_panel(Context &C, Layer &armature)
     /* Where it starts and ends: a click opens it there. */
     const BoneFixPlay play = bone_fix_play(armature, *fix, open);
     for (const bool start : {true, false}) {
-      label(start ? "Starts" : "Ends");
+      ui_row_label(start ? "Starts" : "Ends");
       const float frame = start ? play.start : play.end;
       const std::string pose = bone_fix_pose_label(armature, *fix, open, frame);
       const std::string on = "frame " + std::to_string(int(std::lround(frame)));
@@ -1845,8 +1827,7 @@ static void bone_fixes_panel(Context &C, Layer &armature)
       ImGui::PopID();
     }
     /* How it fades as its bones leave its line. */
-    label("Fade");
-    ImGui::SetNextItemWidth(-1.0f);
+    ui_row_label("Fade");
     const bool smooth = fix->fade == BoneFixFade::Smooth;
     if (ImGui::BeginCombo("##fade", smooth ? "Smooth" : "Linear")) {
       if (ImGui::Selectable("Linear", !smooth)) {
@@ -1888,14 +1869,6 @@ static void bone_bendy_panel(Context &C, Layer &armature)
   if (!open) {
     return;
   }
-  const auto label = [](const char *text) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(text);
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-1);
-  };
   const std::string bone_path = "bones[\"" + active->name + "\"].";
   if (bone_curve_has(*active)) {
     const size_t ai = size_t(active - armature.bones.data());
@@ -1906,7 +1879,7 @@ static void bone_bendy_panel(Context &C, Layer &armature)
     float *tail_reach = kid >= 0 ? &tail_owner->curve_parent_reach : &tail_owner->curve_tail_reach;
     const auto reach_field = [&](const char *name, const std::string &path, float *value, const char *id) {
       const int state = layer_key_state(armature, {path}, doc.frame_current);
-      label(name);
+      ui_row_label(name);
       ImGui::SetNextItemWidth(-ui_key_button_width());
       const int pushed = ui_key_tint_push(state);
       ui_drag_float(id, value, 0.01f, 0.0f, 3.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
@@ -1926,7 +1899,7 @@ static void bone_bendy_panel(Context &C, Layer &armature)
     };
     reach_field("Curve Head", bone_path + "curve_head_reach", &active->curve_head_reach, "##curve_head_reach");
     reach_field("Curve Tail", tail_path, tail_reach, "##curve_tail_reach");
-    label("");
+    ui_row_label("");
     if (ImGui::Button("Reset Curve", ImVec2(-1, 0))) {
       operator_call(C, "armature.curve_reset", {{"bone", active->name}});
     }
@@ -1946,19 +1919,11 @@ static void bone_panel(Context &C, Layer &armature)
     return;
   }
   if (active) {
-    const auto label = [](const char *text) {
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted(text);
-      ImGui::TableSetColumnIndex(1);
-      ImGui::SetNextItemWidth(-1);
-    };
-    label("Name");
+    ui_row_label("Name");
     /* Its action bone actions are named after it: they (and the fixes they drive) follow a rename. */
     static std::string renaming_from;
     const std::string name_before = active->name;
-    ImGui::InputText("##bone_name", &active->name);
+    ui_input_text("##bone_name", &active->name);
     if (ImGui::IsItemActivated()) {
       renaming_from = name_before;
     }
@@ -1982,7 +1947,7 @@ static void bone_panel(Context &C, Layer &armature)
       ui_panel_end();
       return;
     }
-    label("Type");
+    ui_row_label("Type");
     const bool pin = bone_is_pin(*active), controller = bone_is_controller(*active);
     if (ImGui::BeginCombo("##bone_type", controller ? "2 Axis Controller" : pin ? "Pin" : "Regular")) {
       if (ImGui::Selectable("Regular", !controller && !pin)) {
@@ -2006,12 +1971,13 @@ static void bone_panel(Context &C, Layer &armature)
       ui_panel_end();
       return;
     }
+    ui_group_gap();
     float degrees = active->angle * 180.0f / PI;
     const std::string bone_path = "bones[\"" + active->name + "\"].";
     /* A bone field with its keyframe button. */
     const auto keyed_field = [&](const char *name, const std::string &channel, auto &&field) {
       const int state = layer_key_state(armature, {bone_path + channel}, doc.frame_current);
-      label(name);
+      ui_row_label(name);
       ImGui::SetNextItemWidth(-ui_key_button_width());
       const int pushed = ui_key_tint_push(state);
       const int driven = ui_driver_field_begin(C, armature.id, bone_path + channel, -1);
@@ -2066,8 +2032,8 @@ static void bone_panel(Context &C, Layer &armature)
           }
         });
       }
-      label("");
-      if (ImGui::Checkbox("Contain Knob in Box", &active->controller_contain_knob)) {
+      ui_checks_row();
+      if (ui_checkbox("Contain Knob in Box", &active->controller_contain_knob)) {
         C.undo->push("Contain Knob in Box", doc);
       }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -2086,7 +2052,7 @@ static void bone_panel(Context &C, Layer &armature)
       float2 head = pose ? pose->head : active->position, tail = pose ? pose->tail : active->position;
       const Bone *above = active->connected ? bone_find(armature, active->parent) : nullptr;
       const BonePose *above_pose = above ? bone_pose_find(poses, above->id) : nullptr;
-      label("Head");
+      ui_row_label("Head");
       if (ui_drag_float2("##bone_head", &head.x, 0.005f, -10000.0f, 10000.0f, "%.3f")) {
         std::map<uint64_t, std::pair<float2, float2>> targets{{active->id, {head, tail}}};
         if (above_pose) {
@@ -2103,7 +2069,7 @@ static void bone_panel(Context &C, Layer &armature)
       }
       /* A pin is one point: no tail and no length to show (its length is kept, hidden, for converting back). */
       if (!bone_is_pin(*active)) {
-      label("Tail");
+      ui_row_label("Tail");
       if (ui_drag_float2("##bone_tail", &tail.x, 0.005f, -10000.0f, 10000.0f, "%.3f")) {
         armature_set_joints(armature, {{active->id, {head, tail}}});
       }
@@ -2114,7 +2080,7 @@ static void bone_panel(Context &C, Layer &armature)
         C.undo->push("Bone Tail", doc);
       }
       active = bone_find(armature, armature.active_bone);
-      label("Length");
+      ui_row_label("Length");
       ui_drag_float("##bone_length", &active->length, 0.005f, 0.0f, 1000.0f, "%.3f");
       if (ImGui::IsItemDeactivatedAfterEdit()) {
         C.undo->push("Bone Length", doc);
@@ -2189,8 +2155,9 @@ static void bone_panel(Context &C, Layer &armature)
         }
       });
     }
+    ui_group_gap();
     ImGui::BeginDisabled(doc.frame_current != 0);
-    label("Strength");
+    ui_row_label("Strength");
     ui_drag_float("##bone_strength", &active->strength, 0.01f, 0.0f, 100.0f, "%.2f");
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
       ImGui::SetTooltip("How far the bone reaches when points get automatic weights (Setup frame only)");
@@ -2205,12 +2172,7 @@ static void bone_panel(Context &C, Layer &armature)
 
 static void props_label(const char *text)
 {
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted(text);
-  ImGui::TableSetColumnIndex(1);
-  ImGui::SetNextItemWidth(-1);
+  ui_row_label(text);
 }
 
 /* Three small swatches of a bone colour set's shades, from `at`, each `w` wide. */
@@ -2330,7 +2292,7 @@ static void bone_color_rows(Context &C, Bone &bone)
 static void drawing_color_rows(Context &C, const std::vector<Layer *> &drawings, const char *label, const char *where,
                                bool copy_button, bool layer_tab = false)
 {
-  /* The Layer tab's rows, as its properties': the label right-aligned (ui_row); the Bone tab's, left. */
+  /* The Layer tab's rows, as its properties' (ui_row); the Bone tab's as its other rows (props_label). */
   const auto row = [&](const char *text, const std::function<void(float)> &body) {
     if (layer_tab) {
       ui_row(text, body);
@@ -2467,6 +2429,7 @@ static void bone_display_panel(Context &C, Layer &armature)
   /* Colour first, on every bone type: it colours the bone, pin or knob and box whatever its shape. */
   bone_color_rows(C, *active);
 
+  ui_group_gap();
   /* Shape: Bone | Custom, as Blender's tabs (on a pin, Bone is its pin). */
   props_label("Shape");
   {
@@ -2584,6 +2547,7 @@ static void bone_display_panel(Context &C, Layer &armature)
 
   if (controller) {
     /* The box: when it shows (the knob always does; only how it looks, so any frame) and how big a frame is. */
+    ui_group_gap();
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
     ImGui::AlignTextToFramePadding();
@@ -2591,7 +2555,6 @@ static void bone_display_panel(Context &C, Layer &armature)
     props_label("Show");
     static const char *const shows[] = {"Always", "When Selected", "Never"};
     const int show = int(active->controller_box_show);
-    ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##controller_box_show", shows[show])) {
       for (int k = 0; k < 3; k++) {
         if (ImGui::Selectable(shows[k], k == show) && k != show) {
@@ -2786,7 +2749,7 @@ static void actions_panel_body(Context &C, Layer &armature)
       if (ImGui::IsWindowAppearing() || !ImGui::IsAnyItemActive()) {
         ImGui::SetKeyboardFocusHere();
       }
-      ImGui::InputText("##rename", &st.rename_text, ImGuiInputTextFlags_AutoSelectAll);
+      ui_input_text("##rename", &st.rename_text, ImGuiInputTextFlags_AutoSelectAll);
       if (ImGui::IsItemDeactivated()) {
         if (!st.rename_text.empty() && st.rename_text != name) {
           operator_call(C, "anim.action_rename", {layer_arg, {"name", name}, {"to", st.rename_text}});
@@ -2988,7 +2951,7 @@ static void actions_panel_body(Context &C, Layer &armature)
   }
   if (st.filter_open) {
     ImGui::SetNextItemWidth(list_w);
-    ImGui::InputTextWithHint("##filter_text", "Filter by name", &st.filter);
+    ui_input_text_hint("##filter_text", "Filter by name", &st.filter);
   }
 
   /* The action being edited: Loop, how long it is, what plays it. */
@@ -3001,17 +2964,10 @@ static void actions_panel_body(Context &C, Layer &armature)
   if (ImGui::BeginTable("##action_details", 2, ImGuiTableFlags_SizingStretchProp)) {
     ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch, 0.4f);
     ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.6f);
-    const auto label = [](const char *text) {
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted(text);
-      ImGui::TableSetColumnIndex(1);
-    };
     if (by == ActionFrameBy::Own || by == ActionFrameBy::Bone) {
-      label("Loop");
+      ui_row_label("Loop");
       bool loops = action_loops(armature, picked);
-      if (ImGui::Checkbox("##loop", &loops)) {
+      if (ui_checkbox("##loop", &loops)) {
         /* Back to Auto when it matches what Auto gives. */
         const bool automatic = action_bone_action_full_turn(armature, picked);
         operator_call(C, "anim.action_play_set",
@@ -3021,10 +2977,10 @@ static void actions_panel_body(Context &C, Layer &armature)
                                       "a whole turn (a 360 dial)"
                                     : "Past its last frame it starts over");
     }
-    label("Length");
+    ui_row_label("Length");
     ImGui::Text("%d frames", int(std::lround(action_length(armature, picked, true))));
     if (holder) {
-      label("Linked To");
+      ui_row_label("Linked To");
       if (ImGui::Button(holder->name.c_str(), ImVec2(-1, 0))) {
         Bone &b = *bone_find(armature, holder->id);
         if (!ImGui::GetIO().KeyShift) {
@@ -3356,7 +3312,7 @@ static void reference_tab(Context &C)
   if (ui_collapsing_header("More", false)) {
     if (!ref->is_group()) {
       bool follow = rs.follow_animation;
-      if (ImGui::Checkbox("Follow Original's Animation", &follow)) {
+      if (ui_checkbox("Follow Original's Animation", &follow)) {
         operator_call(C, "layer.reference_set", {{"follow_animation", follow ? "1" : "0"}});
       }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -3407,12 +3363,7 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
   if (!ui_panel_begin("Bones")) {
     return;
   }
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted("Parent Bone");
-  ImGui::TableSetColumnIndex(1);
-  ImGui::SetNextItemWidth(-1);
+  ui_row_label("Parent Bone");
   /* A group above with a Parent Bone moves this layer as a whole: its bone shows here, greyed. */
   const Layer *binding = layer_binding_group(doc, layer.id);
   const Bone *parent = bone_find(armature, binding ? binding->parent_bone : layer.parent_bone);
@@ -3453,8 +3404,8 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
       ImGui::SetKeyboardFocusHere();
     }
     ImGui::SetNextItemWidth(-1);
-    const bool entered = ImGui::InputTextWithHint("##search", "Search bones", &search,
-                                                  ImGuiInputTextFlags_EnterReturnsTrue);
+    const bool entered = ui_input_text_hint("##search", "Search bones", &search,
+                                            ImGuiInputTextFlags_EnterReturnsTrue);
     std::string needle = search;
     std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
     const auto matches = [&](const std::string &name) {
@@ -3524,26 +3475,22 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
   /* Keep Animation: changing the bone leaves the layer where it showed on every keyed frame (Keep
    * Poses' reverse: the setup frame is left alone, the poses are kept). */
   if (parent && !binding) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(1);
+    ui_checks_row();
     ImGui::BeginDisabled(doc.frame_current != 0 || same_as_original || layer.points_follow_bone());
-    ImGui::Checkbox("Keep Animation##parent_keep", &keep_animation);
+    ui_checkbox("Keep Animation##parent_keep", &keep_animation);
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
       ImGui::SetTooltip("Changing the parent bone keeps the layer where it shows on every keyed frame: its position, "
                         "rotation and scale are keyed again there against the new bone.\nOff, it follows the new "
                         "bone's motion from its setup pose (Deform: Layer only)");
     }
+    ui_group_gap();
   }
   /* Attached To (a regular bone): its whole move, or only its head's or tail's (a joint's round cap that never squashes),
    * with how it turns there. Like Deform, set on Setup. */
   const auto choice_row = [&](const char *label, const char *id, int now, int count, const char *const *names,
                               const char *const *tips, bool usable, const auto &pick) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    ImGui::TableSetColumnIndex(1);
+    ui_row_label(label);
     ImGui::PushID(id);
     ImGui::BeginDisabled(!usable);
     const float w = (ImGui::GetContentRegionAvail().x - float(count - 1)) / float(count);
@@ -3626,12 +3573,7 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
     /* Chain To (Deform: Curve): the points bend along the curves from the Parent Bone on through its connected
      * children to this bone. */
     if (layer.points_follow_bone() && layer.parent_bone_curve) {
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted("Chain To");
-      ImGui::TableSetColumnIndex(1);
-      ImGui::SetNextItemWidth(-1);
+      ui_row_label("Chain To");
       ImGui::BeginDisabled(!usable);
       const std::vector<size_t> chain = layer_curve_chain(armature, layer);
       const std::string end_name = chain.size() > 1 ? armature.bones[chain.back()].name : parent->name;
@@ -3667,6 +3609,7 @@ static void binding_panel(Context &C, Layer &layer, Layer &armature)
   }
   /* Bone Follows Selection: the parent bone keyed onto the selection on each of its keyed frames. */
   if (parent && (layer.has_drawing() || layer.is_group())) {
+    ui_group_gap();
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(1);
     ImGui::BeginDisabled(same_as_original || (doc.frame_current == 0 && doc.action.empty()));
@@ -3949,11 +3892,11 @@ static bool merge_shape_picker(const char *id, const VectorDrawing &drawing, con
       ImGui::SetKeyboardFocusHere();
     }
     ImGui::SetNextItemWidth(std::max(ImGui::CalcItemWidth(), 160.0f));
-    ImGui::InputTextWithHint("##search", "Search shapes", &search);
+    ui_input_text_hint("##search", "Search shapes", &search);
     std::string needle = search;
     std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
     bool all = picked.empty();
-    if (ImGui::Checkbox("All shapes", &all) && all) {
+    if (ui_checkbox("All shapes", &all) && all) {
       r_picked->clear();
       changed = true;
     }
@@ -3964,7 +3907,7 @@ static bool merge_shape_picker(const char *id, const VectorDrawing &drawing, con
       }
       bool on = std::find(picked.begin(), picked.end(), s.id) != picked.end();
       ImGui::PushID(int(s.id));
-      if (ImGui::Checkbox(s.name.c_str(), &on)) {
+      if (ui_checkbox(s.name.c_str(), &on)) {
         *r_picked = picked;
         if (on) {
           r_picked->push_back(s.id);
@@ -4003,8 +3946,8 @@ static uint64_t layer_search_combo(const char *id, const char *preview, const st
       ImGui::SetKeyboardFocusHere();
     }
     ImGui::SetNextItemWidth(-1);
-    const bool entered = ImGui::InputTextWithHint("##search", "Search layers", &search,
-                                                  ImGuiInputTextFlags_EnterReturnsTrue);
+    const bool entered = ui_input_text_hint("##search", "Search layers", &search,
+                                            ImGuiInputTextFlags_EnterReturnsTrue);
     std::string needle = search;
     std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
     const Layer *first = nullptr;
@@ -4227,7 +4170,7 @@ static void merge_modifier_body(Context &C, Layer &layer, Modifier &m, int index
   modifier_row_label("", column);
   bool corners = m.merge_corners_only;
   ImGui::BeginDisabled(m.merge_operation != MergeOperation::Union);
-  if (ImGui::Checkbox("Corners Only", &corners)) {
+  if (ui_checkbox("Corners Only", &corners)) {
     set({{"corners_only", corners ? "1" : "0"}});
   }
   ImGui::EndDisabled();
@@ -4254,8 +4197,8 @@ static bool point_group_combo(const Layer &layer, std::string &name)
       ImGui::SetKeyboardFocusHere();
     }
     ImGui::SetNextItemWidth(-1);
-    const bool entered = ImGui::InputTextWithHint("##search", "Search point groups", &search,
-                                                  ImGuiInputTextFlags_EnterReturnsTrue);
+    const bool entered = ui_input_text_hint("##search", "Search point groups", &search,
+                                            ImGuiInputTextFlags_EnterReturnsTrue);
     std::string needle = search;
     std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
     const PointGroup *first = nullptr;
@@ -4395,7 +4338,7 @@ static void bevel_modifier_body(Context &C, Layer &layer, Modifier &m, int index
   ui_fold_record(geometry_key, false, geometry_open);
   if (geometry_open) {
     modifier_row_label("", column);
-    if (ImGui::Checkbox("Clamp Overlap", &m.bevel_clamp)) {
+    if (ui_checkbox("Clamp Overlap", &m.bevel_clamp)) {
       done = true;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -4589,7 +4532,7 @@ static void resample_modifier_body(Context &C, Layer &layer, Modifier &m, int in
     }
 
     modifier_row_label("", column);
-    if (ImGui::Checkbox("Preserve Volume", &m.subdiv_preserve_volume)) {
+    if (ui_checkbox("Preserve Volume", &m.subdiv_preserve_volume)) {
       done = true;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -4949,7 +4892,7 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
       return;
     }
     modifier_row_label("", column);
-    if (ImGui::Checkbox("Symmetric", &m.deform_influence_symmetric)) {
+    if (ui_checkbox("Symmetric", &m.deform_influence_symmetric)) {
       done = true;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -5052,7 +4995,7 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
     mesh_method_rows(true);
     if (vector_deform_drawn_grid(doc, layer, m)) {
       modifier_row_label("", column);
-      if (ImGui::Checkbox("Smooth", &m.deform_smooth)) {
+      if (ui_checkbox("Smooth", &m.deform_smooth)) {
         done = true;
       }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -5159,7 +5102,7 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
     }
     if (!envelope) {
       modifier_row_label("", column);
-      if (ImGui::Checkbox("Stretch", &m.deform_stretch)) {
+      if (ui_checkbox("Stretch", &m.deform_stretch)) {
         done = true;
       }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -5350,7 +5293,7 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
     }
     if (m.follow_limit != FollowLimit::None) {
       modifier_row_label("", column);
-      if (ImGui::Checkbox("Invert", &m.follow_limit_invert)) {
+      if (ui_checkbox("Invert", &m.follow_limit_invert)) {
         done = true;
       }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -5400,7 +5343,7 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
     };
     point_row(false);
     modifier_row_label("", column);
-    if (ImGui::Checkbox("Show Point", &m.deform_show_point)) {
+    if (ui_checkbox("Show Point", &m.deform_show_point)) {
       done = true;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -5409,7 +5352,7 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
     }
     modifier_row_label("", column);
     bool two = m.deform_two;
-    if (ImGui::Checkbox("Second Point", &two)) {
+    if (ui_checkbox("Second Point", &two)) {
       vector_deform_follow_two(m, two);
       done = true;
     }
@@ -5449,11 +5392,11 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
     ImGui::EndDisabled();
     if (m.deform_two) {
       modifier_row_label("", column);
-      if (ImGui::Checkbox("Rotation", &m.deform_rotation)) {
+      if (ui_checkbox("Rotation", &m.deform_rotation)) {
         done = true;
       }
-      ImGui::SameLine();
-      if (ImGui::Checkbox("Scale", &m.deform_scale)) {
+      ImGui::SameLine(0.0f, ui_space(UI_CHECK_GAP));
+      if (ui_checkbox("Scale", &m.deform_scale)) {
         done = true;
       }
     }
@@ -5475,7 +5418,7 @@ static void vector_deform_modifier_body(Context &C, Layer &layer, Modifier &m, i
   done |= ImGui::IsItemDeactivatedAfterEdit();
   ImGui::EndDisabled();
   modifier_row_label("", column);
-  if (ImGui::Checkbox("Resample Self", &m.deform_resample_self)) {
+  if (ui_checkbox("Resample Self", &m.deform_resample_self)) {
     done = true;
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -5606,7 +5549,7 @@ static void modifiers_panel(Context &C, Layer &layer)
     const float right_w = h * (mesh_button ? 6.0f : 5.0f) + h * 0.8f + style.ItemSpacing.x * 3.0f +
                           (mesh_button ? 10.0f : 9.0f);
     ImGui::SetNextItemWidth(std::max(40.0f, inner_w - (ImGui::GetCursorScreenPos().x - box_min.x) - right_w));
-    ImGui::InputText("##name", &m.name);
+    ui_input_text("##name", &m.name);
     if (ImGui::IsItemDeactivatedAfterEdit()) {
       C.undo->push("Rename Modifier", doc);
     }
@@ -5743,7 +5686,7 @@ static void modifiers_panel(Context &C, Layer &layer)
         modifier_row_label("Object", column, "The bone layer whose bones move this drawing");
         ImGui::BeginDisabled();
         std::string name = bones ? bones->name : std::string("(none)");
-        ImGui::InputText("##object", &name, ImGuiInputTextFlags_ReadOnly);
+        ui_input_text("##object", &name, ImGuiInputTextFlags_ReadOnly);
         ImGui::EndDisabled();
         modifier_row_label("", column);
         ImGui::TextDisabled("The bone layer's bones move this drawing.");
@@ -5781,7 +5724,7 @@ static void modifiers_panel(Context &C, Layer &layer)
                            "The number is how close to the axis a point must be to be shared");
         const std::string driven_merge_path = std::string("modifiers[" + std::to_string(i) + "].") + "merge";
         const int driven_merge = ui_driver_field_begin(C, layer.id, driven_merge_path, -1);
-        changed |= ImGui::Checkbox("##merge", &m.merge);
+        changed |= ui_checkbox("##merge", &m.merge);
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
           ImGui::SetTooltip("Share points on the axis, so lines ending there join their reflection");
         }
@@ -5807,7 +5750,7 @@ static void modifiers_panel(Context &C, Layer &layer)
           modifier_row_label("", column);
           const std::string driven_mirror_bones_path = std::string("modifiers[" + std::to_string(i) + "].") + "mirror_bones";
           const int driven_mirror_bones = ui_driver_field_begin(C, layer.id, driven_mirror_bones_path, -1);
-          changed |= ImGui::Checkbox("Mirror Bones", &m.mirror_bones);
+          changed |= ui_checkbox("Mirror Bones", &m.mirror_bones);
           if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
             ImGui::SetTooltip("Reflected points bound (or weighted) to ..._L bones follow ..._R ones, and the "
                               "other way (Blender's Vertex Groups)");
@@ -5988,7 +5931,7 @@ static void constraints_panel(Context &C, Layer &armature)
     if (c.name.empty()) {
       c.name = bone_constraint_name(c.type);
     }
-    ImGui::InputText("##name", &c.name);
+    ui_input_text("##name", &c.name);
     if (ImGui::IsItemDeactivatedAfterEdit()) {
       C.undo->push("Rename Constraint", doc);
     }
@@ -6060,8 +6003,8 @@ static void constraints_panel(Context &C, Layer &armature)
             ImGui::SetKeyboardFocusHere();
           }
           ImGui::SetNextItemWidth(-1);
-          const bool entered = ImGui::InputTextWithHint("##search", "Search bones", &search,
-                                                        ImGuiInputTextFlags_EnterReturnsTrue);
+          const bool entered = ui_input_text_hint("##search", "Search bones", &search,
+                                                  ImGuiInputTextFlags_EnterReturnsTrue);
           std::string needle = search;
           std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
           const auto matches = [&](const std::string &name) {
@@ -6156,7 +6099,7 @@ static void constraints_panel(Context &C, Layer &armature)
         modifier_row_label("", column);
         const std::string driven_spring_path = constraint_path + (&sp == &c.angle_spring ? "angle_spring." : &sp == &c.position_spring ? "position_spring." : "scale_spring.") + "enabled";
         const int driven_spring = ui_driver_field_begin(C, armature.id, driven_spring_path, -1);
-        if (ImGui::Checkbox(label, &sp.enabled)) {
+        if (ui_checkbox(label, &sp.enabled)) {
           C.undo->push("Dynamics", doc);
         }
         ui_driver_typed(C, armature.id, driven_spring_path, -1);
@@ -6210,7 +6153,7 @@ static void constraints_panel(Context &C, Layer &armature)
             modifier_row_label(name, column, tip);
             const std::string driven_use_limit_path = spring_path + "use_limit";
             const int driven_use_limit = ui_driver_field_begin(C, armature.id, driven_use_limit_path, -1);
-            if (ImGui::Checkbox("##use_limit", &sp.use_limit)) {
+            if (ui_checkbox("##use_limit", &sp.use_limit)) {
               C.undo->push("Dynamics", doc);
             }
             ui_driver_typed(C, armature.id, driven_use_limit_path, -1);
@@ -6248,7 +6191,7 @@ static void constraints_panel(Context &C, Layer &armature)
               modifier_row_label(name, column, tip);
               const std::string driven_path = spring_path + use_name;
               const int driven = ui_driver_field_begin(C, armature.id, driven_path, -1);
-              if (ImGui::Checkbox(("##" + use_name).c_str(), use)) {
+              if (ui_checkbox(("##" + use_name).c_str(), use)) {
                 C.undo->push("Dynamics", doc);
               }
               ui_driver_typed(C, armature.id, driven_path, -1);
@@ -6295,8 +6238,8 @@ static void constraints_panel(Context &C, Layer &armature)
                 ImGui::SetKeyboardFocusHere();
               }
               ImGui::SetNextItemWidth(-1);
-              const bool entered = ImGui::InputTextWithHint("##search", "Search layers", &search,
-                                                            ImGuiInputTextFlags_EnterReturnsTrue);
+              const bool entered = ui_input_text_hint("##search", "Search layers", &search,
+                                                      ImGuiInputTextFlags_EnterReturnsTrue);
               std::string needle = search;
               std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
               const auto matches = [&](const std::string &name) {
@@ -6574,14 +6517,14 @@ static void constraints_panel(Context &C, Layer &armature)
               ImGui::EndCombo();
             }
             modifier_row_label("", column);
-            if (ImGui::Checkbox("Keep Angle", &c.keep_angle)) {
+            if (ui_checkbox("Keep Angle", &c.keep_angle)) {
               C.undo->push("IK End", doc);
             }
             if (ImGui::IsItemHovered()) {
               ImGui::SetTooltip("The end bone's children keep their angle in the scene however the chain bends");
             }
-            ImGui::SameLine();
-            if (ImGui::Checkbox("Soft", &c.soft)) {
+            ImGui::SameLine(0.0f, ui_space(UI_CHECK_GAP));
+            if (ui_checkbox("Soft", &c.soft)) {
               C.undo->push("IK End", doc);
             }
             if (ImGui::IsItemHovered()) {
@@ -6591,7 +6534,7 @@ static void constraints_panel(Context &C, Layer &armature)
           else {
             bool pinned = c.pin != IK_PIN_NONE;
             ImGui::BeginDisabled(!bone_find(armature, bone->parent));
-            if (ImGui::Checkbox("##pinned", &pinned)) {
+            if (ui_checkbox("##pinned", &pinned)) {
               pin_to(pinned ? "SCENE" : "");
             }
             ImGui::EndDisabled();
@@ -6601,7 +6544,7 @@ static void constraints_panel(Context &C, Layer &armature)
         case BoneConstraintType::LimitShape: {
           shape_rows();
           modifier_row_label("", column);
-          if (ImGui::Checkbox("Affect Transform", &c.affect_transform)) {
+          if (ui_checkbox("Affect Transform", &c.affect_transform)) {
             C.undo->push("Limit to Shape", doc);
           }
           if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -6687,7 +6630,7 @@ static void constraints_panel(Context &C, Layer &armature)
             point_row(k);
           }
           modifier_row_label("", column);
-          if (ImGui::Checkbox("Show Follow Point", &c.follow_show)) {
+          if (ui_checkbox("Show Follow Point", &c.follow_show)) {
             C.undo->push("Follow Point", doc);
           }
           if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -6722,7 +6665,7 @@ static void constraints_panel(Context &C, Layer &armature)
           /* Three points always turn and scale it. */
           ImGui::BeginDisabled(count == 3);
           bool rotation = c.follow_rotation || count == 3;
-          if (ImGui::Checkbox("Rotation", &rotation)) {
+          if (ui_checkbox("Rotation", &rotation)) {
             c.follow_rotation = rotation;
             C.undo->push("Follow Point", doc);
           }
@@ -6731,10 +6674,10 @@ static void constraints_panel(Context &C, Layer &armature)
                                          : count == 2 ? "Turns the bone as the way from the first point to the second turns"
                                                       : "Three points always turn the bone");
           }
-          ImGui::SameLine();
+          ImGui::SameLine(0.0f, ui_space(UI_CHECK_GAP));
           ImGui::BeginDisabled(count == 1);
           bool scale = c.follow_scale || count == 3;
-          if (ImGui::Checkbox("Scale", &scale)) {
+          if (ui_checkbox("Scale", &scale)) {
             c.follow_scale = scale;
             C.undo->push("Follow Point", doc);
           }
@@ -6798,11 +6741,11 @@ static void constraints_panel(Context &C, Layer &armature)
           modifier_row_label("Follow", column, "Which of the target's change it takes: its move, its turn, its size.\n"
                                                "Key Influence to pick the target up or drop it (a hat lifted off, a look\n"
                                                "target leaving the head).");
-          bool changed = ImGui::Checkbox("Position", &c.child_position);
-          ImGui::SameLine();
-          changed |= ImGui::Checkbox("Rotation", &c.child_rotation);
-          ImGui::SameLine();
-          changed |= ImGui::Checkbox("Scale", &c.child_scale);
+          bool changed = ui_checkbox("Position", &c.child_position);
+          ImGui::SameLine(0.0f, ui_space(UI_CHECK_GAP));
+          changed |= ui_checkbox("Rotation", &c.child_rotation);
+          ImGui::SameLine(0.0f, ui_space(UI_CHECK_GAP));
+          changed |= ui_checkbox("Scale", &c.child_scale);
           if (changed) {
             C.undo->push("Child Of", doc);
           }
@@ -6931,7 +6874,7 @@ static void constraints_panel(Context &C, Layer &armature)
             /* An Own checkbox: the first time, its settings start as the document's. */
             const auto own_box = [&](const char *label, bool own, bool gravity, const char *tip) {
               modifier_row_label("", column);
-              if (ImGui::Checkbox(label, &own)) {
+              if (ui_checkbox(label, &own)) {
                 if (gravity) {
                   dynamics_use_own_gravity(doc, c, own);
                 }
@@ -7463,7 +7406,7 @@ static void mask_area_panel(Context &C, Layer &layer, const WindowManager::MaskA
       const float count_w = ImGui::CalcTextSize(count.c_str()).x + style.FramePadding.x * 2.0f + 4.0f;
       ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - count_w - 6.0f);
       std::string edited = st.name;
-      ImGui::InputText("##global_name", &edited);
+      ui_input_text("##global_name", &edited);
       if (ImGui::IsItemDeactivatedAfterEdit() && !edited.empty()) {
         operator_call(C, "mask.set", with_step("area_name", edited));
       }
@@ -7492,7 +7435,7 @@ static void mask_area_panel(Context &C, Layer &layer, const WindowManager::MaskA
     const std::string driven_invert_path = step_path + "invert";
     const int driven_invert = driven_begin(driven_invert_path);
     bool invert = st.invert;
-    if (ImGui::Checkbox("Inverse (use the outside)", &invert)) {
+    if (ui_checkbox("Inverse (use the outside)", &invert)) {
       operator_call(C, "mask.set", with_step("invert", invert ? "1" : "0"));
     }
     driven_end(driven_invert_path, driven_invert);
@@ -7505,7 +7448,7 @@ static void mask_area_panel(Context &C, Layer &layer, const WindowManager::MaskA
     if (st.global == 0) {
       modifier_row_label("Name", column, "The group's name");
       std::string edited = st.name;
-      ImGui::InputText("##group_name", &edited);
+      ui_input_text("##group_name", &edited);
       if (ImGui::IsItemDeactivatedAfterEdit()) {
         operator_call(C, "mask.set", with_step("area_name", edited));
       }
@@ -7602,7 +7545,7 @@ static void mask_area_panel(Context &C, Layer &layer, const WindowManager::MaskA
         continue;
       }
       bool ticked = std::find(st.layers.begin(), st.layers.end(), l->id) != st.layers.end();
-      const bool changed = ImGui::Checkbox(l->name.c_str(), &ticked);
+      const bool changed = ui_checkbox(l->name.c_str(), &ticked);
       if (ImGui::IsItemHovered()) {
         C.wm->layers_hover = {l->id};
         C.wm->layers_hover_frame = ImGui::GetFrameCount();
@@ -7674,7 +7617,7 @@ static void mask_area_panel(Context &C, Layer &layer, const WindowManager::MaskA
   const std::string driven_filled_path = step_path + "filled";
   const int driven_filled = driven_begin(driven_filled_path);
   bool filled = st.filled && !st.strokes_only;
-  if (ImGui::Checkbox("Fill Every Shape", &filled)) {
+  if (ui_checkbox("Fill Every Shape", &filled)) {
     operator_call(C, "mask.set", with_step("filled", filled ? "1" : "0"));
   }
   driven_end(driven_filled_path, driven_filled);
@@ -7689,7 +7632,7 @@ static void mask_area_panel(Context &C, Layer &layer, const WindowManager::MaskA
   const std::string driven_inside_path = step_path + "inside_stroke";
   const int driven_inside = driven_begin(driven_inside_path);
   bool inside_stroke = st.inside_stroke && st.fills_only;
-  if (ImGui::Checkbox("Inside the Stroke", &inside_stroke)) {
+  if (ui_checkbox("Inside the Stroke", &inside_stroke)) {
     operator_call(C, "mask.set", with_step("inside_stroke", inside_stroke ? "1" : "0"));
   }
   driven_end(driven_inside_path, driven_inside);
@@ -7862,7 +7805,7 @@ static void mask_cards(Context &C, Layer &layer)
   bool clipped = layer.clip_to_below && base;
   const std::string driven_clip_path = std::string("clip_to_below");
   const int driven_clip = ui_driver_field_begin(C, layer.id, driven_clip_path, -1);
-  if (ImGui::Checkbox("Clip to Below", &clipped)) {
+  if (ui_checkbox("Clip to Below", &clipped)) {
     operator_call(C, "mask.clip_to_below", {{"layer", id}, {"set", clipped ? "1" : "0"}});
   }
   ui_driver_typed(C, layer.id, driven_clip_path, -1);
@@ -7876,7 +7819,7 @@ static void mask_cards(Context &C, Layer &layer)
     bool exclude = layer.clip_exclude_strokes;
     const std::string driven_exclude_path = std::string("clip_exclude_strokes");
     const int driven_exclude = ui_driver_field_begin(C, layer.id, driven_exclude_path, -1);
-    if (ImGui::Checkbox("Exclude Strokes", &exclude)) {
+    if (ui_checkbox("Exclude Strokes", &exclude)) {
       operator_call(C, "mask.clip_to_below", {{"layer", id}, {"exclude_strokes", exclude ? "1" : "0"}});
     }
     ui_driver_typed(C, layer.id, driven_exclude_path, -1);
@@ -7929,7 +7872,7 @@ static void mask_cards(Context &C, Layer &layer)
     const std::string phrase = size_t(i) < phrases.size() ? phrases[size_t(i)] : std::string();
     const std::string hint = "Mask " + std::to_string(i + 1);
     ImGui::SetNextItemWidth(title_w);
-    ImGui::InputTextWithHint("##name", hint.c_str(), &layer.masks[size_t(i)].name);
+    ui_input_text_hint("##name", hint.c_str(), &layer.masks[size_t(i)].name);
     if (ImGui::IsItemDeactivatedAfterEdit()) {
       C.undo->push("Rename Mask", doc);
     }
@@ -8088,7 +8031,7 @@ static void mask_cards(Context &C, Layer &layer)
         const std::string driven_end_path = "masks[" + std::to_string(i) + "].end_lines";
         const int driven_end = ui_driver_field_begin(C, layer.id, driven_end_path, -1);
         bool end_lines = m.end_lines;
-        if (ImGui::Checkbox("End Lines at Edge", &end_lines)) {
+        if (ui_checkbox("End Lines at Edge", &end_lines)) {
           operator_call(C, "mask.set", with("end_lines", end_lines ? "1" : "0"));
         }
         ui_driver_field_end(C, layer.id, driven_end_path, -1, driven_end);
@@ -8672,13 +8615,7 @@ static void used_as_mask_panel(Context &C, Layer &layer)
   if (users.empty() || !ui_panel_begin("Used as a Mask")) {
     return;
   }
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  const char *label = "Masking";
-  ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetColumnWidth() - ImGui::CalcTextSize(label).x));
-  ImGui::TextUnformatted(label);
-  ImGui::TableSetColumnIndex(1);
+  ui_row_label("Masking");
   for (size_t i = 0; i < users.size(); i++) {
     if (i > 0) {
       ImGui::SameLine(0, 4);
@@ -8752,7 +8689,7 @@ static void layer_bone_group_panel(Context &C)
   bool on = drawings.front()->edit_with_bones;
   bool hovered = false;
   ui_row("Editable in Bone Group", [&](float) {
-    if (ImGui::Checkbox("##edit_with_bones", &on)) {
+    if (ui_checkbox("##edit_with_bones", &on)) {
       operator_call(C, "layer.edit_with_bones_set", {{"on", on ? "1" : "0"}, {"layers", ids}});
     }
     hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal);
@@ -8788,11 +8725,13 @@ static void layer_tab(Context &C)
   const char *path = "oanim.data.layers.active";
   if (ui_panel_begin("Layer")) {
     ui_prop(C, ptr, "name", path);
+    ui_group_gap();
     key_next(C, *layer, {"visible"});
     ui_prop(C, ptr, "visible", path);
     draw_order_row(C, *layer);
     ui_prop(C, ptr, "render_visible", path);
     ui_prop(C, ptr, "locked", path);
+    ui_group_gap();
     if (layer->type == LayerType::Vector && (layer->ignore_group_deforms || layer_has_group_deforms(doc, *layer, false))) {
       ui_prop(C, ptr, "ignore_group_deforms", path);
     }
@@ -9094,6 +9033,7 @@ static void media_tab(Context &C)
   if (ui_panel_begin("Look")) {
     ui_prop(C, ptr, "media_guide", path);
     ui_prop(C, ptr, "media_fit", path);
+    ui_group_gap();
     key_next(C, *layer, {"opacity"});
     ui_prop(C, ptr, "opacity", path);
     ui_prop(C, ptr, "media_greyscale", path);
@@ -9103,6 +9043,7 @@ static void media_tab(Context &C)
       layer->media.tint = {rgba[0], rgba[1], rgba[2], 1.0f};
     }
     ui_prop(C, ptr, "media_tint_amount", path);
+    ui_group_gap();
     ui_prop(C, ptr, "media_in_front", path);
     ui_prop(C, ptr, "media_dont_auto_key", path);
     ui_panel_end();
@@ -9193,25 +9134,16 @@ static void sub_shape_panel(Context &C, Layer &owner, VectorDrawing &drawing, Sh
     ImGui::EndPopup();
   }
   if (open) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Name");
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-1);
+    ui_row_label("Name");
     ImGui::BeginDisabled(owner.is_reference());
-    ImGui::InputText("##name", &shape.name);
+    ui_input_text("##name", &shape.name);
     ImGui::EndDisabled();
     if (ImGui::IsItemDeactivatedAfterEdit()) {
       C.undo->push("Rename Shape", doc);
     }
 
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Operation");
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-1);
+    ui_group_gap();
+    ui_row_label("Operation");
     const int op = segmented("##operation", int(shape.op), 4, SHAPE_OP_NAMES, SHAPE_OP_TIPS, {});
     if (op >= 0 && op != int(shape.op)) {
       call = "mesh.shape_op_set";
@@ -9222,6 +9154,7 @@ static void sub_shape_panel(Context &C, Layer &owner, VectorDrawing &drawing, Sh
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
     ImGui::AlignTextToFramePadding();
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetColumnWidth() - ImGui::CalcTextSize("Smoothing").x));
     ImGui::TextUnformatted("Smoothing");
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip("Rounds the corners where its outline crosses the shape's, growing as they overlap more. It "
@@ -9377,7 +9310,7 @@ static void point_groups_panel(Context &C, VectorDrawing &drawing)
         if (!ImGui::IsAnyItemActive()) {
           ImGui::SetKeyboardFocusHere();
         }
-        ImGui::InputText("##rename", &typed, ImGuiInputTextFlags_AutoSelectAll);
+        ui_input_text("##rename", &typed, ImGuiInputTextFlags_AutoSelectAll);
         if (ImGui::IsItemDeactivated()) {
           if (!ImGui::IsKeyPressed(ImGuiKey_Escape) && typed != g.name) {
             operator_call(C, "mesh.point_group_set", {{"index", std::to_string(i)}, {"name", typed}});
@@ -9459,7 +9392,7 @@ static void point_groups_panel(Context &C, VectorDrawing &drawing)
   if (filter_open) {
     ImGui::SetCursorScreenPos(ImVec2(bar.x + 4.0f, bar.y + bar_h));
     ImGui::SetNextItemWidth(list_w - h * 2.0f - 12.0f);
-    ImGui::InputTextWithHint("##filter_text", "Filter by name", &filter);
+    ui_input_text_hint("##filter_text", "Filter by name", &filter);
     ImGui::SameLine(0, 2);
     if (sort_by_name) {
       ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
@@ -10042,11 +9975,7 @@ static void handle_row(Context &C, const HandleRow &row, const char *suffix)
                          float2(std::atan2(handle.y, handle.x), length(handle));
   const std::string label = std::string(row.in ? "Handle In" : "Handle Out") + suffix;
   ImGui::PushID(label.c_str());
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted(label.c_str());
-  ImGui::TableSetColumnIndex(1);
+  ui_row_label(label.c_str());
   const float w = (ImGui::GetContentRegionAvail().x - 2.0f) * 0.5f;
   float degrees = value.x * 180.0f / PI;
   bool edited = false, done = false;
@@ -10132,7 +10061,8 @@ static void mean_position_row(Context &C, const char *label, VectorDrawing &draw
   ImGui::TextUnformatted(label);
   ImGui::TableSetColumnIndex(1);
   ImGui::PushID(label);
-  const float spacing = 2.0f;
+  /* X and Y joined, as Blender's aligned row. */
+  const float spacing = ui_space(UI_JOIN_GAP);
   const float w = (ImGui::GetContentRegionAvail().x - spacing) * 0.5f;
   bool done = false;
   for (int axis = 0; axis < 2; axis++) {
@@ -10141,6 +10071,7 @@ static void mean_position_row(Context &C, const char *label, VectorDrawing &draw
     }
     const int driven = ui_driver_field_begin(C, driver_layer, driver_path, axis);
     ImGui::SetNextItemWidth(axis == 0 ? w : -FLT_MIN);
+    ui_join_in_row(axis, 2);
     float value = axis == 0 ? mean.x : mean.y;
     if (ui_drag_float(axis == 0 ? "##x" : "##y", &value, 0.005f, -100000.0f, 100000.0f,
                          axis == 0 ? "X  %.3f" : "Y  %.3f")) {
@@ -10169,14 +10100,7 @@ static void detail_panel(Context &C, VectorDrawing &drawing, Shape &shape)
   }
   ImGui::BeginDisabled(owner && owner->is_reference());
   const int top = shape_detail_max_level(drawing, shape);
-  const auto row = [](const char *label) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    ImGui::TableSetColumnIndex(1);
-  };
-  row("Level");
+  ui_row_label("Level");
   if (ImGui::ArrowButton("##detail_down", ImGuiDir_Left)) {
     operator_call(C, "mesh.detail_level_set", {{"delta", "-1"}});
   }
@@ -10198,7 +10122,7 @@ static void detail_panel(Context &C, VectorDrawing &drawing, Shape &shape)
   if (ImGui::ArrowButton("##detail_up", ImGuiDir_Right)) {
     operator_call(C, "mesh.detail_level_set", {{"delta", "1"}});
   }
-  row("Has");
+  ui_row_label("Has");
   const int points = shape_detail_point_count(drawing, shape);
   if (top == 0) {
     ImGui::TextDisabled(shape.detail_level > 0 ? "No detail yet: the knife (K) adds some" : "No detail");
@@ -10206,7 +10130,8 @@ static void detail_panel(Context &C, VectorDrawing &drawing, Shape &shape)
   else {
     ImGui::Text("Levels %d  \xc2\xb7  %d detail point%s", top, points, points == 1 ? "" : "s");
   }
-  row("");
+  ui_group_gap();
+  ui_row_label("");
   const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
   ImGui::BeginDisabled(top <= shape.detail_level);
   if (ImGui::Button("Delete Higher", ImVec2(half, 0))) {
@@ -10225,7 +10150,7 @@ static void detail_panel(Context &C, VectorDrawing &drawing, Shape &shape)
     ImGui::SetTooltip("Make the selected shapes' detail points their own points, as they show (setup frame)");
   }
   ImGui::EndDisabled();
-  row("");
+  ui_row_label("");
   static float tolerance = 0.02f;
   ImGui::SetNextItemWidth(half);
   ui_drag_float("##rebuild_tolerance", &tolerance, 0.001f, 0.0f, 1.0f, "Tolerance %.3f",
@@ -10297,7 +10222,8 @@ static void material_row(Context &C, Shape &shape, bool reference)
 
   /* Browse. */
   const ImVec2 at = ImGui::GetCursorScreenPos();
-  if (ImGui::Button("##browse", ImVec2(h * 1.5f, h))) {
+  ui_join_next(ImDrawFlags_RoundCornersLeft);
+  if (ui_button("##browse", h * 1.5f, h)) {
     ImGui::OpenPopup("##materials");
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -10309,11 +10235,12 @@ static void material_row(Context &C, Shape &shape, bool reference)
   const ImVec2 arrow = at + ImVec2(h * 1.15f, h * 0.45f);
   dl->AddTriangleFilled(arrow + ImVec2(-h * 0.12f, -h * 0.06f), arrow + ImVec2(h * 0.12f, -h * 0.06f),
                         arrow + ImVec2(0, h * 0.1f), IM_COL32(0xd0, 0xd0, 0xd0, 255));
-  ImGui::SameLine(0, 2);
+  ImGui::SameLine(0, ui_space(UI_JOIN_GAP));
 
   const float rest = ImGui::GetContentRegionAvail().x;
   if (!material) {
-    if (ImGui::Button("Make Shared", ImVec2(rest, 0))) {
+    ui_join_next(ImDrawFlags_RoundCornersRight);
+    if (ui_button("Make Shared", rest)) {
       operator_call(C, "material.new");
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -10328,13 +10255,15 @@ static void material_row(Context &C, Shape &shape, bool reference)
     std::snprintf(count, sizeof(count), "%d", users);
     const float count_w = ImGui::CalcTextSize(count).x + ImGui::GetStyle().FramePadding.x * 2.0f + 4.0f;
     std::string name = material->name;
-    ImGui::SetNextItemWidth(rest - count_w - 2.0f);
-    ImGui::InputText("##material_name", &name);
+    ImGui::SetNextItemWidth(rest - count_w - ui_space(UI_JOIN_GAP));
+    ui_join_next(ImDrawFlags_RoundCornersNone);
+    ui_input_text("##material_name", &name);
     if (ImGui::IsItemDeactivatedAfterEdit() && !name.empty() && name != material->name) {
       operator_call(C, "material.rename", {{"material", std::to_string(material->id)}, {"name", name}});
     }
-    ImGui::SameLine(0, 2);
-    if (ImGui::Button(count, ImVec2(count_w, 0))) {
+    ImGui::SameLine(0, ui_space(UI_JOIN_GAP));
+    ui_join_next(ImDrawFlags_RoundCornersRight);
+    if (ui_button(count, count_w)) {
       operator_call(C, "material.unlink");
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
@@ -10479,7 +10408,7 @@ static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, 
     ui_row_label("Name");
     /* A reference's shapes are named by its original. */
     ImGui::BeginDisabled(reference);
-    ImGui::InputText("##name", &shape.name);
+    ui_input_text("##name", &shape.name);
     ImGui::EndDisabled();
     if (ImGui::IsItemDeactivatedAfterEdit()) {
       C.undo->push("Rename Shape", doc);
@@ -10621,7 +10550,10 @@ static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, 
     on = changed_begin(look && look->width_set);
     ui_row_label("Line Width");
     /* Changed on a copy: a revert button beside it, as beside a changed colour; the eyedropper last. */
-    ImGui::SetNextItemWidth(-(ui_revert_button_space() * (on ? 2.0f : 1.0f)));
+    /* Joined to its revert button and eyedropper, as a colour row is. */
+    const float button_w = ImGui::GetFrameHeight() + ui_space(UI_JOIN_GAP);
+    ImGui::SetNextItemWidth(-(button_w * (on ? 2.0f : 1.0f)));
+    ui_join_next(ImDrawFlags_RoundCornersLeft);
     const float units_to_pixels = float(doc.height) * 0.5f;
     float pixels = shape.style.line_width * units_to_pixels;
     /* Driven in pixels, as shown. */
@@ -10637,12 +10569,14 @@ static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, 
     ui_driver_typed(C, look_layer, width_path, -1);
     ui_driver_field_end(C, look_layer, width_path, -1, driven_width);
     if (on) {
-      ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+      ImGui::SameLine(0.0f, ui_space(UI_JOIN_GAP));
+      ui_join_next(ImDrawFlags_RoundCornersNone);
       if (ui_revert_button("##revert_width", "Revert to the original's line width")) {
         operator_call(C, "layer.reference_revert", setting("line_width")[0]);
       }
     }
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::SameLine(0.0f, ui_space(UI_JOIN_GAP));
+    ui_join_next(ImDrawFlags_RoundCornersRight);
     if (ui_pick_button("##pick_width", "Eyedropper: click a shape in the viewport to take its line width",
                        ui_shape_eyedropper_active("WIDTH"))) {
       ui_style_eyedropper_start("WIDTH", "line width");
@@ -10676,12 +10610,8 @@ static void edge_panel(Context &C, VectorDrawing &drawing)
   for (const ShapeEdge &e : edges) {
     visible = visible && !drawing.curves[e.curve].points[e.segment].edge_hidden;
   }
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted(edges.size() == 1 ? "1 edge" : (std::to_string(edges.size()) + " edges").c_str());
-  ImGui::TableSetColumnIndex(1);
-  if (ImGui::Checkbox("Visible", &visible)) {
+  ui_row_label(edges.size() == 1 ? "1 edge" : (std::to_string(edges.size()) + " edges").c_str());
+  if (ui_checkbox("Visible", &visible)) {
     drawing_set_edges_hidden(drawing, edges, !visible);
     C.undo->push(visible ? "Show Edge" : "Hide Edge", *C.document);
   }
@@ -10801,11 +10731,7 @@ static void points_key_button(Context &C, const char *id, const char *what, int 
 
 static void points_row_label(const char *label)
 {
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted(label);
-  ImGui::TableSetColumnIndex(1);
+  ui_row_label(label);
 }
 
 /* Median (Point, with one), Rotation and Scale, as Blender's Transform panel in edit mode: where the picked points show
@@ -11036,7 +10962,9 @@ static void selected_points_panel(Context &C, const std::vector<Layer *> &layers
   }
   if (ui_panel_begin("Selected Points")) {
     points_transform_rows(C, layers);
+    ui_group_gap();
     points_mean_rows(C, layers);
+    ui_group_gap();
     /* Align: the handles stay in line (moving one turns the other); a mix shows a dash. */
     points_row_label("Handles");
     const int alignment = drawing_selected_alignment(first);
@@ -11044,7 +10972,7 @@ static void selected_points_panel(Context &C, const std::vector<Layer *> &layers
     if (alignment == -2) {
       ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
     }
-    if (ImGui::Checkbox("Aligned", &aligned)) {
+    if (ui_checkbox("Aligned", &aligned)) {
       operator_call(C, aligned ? "mesh.handles_align" : "mesh.handles_unalign");
     }
     if (alignment == -2) {

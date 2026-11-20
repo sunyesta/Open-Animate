@@ -176,7 +176,7 @@ void ui_row(const char *label, const std::function<void(float width)> &body);
  * groups of rows UI_GROUP_GAP apart, fields that belong together (X and Y) UI_JOIN_GAP apart, checkboxes on
  * one row UI_CHECK_GAP apart. Labels are right-aligned against their fields, as Blender's. */
 inline constexpr float UI_GROUP_GAP = 10.0f;
-inline constexpr float UI_JOIN_GAP = 2.0f;
+inline constexpr float UI_JOIN_GAP = 1.0f;
 inline constexpr float UI_CHECK_GAP = 16.0f;
 /* A spacing rule at the interface scale. */
 float ui_space(float pixels);
@@ -184,11 +184,29 @@ float ui_space(float pixels);
 void ui_row_label(const char *label);
 /* The space between two groups of rows. */
 void ui_group_gap();
-/* A new row of checkboxes (ui_checkbox), as tall as a row of fields, in the value column. */
-void ui_checks_row();
-/* A checkbox the size of Blender's (14 of a 20 pixel row), centred on the row; several go on one row
- * UI_CHECK_GAP apart (SameLine). */
+/* A new row of checkboxes (ui_checkbox) in the value column. `heading`, if any, names the group in the
+ * label column, right-aligned as a label (Blender's column heading: "Show  [x] Fill  [x] Outline"). */
+void ui_checks_row(const char *heading = nullptr);
+/* A checkbox the size of Blender's (14 of a 20 pixel row), centred on a row of fields' height; several go
+ * on one row UI_CHECK_GAP apart (SameLine), or one under another. */
 bool ui_checkbox(const char *label, bool *value);
+/* Fields joined as Blender's aligned rows: the next field (number, text, button, colour, eyedropper) rounds
+ * only these corners (an ImDrawFlags_RoundCorners* value); call before each and put them UI_JOIN_GAP apart. */
+void ui_join_next(int corners);
+/* The corners the next field rounds (all, unless ui_join_next asked otherwise), used up by asking. */
+int ui_join_take();
+/* The corners in both (ImGui reads no corner flags as all of them: none left is RoundCornersNone). */
+int ui_corners_and(int a, int b);
+/* ui_join_next for a field `i` of `n` in a joined row: the first rounds its left corners, the last its right. */
+void ui_join_in_row(int i, int n);
+/* A text field as Blender's: darker than a number field, so typing into it reads apart from dragging. */
+bool ui_input_text(const char *id, std::string *text, int flags = 0);
+bool ui_input_text_hint(const char *id, const char *hint, std::string *text, int flags = 0);
+/* A field drawn by `draw` (ImGui's, sized by the next item width) on Blender's dark text-field background,
+ * keeping ui_join_next's corners. */
+bool ui_field_dark(const char *id, const std::function<bool()> &draw);
+/* A button that keeps ui_join_next's corners. */
+bool ui_button(const char *label, float width = 0.0f, float height = 0.0f);
 /* A Bool property as Blender's checkbox, its name to the right of the box, in the value column;
  * `heading` in the label column names the group (empty for the rest of it): "Audio  [x] Scrubbing". */
 void ui_prop_check(Context &C, const rna::PointerRNA &ptr, const char *identifier, const char *python_path,

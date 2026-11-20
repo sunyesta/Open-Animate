@@ -507,9 +507,8 @@ static void drag_int(Edit &r, const char *label, const char *id, int &value, int
 
 static void check(Edit &r, const char *label, bool &value, const char *tip)
 {
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(1);
-  if (ImGui::Checkbox(label, &value)) {
+  ui_checks_row();
+  if (ui_checkbox(label, &value)) {
     r.changed = r.done = true;
   }
   tooltip(tip);
@@ -711,11 +710,11 @@ static void tip_section(Context &C, Edit &r, BrushSettings &b)
     }
     r.done |= ImGui::IsItemDeactivatedAfterEdit();
     tooltip("100%: the tip as drawn; less squashes it across, for calligraphic lines");
-    if (ImGui::Checkbox("Flip X", &b.flip_x)) {
+    if (ui_checkbox("Flip X", &b.flip_x)) {
       r.changed = r.done = true;
     }
-    ImGui::SameLine();
-    if (ImGui::Checkbox("Flip Y", &b.flip_y)) {
+    ImGui::SameLine(0.0f, ui_space(UI_CHECK_GAP));
+    if (ui_checkbox("Flip Y", &b.flip_y)) {
       r.changed = r.done = true;
     }
     ImGui::EndGroup();
@@ -1022,7 +1021,7 @@ static void brushes_tab(Context &C, const BrushSettings &current, const Style &s
 {
   WindowState &w = g_window;
   ImGui::SetNextItemWidth(-1);
-  ImGui::InputTextWithHint("##search", "Search brushes", &w.search);
+  ui_input_text_hint("##search", "Search brushes", &w.search);
   ImGui::Spacing();
   if (ImGui::BeginChild("##presets", ImVec2(0, -footer))) {
     std::vector<const BrushPreset *> file;
@@ -1102,7 +1101,7 @@ static void footer_row(Context &C, BrushTarget target, bool enabled)
   const bool to_library = w.to_library && library_ready;
   const float right = plus + where_w + st.ItemSpacing.x * 2.0f + (to_library ? category_w + st.ItemSpacing.x : 0.0f);
   ImGui::SetNextItemWidth(std::max(ImGui::GetContentRegionAvail().x - right, 80.0f));
-  bool save = ImGui::InputTextWithHint("##new_name", "New preset name", &w.new_name, ImGuiInputTextFlags_EnterReturnsTrue);
+  bool save = ui_input_text_hint("##new_name", "New preset name", &w.new_name, ImGuiInputTextFlags_EnterReturnsTrue);
 
   /* Where it goes. */
   ImGui::SameLine();
@@ -1139,7 +1138,7 @@ static void footer_row(Context &C, BrushTarget target, bool enabled)
         ImGui::SetKeyboardFocusHere();
         w.focus_category = false;
       }
-      const bool entered = ImGui::InputTextWithHint("##new_category", "New category", &w.typed_category,
+      const bool entered = ui_input_text_hint("##new_category", "New category", &w.typed_category,
                                                     ImGuiInputTextFlags_EnterReturnsTrue);
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
         ImGui::SetTooltip("A new category: a new folder of Brushes (Enter keeps it, Esc goes back)");
@@ -1208,7 +1207,7 @@ static void footer_row(Context &C, BrushTarget target, bool enabled)
     if (ImGui::IsWindowAppearing()) {
       ImGui::SetKeyboardFocusHere();
     }
-    const bool entered = ImGui::InputTextWithHint("##name", "Category name", &w.save_category,
+    const bool entered = ui_input_text_hint("##name", "Category name", &w.save_category,
                                                   ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::Spacing();
     ImGui::BeginDisabled(w.save_category.empty());
@@ -1469,10 +1468,12 @@ bool brush_row(Context &C, const BrushSettings &brush, const Style &style, const
 {
   ui_row_label("Brush");
   const float revert_w = revert_tip ? ui_revert_button_space() : 0.0f;
-  const float preview_h = 48.0f, button_w = ImGui::GetFrameHeight(), gap = ImGui::GetStyle().ItemInnerSpacing.x;
+  /* The button and the preview joined, as Blender's aligned row. */
+  const float preview_h = 48.0f, button_w = ImGui::GetFrameHeight(), gap = ui_space(UI_JOIN_GAP);
   /* Blender's preset button (three sliders), as tall as the preview: it opens Brush Settings. */
   const ImVec2 at = ImGui::GetCursorScreenPos();
-  if (ImGui::Button("##brush_settings", ImVec2(button_w, preview_h))) {
+  ui_join_next(ImDrawFlags_RoundCornersLeft);
+  if (ui_button("##brush_settings", button_w, preview_h)) {
     g_window.tab_request = 0;
     brush_window_open(BrushTarget::Shapes);
   }
@@ -1490,13 +1491,14 @@ bool brush_row(Context &C, const BrushSettings &brush, const Style &style, const
     brush_window_open(BrushTarget::Shapes);
   }
   const bool hot = ImGui::IsItemHovered();
-  dl->AddRectFilled(pa, pa + size, WELL_BG, ImGui::GetStyle().FrameRounding);
+  dl->AddRectFilled(pa, pa + size, WELL_BG, ImGui::GetStyle().FrameRounding, ImDrawFlags_RoundCornersRight);
   preview_draw(dl, "panel:shapes", brush, style, pa + ImVec2(2, 2), pa + size - ImVec2(2, 2), 0x262626);
   const bool missing = !brush.name.empty() && !brush_find(brush.name);
   const std::string name = brush_shown_name(*C.document, brush) + (missing ? "  (shape missing)" : "");
   dl->AddText(pa + ImVec2(6.0f, 3.0f), missing ? MISSING_TEXT : IM_COL32(0xc8, 0xc8, 0xc8, 220), name.c_str());
   if (hot) {
-    dl->AddRect(pa, pa + size, IM_COL32(0x80, 0x80, 0x80, 255), ImGui::GetStyle().FrameRounding);
+    dl->AddRect(pa, pa + size, IM_COL32(0x80, 0x80, 0x80, 255), ImGui::GetStyle().FrameRounding,
+                ImDrawFlags_RoundCornersRight);
   }
   tooltip(missing ? "This brush's shape isn't in the asset library: the line is drawn plain. Click for the brush presets"
                   : "Click for the brush presets");

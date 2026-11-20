@@ -778,6 +778,12 @@ static void key_button_finish(int pushed)
   const uint64_t flash_layer = g_key_next.flash_layer;
   const std::string flash_path = g_key_next.flash_path;
   g_key_next = {};
+  /* After a field narrower than its column (a checkbox), the key button still goes at the column's end. */
+  ImGui::SameLine(0.0f, 0.0f);
+  const float spare = ImGui::GetContentRegionAvail().x - ui_key_button_width();
+  if (spare > 1.0f) {
+    ImGui::Dummy(ImVec2(spare, 0.0f));
+  }
   if (ui_key_button("##key", state) && on_click) {
     on_click();
   }
@@ -820,10 +826,129 @@ void ui_group_gap()
                       std::max(0.0f, ui_space(UI_GROUP_GAP) - ImGui::GetStyle().CellPadding.y * 2.0f));
 }
 
-void ui_checks_row()
+void ui_checks_row(const char *heading)
 {
-  ImGui::TableNextRow(ImGuiTableRowFlags_None, ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2.0f);
+  if (heading && heading[0]) {
+    ui_label(heading);
+    return;
+  }
+  ImGui::TableNextRow();
   ImGui::TableSetColumnIndex(1);
+}
+
+static int g_join_corners = ImDrawFlags_RoundCornersAll;
+
+void ui_join_next(int corners)
+{
+  g_join_corners = corners;
+}
+
+int ui_join_take()
+{
+  const int corners = g_join_corners;
+  g_join_corners = ImDrawFlags_RoundCornersAll;
+  return corners;
+}
+
+int ui_corners_and(int a, int b)
+{
+  /* The corners each names: None is none, no corner flags at all is every corner. */
+  const auto corners = [](int flags) {
+    const int all = ImDrawFlags_RoundCornersAll;
+    return (flags & ImDrawFlags_RoundCornersNone) ? 0 : ((flags & all) ? (flags & all) : all);
+  };
+  const int both = corners(a) & corners(b);
+  return both ? both : ImDrawFlags_RoundCornersNone;
+}
+
+void ui_join_in_row(int i, int n)
+{
+  int corners = ImDrawFlags_RoundCornersAll;
+  if (i > 0) {
+    corners &= ~ImDrawFlags_RoundCornersLeft;
+  }
+  if (i < n - 1) {
+    corners &= ~ImDrawFlags_RoundCornersRight;
+  }
+  ui_join_next(corners ? corners : ImDrawFlags_RoundCornersNone);
+}
+
+/* Blender's text field (wcol_text): darker than a number field. */
+static const ImU32 TEXT_FIELD_BG = IM_COL32(0x1d, 0x1d, 0x1d, 255);
+static const ImU32 TEXT_FIELD_HOVER = IM_COL32(0x24, 0x24, 0x24, 255);
+
+/* Draws a field's background itself, with the joined corners, then has ImGui draw the field over it with
+ * no background of its own. */
+template<typename Draw> static bool field_with_corners(const char *id, ImU32 bg, ImU32 hover, Draw draw)
+{
+  const int corners = ui_join_take();
+  const ImVec2 at = ImGui::GetCursorScreenPos();
+  const ImVec2 size(ImGui::CalcItemWidth(), ImGui::GetFrameHeight());
+  const ImGuiContext &g = *GImGui;
+  const ImGuiID item = ImGui::GetID(id);
+  const bool disabled = (g.CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
+  /* Its own id or, for a widget whose inner field has another, the mouse over it. */
+  const bool hot = !disabled && (g.ActiveId == item || g.HoveredIdPreviousFrame == item ||
+                                 (ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(at, at + size)));
+  ImU32 col = hot ? hover : bg;
+  if (disabled) {
+    col = (col & 0x00ffffffu) | (ImU32(float(col >> 24) * g.Style.DisabledAlpha) << 24);
+  }
+  ImGui::GetWindowDrawList()->AddRectFilled(at, at + size, col, ImGui::GetStyle().FrameRounding, corners);
+  ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgActive, IM_COL32(0, 0, 0, 0));
+  const bool result = draw();
+  ImGui::PopStyleColor(3);
+  return result;
+}
+
+bool ui_field_dark(const char *id, const std::function<bool()> &draw)
+{
+  return field_with_corners(id, TEXT_FIELD_BG, TEXT_FIELD_HOVER, draw);
+}
+
+bool ui_input_text(const char *id, std::string *text, int flags)
+{
+  return field_with_corners(id, TEXT_FIELD_BG, TEXT_FIELD_HOVER,
+                            [&] { return ImGui::InputText(id, text, ImGuiInputTextFlags(flags)); });
+}
+
+bool ui_input_text_hint(const char *id, const char *hint, std::string *text, int flags)
+{
+  return field_with_corners(id, TEXT_FIELD_BG, TEXT_FIELD_HOVER,
+                            [&] { return ImGui::InputTextWithHint(id, hint, text, ImGuiInputTextFlags(flags)); });
+}
+
+bool ui_button(const char *label, float width, float height)
+{
+  const int corners = ui_join_take();
+  if (corners == ImDrawFlags_RoundCornersAll) {
+    return ImGui::Button(label, ImVec2(width, height));
+  }
+  /* ImGui rounds every corner of a button: its background drawn here first, with the outer corners only
+   * (hover and press as of the last frame, as ImGui's own are), and the button over it with none. */
+  const ImGuiContext &g = *GImGui;
+  const ImGuiStyle &st = g.Style;
+  const ImGuiID id = ImGui::GetID(label);
+  const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
+  const ImVec2 size = ImGui::CalcItemSize(ImVec2(width, height), label_size.x + st.FramePadding.x * 2.0f,
+                                          label_size.y + st.FramePadding.y * 2.0f);
+  const ImVec2 at = ImGui::GetCursorScreenPos();
+  const ImGuiCol c = g.ActiveId == id ? ImGuiCol_ButtonActive
+                     : g.HoveredIdPreviousFrame == id ? ImGuiCol_ButtonHovered
+                                                      : ImGuiCol_Button;
+  ImU32 col = ImGui::GetColorU32(c);
+  if (g.CurrentItemFlags & ImGuiItemFlags_Disabled) {
+    col = ImGui::GetColorU32(c, st.DisabledAlpha);
+  }
+  ImGui::GetWindowDrawList()->AddRectFilled(at, at + size, col, st.FrameRounding, corners);
+  ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(0, 0, 0, 0));
+  const bool clicked = ImGui::Button(label, size);
+  ImGui::PopStyleColor(3);
+  return clicked;
 }
 
 bool ui_checkbox(const char *label, bool *value)
@@ -839,8 +964,14 @@ bool ui_checkbox(const char *label, bool *value)
   ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(ui_space(3.0f), ImGui::GetStyle().ItemInnerSpacing.y));
   const bool changed = ImGui::Checkbox(label, value);
   ImGui::PopStyleVar(2);
-  /* SameLine goes back to the row's top, not the box's, so the next box drops the same. */
-  ImGui::GetCurrentWindow()->DC.CursorPosPrevLine.y = at.y;
+  /* The box takes a row of fields' height: SameLine goes back to the row's top, not the box's (so the next
+   * box drops the same), a line under it starts a field's height down, and a table row is that tall. */
+  ImGuiWindow *window = ImGui::GetCurrentWindow();
+  const float row = ImGui::GetFrameHeight();
+  window->DC.CursorPosPrevLine.y = at.y;
+  window->DC.PrevLineSize.y = std::max(window->DC.PrevLineSize.y, row);
+  window->DC.CursorPos.y = std::max(window->DC.CursorPos.y, at.y + row + ImGui::GetStyle().ItemSpacing.y);
+  window->DC.CursorMaxPos.y = std::max(window->DC.CursorMaxPos.y, at.y + row);
   return changed;
 }
 
@@ -872,7 +1003,8 @@ static void prop_field(Context &C, const rna::PointerRNA &ptr, const rna::Proper
   const float hard_min = ranged ? float(prop->min) : -FLT_MAX, hard_max = ranged ? float(prop->max) : FLT_MAX;
   switch (prop->type) {
     case rna::PropType::Bool:
-      changed = ImGui::Checkbox("##value", &std::get<bool>(value));
+      /* `prefix` is a checkbox's own name, beside the box (Blender's: no label in the label column). */
+      changed = ui_checkbox(prefix ? (std::string(prefix) + "###value").c_str() : "##value", &std::get<bool>(value));
       break;
     case rna::PropType::Int:
       changed = ui_drag_int("##value", &std::get<int>(value), 0.25f, int(soft_min), int(soft_max), int_format.c_str(), 0,
@@ -898,7 +1030,7 @@ static void prop_field(Context &C, const rna::PointerRNA &ptr, const rna::Proper
     }
       break;
     case rna::PropType::String:
-      changed = ImGui::InputText("##value", &std::get<std::string>(value));
+      changed = ui_input_text("##value", &std::get<std::string>(value));
       break;
     case rna::PropType::Enum: {
       int &index = std::get<int>(value);
@@ -943,7 +1075,9 @@ void ui_prop(Context &C, const rna::PointerRNA &ptr, const char *identifier, con
   if (!prop) {
     return;
   }
-  ui_label(prop->name.c_str());
+  /* A checkbox has its name after the box and nothing in the label column, as in Blender. */
+  const bool check = prop->type == rna::PropType::Bool;
+  ui_label(check ? "" : prop->name.c_str());
   ImGui::PushID(identifier);
   const int pushed = g_key_next.pending ? ui_key_tint_push(g_key_next.state) : 0;
   uint64_t dl = g_key_next.flash_layer;
@@ -955,7 +1089,7 @@ void ui_prop(Context &C, const rna::PointerRNA &ptr, const char *identifier, con
     dp = std::string("props.") + identifier;
   }
   const int driven = ui_driver_field_begin(C, dl, dp, -1);
-  prop_field(C, ptr, prop, python_path, nullptr);
+  prop_field(C, ptr, prop, python_path, check ? prop->name.c_str() : nullptr);
   ui_driver_typed(C, dl, dp, -1);
   ui_driver_field_end(C, dl, dp, -1, driven);
   key_button_finish(pushed);
@@ -973,7 +1107,7 @@ void ui_prop_check(Context &C, const rna::PointerRNA &ptr, const char *identifie
   ImGui::PushID(identifier);
   ImGui::BeginDisabled(!prop->set);
   bool value = std::get<bool>(prop->get(ptr.data));
-  if (ImGui::Checkbox(prop->name.c_str(), &value) && prop->set) {
+  if (ui_checkbox(prop->name.c_str(), &value) && prop->set) {
     prop->set(ptr.data, value);
     if (C.undo && C.document) {
       C.undo->push("Change " + prop->name, *C.document);
@@ -999,7 +1133,8 @@ void ui_prop_pair(Context &C, const rna::PointerRNA &ptr, const char *label, con
   ImGui::PushID(label);
   const bool keyed = g_key_next.pending;
   const int pushed = keyed ? ui_key_tint_push(g_key_next.state) : 0;
-  const float spacing = 2.0f;
+  /* Joined, as Blender's aligned row: only the outer corners round. */
+  const float spacing = ui_space(UI_JOIN_GAP);
   const float middle = between ? ImGui::GetFrameHeight() + spacing : 0.0f;
   const float avail = ImGui::GetContentRegionAvail().x - (keyed ? ui_key_button_width() : 0.0f) - middle;
   const float w = (avail - spacing) * 0.5f;
@@ -1008,17 +1143,24 @@ void ui_prop_pair(Context &C, const rna::PointerRNA &ptr, const char *label, con
   /* Each of the pair is one part of the channel (a position's X and Y), driven on its own. */
   int driven = ui_driver_field_begin(C, dl, dp, 0);
   ImGui::SetNextItemWidth(w);
+  ui_join_next(ImDrawFlags_RoundCornersLeft);
   prop_field(C, ptr, a, python_path, first_prefix);
+  /* A field that doesn't join (not a number) leaves the corners for nothing after it. */
+  ui_join_take();
   ui_driver_typed(C, dl, dp, 0);
   ui_driver_field_end(C, dl, dp, 0, driven);
   ImGui::SameLine(0.0f, spacing);
   if (between) {
+    ui_join_next(ImDrawFlags_RoundCornersNone);
     between();
+    ui_join_take();
     ImGui::SameLine(0.0f, spacing);
   }
   driven = ui_driver_field_begin(C, dl, dp, 1);
   ImGui::SetNextItemWidth(keyed ? w : -FLT_MIN);
+  ui_join_next(ImDrawFlags_RoundCornersRight);
   prop_field(C, ptr, b, python_path, second_prefix);
+  ui_join_take();
   ui_driver_typed(C, dl, dp, 1);
   ui_driver_field_end(C, dl, dp, 1, driven);
   key_button_finish(pushed);
@@ -1031,22 +1173,27 @@ bool ui_color(Context &C, const char *label, float rgba[4], const char *undo_nam
   ui_label(label);
   ImGui::PushID(label);
   bool finished = false;
-  const float revert_w = (r_revert ? ui_revert_button_space() : 0.0f) + (r_pick ? ui_revert_button_space() : 0.0f);
+  /* Swatch, hex, revert and eyedropper joined in one row (Blender's aligned row). */
+  const float button_w = ImGui::GetFrameHeight() + ui_space(UI_JOIN_GAP);
+  const float revert_w = (r_revert ? button_w : 0.0f) + (r_pick ? button_w : 0.0f);
   uint64_t dl = 0;
   std::string dp;
   ui_driver_next_take(&dl, &dp);
   const int driven = ui_driver_field_begin(C, dl, dp, -1);
+  ui_join_next(r_revert || r_pick ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersAll);
   const bool changed = ui_color_edit("##color", rgba, true, &finished, revert_w);
   ui_driver_field_end(C, dl, dp, -1, driven);
   if (finished && C.undo && C.document && undo_name) {
     C.undo->push(undo_name, *C.document);
   }
   if (r_revert) {
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::SameLine(0.0f, ui_space(UI_JOIN_GAP));
+    ui_join_next(r_pick ? ImDrawFlags_RoundCornersNone : ImDrawFlags_RoundCornersRight);
     *r_revert = ui_revert_button("##revert", "Revert to the original's colour");
   }
   if (r_pick) {
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::SameLine(0.0f, ui_space(UI_JOIN_GAP));
+    ui_join_next(ImDrawFlags_RoundCornersRight);
     const std::string tip = std::string("Eyedropper: click a shape in the viewport to take its ") + label;
     *r_pick = ui_pick_button("##pick", tip.c_str(), pick_active);
   }
@@ -1267,7 +1414,7 @@ bool ui_revert_button(const char *id, const char *tooltip)
 {
   const float h = ImGui::GetFrameHeight();
   const ImVec2 at = ImGui::GetCursorScreenPos();
-  const bool clicked = ImGui::Button(id, ImVec2(h, h));
+  const bool clicked = ui_button(id, h, h);
   if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
     ImGui::SetTooltip("%s", tooltip);
   }
@@ -1539,7 +1686,7 @@ void ui_action_panel_draw(Context &C, const char *area, const char *fold_key, Im
     }
     else {
       bool on = value == "1" || value == "true" || value == "True";
-      if (ImGui::Checkbox(prop.label.c_str(), &on)) {
+      if (ui_checkbox(prop.label.c_str(), &on)) {
         args[prop.name] = on ? "1" : "0";
         changed = true;
       }
@@ -1581,18 +1728,43 @@ bool ui_color_edit(const char *id, float rgba[4], bool hex, bool *r_finished, fl
   }
 
   const float h = ImGui::GetFrameHeight();
-  const ImGuiColorEditFlags show = ImGuiColorEditFlags_AlphaPreviewHalf;
-  if (ImGui::ColorButton("##swatch", ImVec4(rgba[0], rgba[1], rgba[2], rgba[3]), show,
-                         ImVec2(swatch_width > 0.0f ? swatch_width : h * 1.6f, h))) {
-    ImGui::OpenPopup("##picker");
+  /* The swatch and the hex field are joined (and to whatever ui_join_next joined the whole to). */
+  const int join = ui_join_take();
+  {
+    /* Drawn here rather than by ColorButton, which rounds every corner: half of it shows the alpha over a
+     * checkerboard, as AlphaPreviewHalf does. */
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const ImVec2 size(swatch_width > 0.0f ? swatch_width : h * 1.6f, h);
+    if (ImGui::InvisibleButton("##swatch", size)) {
+      ImGui::OpenPopup("##picker");
+    }
+    const int corners = hex ? ui_corners_and(join, ImDrawFlags_RoundCornersLeft) : join;
+    const float rounding = ImGui::GetStyle().FrameRounding;
+    ImDrawList *sdl = ImGui::GetWindowDrawList();
+    const ImU32 opaque = ImGui::ColorConvertFloat4ToU32(ImVec4(rgba[0], rgba[1], rgba[2], 1.0f));
+    const ImU32 clear = ImGui::ColorConvertFloat4ToU32(ImVec4(rgba[0], rgba[1], rgba[2], rgba[3]));
+    if (rgba[3] < 1.0f) {
+      const float mid = std::floor(at.x + size.x * 0.5f);
+      sdl->AddRectFilled(at, ImVec2(mid, at.y + size.y), opaque, rounding,
+                         ui_corners_and(corners, ImDrawFlags_RoundCornersLeft));
+      ImGui::RenderColorRectWithAlphaCheckerboard(sdl, ImVec2(mid, at.y), at + size, clear, size.y / 2.7f,
+                                                  ImVec2(0.0f, 0.0f), rounding,
+                                                  ui_corners_and(corners, ImDrawFlags_RoundCornersRight));
+    }
+    else {
+      sdl->AddRectFilled(at, at + size, opaque, rounding, corners);
+    }
   }
   if (hex) {
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::SameLine(0.0f, ui_space(UI_JOIN_GAP));
     ImGui::SetNextItemWidth(right_space > 0.0f ? -right_space : -FLT_MIN);
-    changed |= ImGui::ColorEdit4("##hex", rgba,
-                                 ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_NoSmallPreview |
-                                     ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoOptions |
-                                     ImGuiColorEditFlags_NoLabel | ImGuiColorEditFlags_AlphaBar);
+    ui_join_next(ui_corners_and(join, ImDrawFlags_RoundCornersRight));
+    changed |= ui_field_dark("##hex", [&] {
+      return ImGui::ColorEdit4("##hex", rgba,
+                               ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_NoSmallPreview |
+                                   ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoOptions |
+                                   ImGuiColorEditFlags_NoLabel | ImGuiColorEditFlags_AlphaBar);
+    });
     finished |= ImGui::IsItemDeactivatedAfterEdit();
   }
 
@@ -1714,7 +1886,7 @@ bool ui_collection_list(const Document &doc, const char *id, const std::function
     ImGui::SetKeyboardFocusHere();
   }
   ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
-  const bool entered = ImGui::InputTextWithHint("##collection_search", "Search", &search,
+  const bool entered = ui_input_text_hint("##collection_search", "Search", &search,
                                                 ImGuiInputTextFlags_EnterReturnsTrue);
   const auto lower = [](std::string t) {
     for (char &ch : t) {
@@ -1941,7 +2113,7 @@ bool ui_pick_button(const char *id, const char *tooltip, bool active)
     ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
   }
   /* A click while it's on stops it, as any click off a shape does. */
-  const bool clicked = ImGui::Button(id, ImVec2(h, h)) && !active;
+  const bool clicked = ui_button(id, h, h) && !active;
   if (active) {
     ImGui::PopStyleColor();
   }

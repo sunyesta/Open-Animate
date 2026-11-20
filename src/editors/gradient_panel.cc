@@ -122,6 +122,7 @@ void properties_gradient_tab(Context &C)
     ImGui::EndGroup();
 
     if (g.active_stop >= 0 && g.active_stop < int(g.stops.size())) {
+      ui_group_gap();
       GradientStop &stop = g.stops[size_t(g.active_stop)];
       float rgba[4] = {stop.color.r, stop.color.g, stop.color.b, stop.color.a};
       if (ui_color(C, "Color", rgba, nullptr)) {

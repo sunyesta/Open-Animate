@@ -358,6 +358,8 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
   const float h = ImGui::GetFrameHeight();
   const float w_total = std::max(ImGui::CalcItemWidth(), h);
   const float toggle_w = f.pressure ? h : 0.0f;
+  /* Joined to the fields beside it (ui_join_next): only its outer corners round. */
+  const ImDrawFlags join = ui_join_take();
   const ImVec2 at = window->DC.CursorPos;
   const ImRect frame_bb(at, at + ImVec2(w_total - toggle_w, h));
   const ImRect total_bb(at, at + ImVec2(w_total, h));
@@ -383,7 +385,8 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
     }
     const ImU32 bg = *f.pressure ? COL_FILL
                                  : ImGui::GetColorU32(hovered_toggle ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
-    dl->AddRectFilled(toggle_bb.Min, toggle_bb.Max, bg, style.FrameRounding, ImDrawFlags_RoundCornersRight);
+    dl->AddRectFilled(toggle_bb.Min, toggle_bb.Max, bg, style.FrameRounding,
+                      ui_corners_and(join, ImDrawFlags_RoundCornersRight));
     dl->AddLine(ImVec2(toggle_bb.Min.x, toggle_bb.Min.y + 2.0f), ImVec2(toggle_bb.Min.x, toggle_bb.Max.y - 2.0f),
                 IM_COL32(0x2a, 0x2a, 0x2a, 255));
     ui_pressure_icon(dl, toggle_bb.GetCenter(), h * 0.78f, ImGui::GetColorU32(ImGuiCol_Text));
@@ -640,7 +643,7 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
   const ImU32 frame_col = ImGui::GetColorU32(active || picked ? ImGuiCol_FrameBgActive
                                              : hovered           ? ImGuiCol_FrameBgHovered
                                                                  : ImGuiCol_FrameBg);
-  const ImDrawFlags corners = f.pressure ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersAll;
+  const ImDrawFlags corners = ui_corners_and(join, f.pressure ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersAll);
   dl->AddRectFilled(frame_bb.Min, frame_bb.Max, frame_col, style.FrameRounding, corners);
   if (factor) {
     const float t = float(std::clamp((*value - f.soft_min) / (f.soft_max - f.soft_min), 0.0, 1.0));
@@ -649,7 +652,7 @@ bool ui_number(const char *id_text, double *value, const NumberField &f)
       const bool full = x >= frame_bb.Max.x - style.FrameRounding;
       dl->AddRectFilled(frame_bb.Min, ImVec2(std::max(x, frame_bb.Min.x + 2.0f), frame_bb.Max.y), COL_FILL,
                         style.FrameRounding,
-                        full ? corners : ImDrawFlags(ImDrawFlags_RoundCornersLeft));
+                        full ? corners : ImDrawFlags(ui_corners_and(corners, ImDrawFlags_RoundCornersLeft)));
     }
   }
   if (style.FrameBorderSize > 0.0f) {
@@ -705,14 +708,19 @@ static bool number_row(const char *id, T *v, int n, const NumberField &base)
 {
   ImGui::BeginGroup();
   ImGui::PushID(id);
+  /* Joined, as Blender's aligned row: UI_JOIN_GAP apart, only the outer corners round. */
+  const float gap = ui_space(UI_JOIN_GAP);
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(gap, ImGui::GetStyle().ItemInnerSpacing.y));
   ImGui::PushMultiItemsWidths(n, ImGui::CalcItemWidth());
+  ImGui::PopStyleVar();
   bool changed = false;
   for (int k = 0; k < n; k++) {
     ImGui::PushID(k);
     if (k > 0) {
-      ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+      ImGui::SameLine(0, gap);
     }
     double d = double(v[k]);
+    ui_join_in_row(k, n);
     if (ui_number("##v", &d, base)) {
       v[k] = T(d);
       changed = true;

@@ -144,7 +144,7 @@ void properties_text_tab(Context &C)
     });
     ui_row("Italic", [&](float) {
       bool italic = shown.italic;
-      if (ImGui::Checkbox("##italic", &italic)) {
+      if (ui_checkbox("##italic", &italic)) {
         restyle("Text Italic", true, [&](TextRun &r) { r.italic = italic; });
       }
     });
@@ -166,14 +166,15 @@ void properties_text_tab(Context &C)
   if (ui_panel_begin("Look", material ? "Look: " + material->name + " (shared)" : std::string("Look: Own look"), 0u)) {
     ui_row("Show", [&](float) {
       bool fill = shown.has_fill, outline = shown.has_outline;
-      if (ImGui::Checkbox("Fill", &fill)) {
+      if (ui_checkbox("Fill", &fill)) {
         restyle("Text Fill", true, [&](TextRun &r) { r.has_fill = fill; });
       }
-      ImGui::SameLine();
-      if (ImGui::Checkbox("Outline", &outline)) {
+      ImGui::SameLine(0.0f, ui_space(UI_CHECK_GAP));
+      if (ui_checkbox("Outline", &outline)) {
         restyle("Text Outline", true, [&](TextRun &r) { r.has_outline = outline; });
       }
     });
+    ui_group_gap();
     ui_row("Material", [&](float width) {
       ImGui::SetNextItemWidth(width);
       if (ImGui::BeginCombo("##material", material ? material->name.c_str() : "Own look")) {
@@ -198,6 +199,7 @@ void properties_text_tab(Context &C)
         ImGui::EndCombo();
       }
     });
+    ui_group_gap();
     /* A shared look changes its material, so every shape and text using it changes too. */
     const auto set_look = [&](const char *undo_name, bool finished, auto &&change) {
       if (Material *m = shown.material ? material_find(doc, shown.material) : nullptr) {
@@ -228,6 +230,7 @@ void properties_text_tab(Context &C)
     if (ImGui::IsItemDeactivatedAfterEdit()) {
       C.undo->push("Text Line Color", doc);
     }
+    ui_group_gap();
     ui_row("Line Width", [&](float width) {
       float w = shown.style.line_width;
       ImGui::SetNextItemWidth(width);
