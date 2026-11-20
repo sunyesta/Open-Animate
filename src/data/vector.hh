@@ -678,6 +678,11 @@ std::vector<bool> drawing_selected_shapes(const VectorDrawing &drawing);
  * inside another a hole, Even-Odd unless it had a rule already), with the look and place of the first of
  * them. Returns how many shapes went into it (0 with fewer than two). */
 int drawing_join_fills(VectorDrawing &drawing);
+/* F on a whole loop (every point of a closed curve selected) with no fill round it, as Blender's F makes a face and
+ * Moho's Create Shape: a line all the way round it (and on nothing else) is filled, else a new shape in `style`
+ * fills and outlines it. A curve whose last point is its first again (its ends merged) is closed first. Returns how
+ * many loops it filled. */
+int drawing_fill_loops(VectorDrawing &drawing, const Style &style);
 /* Separate Fills: each shape all of whose points are selected and that has several runs of edges becomes
  * a shape per run, each with its look, the first keeping its place and number. Returns how many shapes
  * were made. */

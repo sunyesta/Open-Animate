@@ -1108,8 +1108,9 @@ static std::vector<int> curve_segment_remap(const std::vector<bool> &removed, bo
     }
     kept_before[size_t(i)] = run;
   }
-  std::vector<bool> kept_after(size_t(n), closed_before);
-  if (!closed_before) {
+  /* Closed after (an open curve whose ends met), the last kept point runs on round to the first. */
+  std::vector<bool> kept_after(size_t(n), closed_before || closed_after);
+  if (!closed_before && !closed_after) {
     bool any = false;
     for (int i = n - 1; i >= 0; i--) {
       kept_after[size_t(i)] = any;
@@ -1242,15 +1243,18 @@ int drawing_merge_points(VectorDrawing &drawing, const std::vector<std::vector<i
                                                    curve.points[size_t(k)].handles_set;
       }
     }
-    /* A loop's last point on its first. */
-    if (curve.closed && n > 1 && !removed[0]) {
+    /* A loop's last point on its first; and an open curve whose two ends were merged goes round now, a loop (left
+     * open, it showed as one but nothing took it for one: F made no fill of it). */
+    if (n > 1 && !removed[0]) {
       int last = n - 1;
       while (last > 0 && removed[size_t(last)]) {
         last--;
       }
-      if (last > 0 && curve.points[size_t(last)].point == curve.points[0].point) {
+      const int kept_n = int(std::count(removed.begin(), removed.end(), false));
+      if (last > 0 && curve.points[size_t(last)].point == curve.points[0].point && (curve.closed || kept_n >= 4)) {
         removed[size_t(last)] = true;
         curve.points[0].handle_in = curve.points[size_t(last)].handle_in;
+        curve.closed = true;
       }
     }
     std::vector<CurvePoint> kept;
@@ -2790,6 +2794,73 @@ int drawing_join_fills(VectorDrawing &drawing)
     drawing.shapes.erase(drawing.shapes.begin() + picked[k]);
   }
   return int(picked.size());
+}
+
+int drawing_fill_loops(VectorDrawing &drawing, const Style &style)
+{
+  int filled = 0;
+  for (int c = 0; c < int(drawing.curves.size()); c++) {
+    Curve &curve = drawing.curves[size_t(c)];
+    if (!std::all_of(curve.points.begin(), curve.points.end(),
+                     [&](const CurvePoint &cp) { return drawing.points[size_t(cp.point)].selected; }))
+    {
+      continue;
+    }
+    /* Ends merged before merging closed loops: its last point its first again. Its segments keep their numbers. */
+    if (!curve.closed && curve.points.size() >= 4 && curve.points.back().point == curve.points.front().point) {
+      curve.points.front().handle_in = curve.points.back().handle_in;
+      curve.points.pop_back();
+      curve.closed = true;
+    }
+    if (!curve.closed || curve.points.size() < 3) {
+      continue;
+    }
+    const int segments = curve.segment_count();
+    /* A shape all the way round it, on nothing else: filled already, or a line to fill. */
+    int round = -1;
+    bool has_fill = false;
+    for (int s = 0; s < int(drawing.shapes.size()); s++) {
+      const Shape &shape = drawing.shapes[size_t(s)];
+      std::vector<bool> on(size_t(segments), false);
+      bool only_here = !shape.edges.empty();
+      for (const ShapeEdge &e : shape.edges) {
+        if (e.curve != c || e.segment < 0 || e.segment >= segments) {
+          only_here = false;
+          break;
+        }
+        on[size_t(e.segment)] = true;
+      }
+      if (only_here && std::all_of(on.begin(), on.end(), [](bool b) { return b; })) {
+        if (shape.has_fill) {
+          has_fill = true;
+          break;
+        }
+        round = s;
+      }
+    }
+    if (has_fill) {
+      continue;
+    }
+    if (round >= 0) {
+      drawing.shapes[size_t(round)].has_fill = true;
+      filled++;
+      continue;
+    }
+    Shape shape;
+    shape.name = "Shape";
+    shape.style = style;
+    shape.has_fill = true;
+    shape.has_outline = true;
+    for (int seg = 0; seg < segments; seg++) {
+      shape.edges.push_back({c, seg});
+    }
+    drawing.shapes.push_back(std::move(shape));
+    filled++;
+  }
+  if (filled > 0) {
+    drawing_ensure_ids(drawing);
+  }
+  return filled;
 }
 
 int drawing_separate_fills(VectorDrawing &drawing)

@@ -1208,7 +1208,8 @@ void vector_operators_register()
                   "Join the two selected points with a segment (F, as Blender's): two curve ends make one curve of "
                   "two, the two ends of one curve close it, and the shapes along them run on; any other two points "
                   "get a segment of their own, welded to both, drawn as the line through them is. With whole loops "
-                  "selected instead, F joins their fills (mesh.join_fills)",
+                  "selected instead, F fills each that has no fill (a new shape in the draw style, or the line round it filled) "
+                  "and joins their fills (mesh.join_fills)",
                   UNDO, editable_with_selection_poll, [](Context &C) {
                     int made = 0;
                     for (Layer *layer : editable_layers(C)) {
@@ -1218,16 +1219,20 @@ void vector_operators_register()
                       }
                     }
                     if (!made) {
-                      /* Whole loops picked: one fill of them, as Blender's F makes a face of a loop. */
+                      /* Whole loops picked: a fill of each that has none, then one fill of them all, as Blender's F
+                       * makes a face of a loop. */
+                      const Style style = C.wm ? C.wm->tool_settings.style : Style();
+                      int filled = 0;
                       for (Layer *layer : editable_layers(C)) {
+                        filled += drawing_fill_loops(layer->drawing, style);
                         made += drawing_join_fills(layer->drawing) > 0;
                       }
-                      if (made) {
-                        C.undo_name = "Join Fills";
+                      if (made || filled) {
+                        C.undo_name = made ? "Join Fills" : "Fill Loop";
                         return OpStatus::Finished;
                       }
-                      report(ReportType::Warning, "Select two points not already joined by a segment, or two or more "
-                                                  "loops to fill together");
+                      report(ReportType::Warning, "Select two points not already joined by a segment, or whole loops to "
+                                                  "fill");
                       return OpStatus::Cancelled;
                     }
                     return OpStatus::Finished;

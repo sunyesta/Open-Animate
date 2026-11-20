@@ -50,6 +50,11 @@ PENDING = [
     ('src/data/gradient.cc', '  piece(f.path.back(), end_dir, inf, f.total, 1.0f);', '  (void)end_dir;', "A gradient's path carries on past its end", 'tests/test_gradient_layer.py'),
     ('src/data/gradient.cc', '  const float q = (2.0f * m - 1.0f) / (1.0f - m);', '  const float q = 0.0f * m;', "A span's tick is where its colours meet half way", 'tests/test_gradient_layer.py'),
     ('src/data/gradient.cc', 'slopes[k][i] = a * b <= 0.0f ? 0.0f :', 'slopes[k][i] = true ? 0.0f :', 'A Smooth gradient has no kink at a stop', 'tests/test_gradient_layer.py'),
+    ('src/data/vector.cc', '      if (last > 0 && curve.points[size_t(last)].point == curve.points[0].point && (curve.closed || kept_n >= 4)) {', '      if (last > 0 && curve.points[size_t(last)].point == curve.points[0].point && (curve.closed || false && kept_n >= 4)) {', "Merging an open curve's two ends closes it", 'tests/test_fill_loop.py'),
+    ('src/data/vector.cc', '  if (!closed_before && !closed_after) {', '  if (!closed_before) {', 'A line along a curve whose ends merged goes round with it', 'tests/test_fill_loop.py'),
+    ('src/ops/vector_ops.cc', '                        filled += drawing_fill_loops(layer->drawing, style);', '                        (void)style;', 'F on a whole loop with no fill makes a shape of it', 'tests/test_fill_loop.py'),
+    ('src/data/vector.cc', '    if (!curve.closed && curve.points.size() >= 4 && curve.points.back().point == curve.points.front().point) {', '    if (false && !curve.closed && curve.points.size() >= 4 && curve.points.back().point == curve.points.front().point) {', 'F closes a loop whose ends were merged before merging closed it', 'tests/test_fill_loop.py'),
+    ('src/data/vector.cc', '      drawing.shapes[size_t(round)].has_fill = true;', '      round = -1;', 'F fills the line round a loop instead of adding a shape', 'tests/test_fill_loop.py'),
 ]
 
 def build(root):

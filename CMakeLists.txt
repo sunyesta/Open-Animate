@@ -466,6 +466,8 @@ add_test(NAME cage_transform
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_cage_transform.py)
 add_test(NAME grid
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_grid.py)
+add_test(NAME fill_loop
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_fill_loop.py)
 add_test(NAME gradient_layer
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_gradient_layer.py)
 add_test(NAME extrude_branch
