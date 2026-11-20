@@ -192,6 +192,10 @@ template<bool sync = true, typename F> static void layer_for_each_channel(Layer 
       f(cp.handle_out_keys, cp.change_out);
     }
   }
+  /* A sub shape's Smoothing (anim/shape_tree.hh). */
+  for (Shape &shape : layer.drawing.shapes) {
+    f(shape.smoothing_keys, shape.smoothing);
+  }
   if constexpr (sync) {
     drawing_values_from_changes(layer.drawing);
   }
@@ -5453,6 +5457,10 @@ std::vector<ChannelRef> layer_channels(Layer &layer, bool drawing)
       add(base + "handle_out", cp.handle_out_keys, cp.change_out);
     }
   }
+  for (size_t s = 0; s < layer.drawing.shapes.size(); s++) {
+    Shape &shape = layer.drawing.shapes[s];
+    add("shapes[" + std::to_string(s) + "].smoothing", shape.smoothing_keys, shape.smoothing);
+  }
   return refs;
 }
 
@@ -6225,6 +6233,13 @@ static void filtered_for_each_all(const std::vector<Layer *> &layers, const KeyF
             f(cp.handle_in_keys);
             f(cp.handle_out_keys);
           }
+        }
+      }
+      /* A sub shape's Smoothing, with its points (all of them selected, as a shape counts as selected). */
+      const std::vector<bool> picked = filter.selected_only ? drawing_selected_shapes(drawing) : std::vector<bool>();
+      for (size_t s = 0; s < drawing.shapes.size(); s++) {
+        if (!filter.selected_only || (s < picked.size() && picked[s])) {
+          f(drawing.shapes[s].smoothing_keys);
         }
       }
       continue;

@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -731,6 +732,9 @@ VectorDrawing drawing_setup_pose(const VectorDrawing &drawing)
       cp.handle_out = handle_setup(cp, false);
     }
   }
+  for (Shape &shape : setup.shapes) {
+    shape.smoothing = setup_of(shape.smoothing_keys, shape.smoothing);
+  }
   /* Detail in its setup pose, placed on the setup curve. */
   for (MeshPoint &p : setup.points) {
     if (p.detail.level > 0 && (p.pos_keys.has_last || p.pos_keys.animated())) {
@@ -1027,6 +1031,185 @@ std::vector<Shape> shape_runs(const VectorDrawing &drawing, const Shape &shape)
     runs.push_back(std::move(run));
   }
   return runs;
+}
+
+/* ---------------------------------------------------------------------------------
+ * The shape tree
+ */
+
+bool shape_closed_all(const VectorDrawing &drawing, const Shape &shape)
+{
+  if (shape.edges.empty()) {
+    return false;
+  }
+  std::vector<OrientedEdge> chain;
+  for (const Shape &run : shape_runs(drawing, shape)) {
+    bool closed = false;
+    if (!shape_chain(drawing, run, chain, &closed) || !closed) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool drawing_has_shape_tree(const VectorDrawing &drawing)
+{
+  return std::any_of(drawing.shapes.begin(), drawing.shapes.end(),
+                     [](const Shape &s) { return s.parent != 0 || !s.shown; });
+}
+
+std::vector<int> shape_children(const VectorDrawing &drawing, uint64_t id)
+{
+  std::vector<int> out;
+  if (id == 0) {
+    return out;
+  }
+  for (int s = 0; s < int(drawing.shapes.size()); s++) {
+    if (drawing.shapes[s].parent == id) {
+      out.push_back(s);
+    }
+  }
+  return out;
+}
+
+int shape_tree_root(const VectorDrawing &drawing, int s)
+{
+  /* As many steps as there are shapes: a loop (which mending never leaves) can't run on. */
+  for (size_t step = 0; step < drawing.shapes.size() && s >= 0 && drawing.shapes[s].parent != 0; step++) {
+    const int up = drawing_shape_index(drawing, drawing.shapes[s].parent);
+    if (up < 0) {
+      break;
+    }
+    s = up;
+  }
+  return s;
+}
+
+bool shape_is_under(const VectorDrawing &drawing, int s, uint64_t ancestor)
+{
+  for (size_t step = 0; step < drawing.shapes.size() && s >= 0; step++) {
+    const uint64_t up = drawing.shapes[s].parent;
+    if (up == 0) {
+      return false;
+    }
+    if (up == ancestor) {
+      return true;
+    }
+    s = drawing_shape_index(drawing, up);
+  }
+  return false;
+}
+
+std::vector<int> shape_tree_members(const VectorDrawing &drawing, int s)
+{
+  std::vector<int> out;
+  if (s < 0 || s >= int(drawing.shapes.size())) {
+    return out;
+  }
+  out.push_back(s);
+  for (size_t i = 0; i < out.size() && out.size() <= drawing.shapes.size(); i++) {
+    for (const int c : shape_children(drawing, drawing.shapes[out[i]].id)) {
+      if (std::find(out.begin(), out.end(), c) == out.end()) {
+        out.push_back(c);
+      }
+    }
+  }
+  return out;
+}
+
+bool drawing_shape_tree_mend(VectorDrawing &drawing)
+{
+  bool changed = false;
+  /* Until nothing changes: one let go can leave its own sub shapes under a shape no longer closed... */
+  for (bool again = true; again;) {
+    again = false;
+    for (int s = 0; s < int(drawing.shapes.size()); s++) {
+      Shape &shape = drawing.shapes[s];
+      if (shape.parent == 0) {
+        continue;
+      }
+      const int p = drawing_shape_index(drawing, shape.parent);
+      const bool bad = p < 0 || p == s || shape_is_under(drawing, p, shape.id) ||
+                       !shape_closed_all(drawing, drawing.shapes[p]) || !shape_closed_all(drawing, shape);
+      if (bad) {
+        shape.parent = 0;
+        changed = again = true;
+      }
+    }
+  }
+  /* Each tree stands together in the stacking order, its root lowest and each sub shape's own tree just above the one
+   * before it (what Make Sub Shape and the list's drops keep): an edit that put a shape in between (a new shape, a
+   * paste) can't leave a tree in two pieces. */
+  if (std::none_of(drawing.shapes.begin(), drawing.shapes.end(), [](const Shape &x) { return x.parent != 0; })) {
+    return changed;
+  }
+  std::vector<int> order;
+  order.reserve(drawing.shapes.size());
+  std::vector<bool> placed(drawing.shapes.size(), false);
+  const std::function<void(int)> place = [&](int s) {
+    if (placed[size_t(s)]) {
+      return;
+    }
+    placed[size_t(s)] = true;
+    order.push_back(s);
+    for (const int c : shape_children(drawing, drawing.shapes[size_t(s)].id)) {
+      place(c);
+    }
+  };
+  for (int s = 0; s < int(drawing.shapes.size()); s++) {
+    if (drawing.shapes[size_t(s)].parent == 0) {
+      place(s);
+    }
+  }
+  bool moved = false;
+  for (int i = 0; i < int(order.size()); i++) {
+    moved |= order[size_t(i)] != i;
+  }
+  if (moved && order.size() == drawing.shapes.size()) {
+    std::vector<Shape> shapes;
+    shapes.reserve(order.size());
+    for (const int s : order) {
+      shapes.push_back(std::move(drawing.shapes[size_t(s)]));
+    }
+    drawing.shapes = std::move(shapes);
+    changed = true;
+  }
+  return changed;
+}
+
+void drawing_shapes_copied(VectorDrawing &drawing, size_t from, const std::vector<uint64_t> &source_ids,
+                           bool keep_outside)
+{
+  if (from >= drawing.shapes.size()) {
+    return;
+  }
+  for (const MeshPoint &p : drawing.points) {
+    drawing.next_id = std::max(drawing.next_id, p.id + 1);
+  }
+  for (const Shape &s : drawing.shapes) {
+    drawing.next_id = std::max(drawing.next_id, s.id + 1);
+  }
+  std::map<uint64_t, uint64_t> copy_of;
+  for (size_t k = from; k < drawing.shapes.size(); k++) {
+    drawing.shapes[k].id = drawing.next_id++;
+    if (k - from < source_ids.size() && source_ids[k - from] != 0) {
+      copy_of[source_ids[k - from]] = drawing.shapes[k].id;
+    }
+  }
+  for (size_t k = from; k < drawing.shapes.size(); k++) {
+    Shape &shape = drawing.shapes[k];
+    if (shape.parent == 0) {
+      continue;
+    }
+    if (const auto it = copy_of.find(shape.parent); it != copy_of.end()) {
+      shape.parent = it->second;
+    }
+    else if (!keep_outside || std::none_of(drawing.shapes.begin(), drawing.shapes.begin() + long(from),
+                                           [&](const Shape &s) { return s.id == shape.parent; }))
+    {
+      shape.parent = 0;
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------------------
@@ -1689,6 +1872,10 @@ int drawing_pick_shape(const VectorDrawing &drawing, float2 pos, float radius)
   std::vector<float2> outline;
   for (int s = int(drawing.shapes.size()) - 1; s >= 0; s--) {
     const Shape &shape = drawing.shapes[s];
+    /* Not shown (its eye closed, or a reference hiding it): not picked. */
+    if (shape.hidden || !shape.shown) {
+      continue;
+    }
     /* Inside its fill (not in a hole), or on a line round any of its runs. */
     if (shape.has_fill && shape_fill_contains(drawing, shape, pos)) {
       return s;
@@ -2732,6 +2919,7 @@ bool drawing_duplicate_selected(VectorDrawing &drawing)
    * shows once closed), never gaining a stroke the original didn't have. */
   const int old_shape_count = int(drawing.shapes.size());
   std::vector<std::vector<ShapeEdge>> lines;
+  std::vector<uint64_t> copied_from;
   for (int s = 0; s < old_shape_count; s++) {
     Shape copy = drawing.shapes[s];
     std::vector<ShapeEdge> edges;
@@ -2758,8 +2946,11 @@ bool drawing_duplicate_selected(VectorDrawing &drawing)
       }
     }
     copy.edges = std::move(edges);
+    copied_from.push_back(copy.id);
     drawing.shapes.push_back(std::move(copy));
   }
+  /* A copied tree stands on its own: its sub shapes under the copied parent. */
+  drawing_shapes_copied(drawing, size_t(old_shape_count), copied_from, true);
 
   for (int p = 0; p < int(drawing.points.size()); p++) {
     drawing.points[p].selected = p >= old_point_count;
@@ -3211,13 +3402,17 @@ void drawing_append_selected(VectorDrawing &dst, const VectorDrawing &src)
     }
     dst.curves.push_back(std::move(curve));
   }
+  const size_t shape_offset = dst.shapes.size();
+  std::vector<uint64_t> copied_from;
   for (Shape shape : src.shapes) {
     for (ShapeEdge &edge : shape.edges) {
       edge.curve += curve_offset;
     }
     shape.name += " " + std::to_string(dst.shapes.size() + 1);
+    copied_from.push_back(shape.id);
     dst.shapes.push_back(std::move(shape));
   }
+  drawing_shapes_copied(dst, shape_offset, copied_from, false);
 }
 
 std::vector<ShapeEdge> drawing_selected_edges(const VectorDrawing &drawing)

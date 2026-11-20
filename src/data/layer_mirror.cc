@@ -815,6 +815,8 @@ static void mirror_new_geometry(Document &doc, Layer &layer, const Layer &was, c
     curve_image[c] = int(dst.curves.size()) - 1;
   }
   std::vector<bool> shape_done(from.shapes.size(), false);
+  const size_t first_copy = target.layer->drawing.shapes.size();
+  std::vector<uint64_t> copied_from;
   for (int s = s0; s < int(from.shapes.size()); s++) {
     const Shape &shape = from.shapes[s];
     if (shape.edges.empty() || !std::all_of(shape.edges.begin(), shape.edges.end(),
@@ -827,6 +829,7 @@ static void mirror_new_geometry(Document &doc, Layer &layer, const Layer &was, c
     for (ShapeEdge &e : copy.edges) {
       e.curve = curve_image[e.curve];
     }
+    copied_from.push_back(shape.id);
     target.layer->drawing.shapes.push_back(std::move(copy));
     shape_done[s] = true;
   }
@@ -1032,8 +1035,11 @@ static void mirror_new_geometry(Document &doc, Layer &layer, const Layer &was, c
     Shape copy = shape;
     copy.id = 0;
     copy.edges = edges;
+    copied_from.push_back(shape.id);
     dst.shapes.push_back(std::move(copy));
   }
+  /* Sub shapes copied with their parent go under its copy. */
+  drawing_shapes_copied(target.layer->drawing, first_copy, copied_from, false);
   drawing_ensure_ids(target.layer->drawing);
 }
 

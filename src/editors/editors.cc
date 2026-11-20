@@ -468,26 +468,31 @@ bool ui_collapsing_header(const char *label, bool default_open)
 }
 
 static bool panel_begin(const char *title, const std::string &header, unsigned int color, bool default_open,
-                        bool *check, bool *r_toggled, const char *check_tooltip);
+                        bool *check, bool *r_toggled, const char *check_tooltip, const char *menu_popup);
 
 bool ui_panel_begin(const char *title, bool default_open)
 {
-  return panel_begin(title, std::string(), 0u, default_open, nullptr, nullptr, nullptr);
+  return panel_begin(title, std::string(), 0u, default_open, nullptr, nullptr, nullptr, nullptr);
 }
 
 bool ui_panel_begin(const char *title, const std::string &header, unsigned int color)
 {
-  return panel_begin(title, header, color, true, nullptr, nullptr, nullptr);
+  return panel_begin(title, header, color, true, nullptr, nullptr, nullptr, nullptr);
+}
+
+bool ui_panel_begin_menu(const char *title, const std::string &header, const char *popup, const char *tooltip)
+{
+  return panel_begin(title, header, 0u, true, nullptr, nullptr, tooltip, popup);
 }
 
 bool ui_panel_begin_check(const char *title, bool *check, bool *r_toggled, const char *tooltip, bool default_open)
 {
   *r_toggled = false;
-  return panel_begin(title, std::string(), 0u, default_open, check, r_toggled, tooltip);
+  return panel_begin(title, std::string(), 0u, default_open, check, r_toggled, tooltip, nullptr);
 }
 
 static bool panel_begin(const char *title, const std::string &header, unsigned int color, bool default_open,
-                        bool *check, bool *r_toggled, const char *check_tooltip)
+                        bool *check, bool *r_toggled, const char *check_tooltip, const char *menu_popup)
 {
   const std::string key = ui_fold_scope() + "/" + title;
   /* A property being shown (ui_flash_bind) opens its panel. */
@@ -509,7 +514,7 @@ static bool panel_begin(const char *title, const std::string &header, unsigned i
     label = std::string(size_t(std::ceil((check_w + ImGui::GetStyle().ItemInnerSpacing.x) / space)), ' ') + title +
             "###" + title;
   }
-  if (check && !boxed) {
+  if ((check || menu_popup) && !boxed) {
     ImGui::SetNextItemAllowOverlap();
   }
   const bool open = boxed ? box_header(label.c_str(), title) : ImGui::CollapsingHeader(label.c_str());
@@ -530,6 +535,33 @@ static bool panel_begin(const char *title, const std::string &header, unsigned i
       ImGui::SetTooltip("%s", check_tooltip);
     }
     ImGui::PopStyleVar();
+    ImGui::PopID();
+    ImGui::SetCursorScreenPos(after);
+  }
+  if (menu_popup) {
+    /* Blender's header menu: a down arrow at the header's right end. */
+    const ImVec2 after = ImGui::GetCursorScreenPos();
+    const ImRect hr = boxed ? g_box.header : ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+    const float hh = hr.GetHeight();
+    /* Left of a box's grip. */
+    const float grip_w = boxed ? ImGui::GetFontSize() * 0.12f * 16.0f : 0.0f;
+    const ImVec2 at(hr.Max.x - grip_w - hh - 2.0f, hr.Min.y);
+    ImGui::SetCursorScreenPos(at);
+    ImGui::PushID(title);
+    if (ImGui::InvisibleButton("##header_menu", ImVec2(hh, hh))) {
+      ImGui::PopID();
+      ImGui::OpenPopup(menu_popup);
+      ImGui::PushID(title);
+    }
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    if (ImGui::IsItemHovered()) {
+      dl->AddRectFilled(at, at + ImVec2(hh, hh), ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
+      if (check_tooltip) {
+        ImGui::SetTooltip("%s", check_tooltip);
+      }
+    }
+    ImGui::RenderArrow(dl, ImVec2(at.x + hh * 0.22f, at.y + hh * 0.22f), ImGui::GetColorU32(ImGuiCol_Text),
+                       ImGuiDir_Down, 0.75f);
     ImGui::PopID();
     ImGui::SetCursorScreenPos(after);
   }

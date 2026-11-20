@@ -330,6 +330,12 @@ struct Style {
  * their overlapping strokes staying filled). */
 enum class FillRule { Loops, EvenOdd, NonZero };
 
+/* What a sub shape does to the shape it is under (the shape tree, anim/shape_tree.hh): adds itself, cuts itself out,
+ * keeps only where they overlap, or keeps where just one of them is. */
+enum class ShapeOp { Union, Subtract, Intersect, Exclude };
+/* The most Smoothing rounds by, in drawing units (the frame is 2 tall). */
+inline constexpr float SHAPE_SMOOTHING_MAX = 2.0f;
+
 /* One curve segment: from curve point `segment` to the next one. */
 struct ShapeEdge {
   int curve = 0;
@@ -370,6 +376,18 @@ struct Shape {
   int detail_level = 0;
   /* Its own number in the drawing, kept for good (as MeshPoint::id). */
   uint64_t id = 0;
+  /* The shape tree (anim/shape_tree.hh): the shape it is a sub shape of (its id), 0 for one of the drawing's own. A sub
+   * shape has no look of its own: its Operation acts on what its parent is so far, the lowest first, and the parent's
+   * look covers the result. Smoothing (keyable) rounds the corners where their outlines cross. */
+  uint64_t parent = 0;
+  ShapeOp op = ShapeOp::Union;
+  float smoothing = 0.0f;
+  Channel<float> smoothing_keys;
+  /* Its eye in the Shapes list: closed, it isn't drawn, picked, or (a sub shape) acting on its parent. */
+  bool shown = true;
+  /* Evaluated drawings only, never saved: a shape whose sub shapes left nothing of it (an Intersect no longer
+   * overlapping), its outline drawn dashed so it can still be found and picked. */
+  bool tree_empty = false;
   /* No selection flag of its own: a shape counts as selected when all its points are (see
    * drawing_selected_shapes), so the viewport and the Properties shape list always agree. */
   bool operator==(const Shape &) const = default;
@@ -535,6 +553,31 @@ bool shape_outline(const VectorDrawing &drawing, const Shape &shape, int steps_p
  * the shape when its edges join up. A Moho stroke shape can be loose edges across many curves (a
  * row of stitches), each run drawn as a line of its own. */
 std::vector<Shape> shape_runs(const VectorDrawing &drawing, const Shape &shape);
+
+/* ---------------------------------------------------------------------------------
+ * The shape tree (worked out by anim/shape_tree.hh)
+ */
+
+/* Whether every run of a shape goes all the way round: what can be a sub shape or have them. */
+bool shape_closed_all(const VectorDrawing &drawing, const Shape &shape);
+/* Whether any shape is a sub shape or has its eye closed: the drawing shows otherwise than its shapes as they are. */
+bool drawing_has_shape_tree(const VectorDrawing &drawing);
+/* The sub shapes of the shape with `id` (their indices), lowest first: the order they act in. */
+std::vector<int> shape_children(const VectorDrawing &drawing, uint64_t id);
+/* The shape at the top of the tree shape `s` is in (itself when it is no sub shape). */
+int shape_tree_root(const VectorDrawing &drawing, int s);
+/* Whether shape `s` is somewhere under the shape with id `ancestor`. */
+bool shape_is_under(const VectorDrawing &drawing, int s, uint64_t ancestor);
+/* Every shape of the tree under shape `s`, `s` first, then its sub shapes', depth first. */
+std::vector<int> shape_tree_members(const VectorDrawing &drawing, int s);
+/* Sub shapes whose parent is gone, or isn't closed, or that aren't closed themselves (or would be under themselves)
+ * go back into the list with their own look. Returns true if any did. */
+bool drawing_shape_tree_mend(VectorDrawing &drawing);
+/* The shapes from index `from` on were just copied in, the one at `from + k` from the shape whose id was
+ * `source_ids[k]`: each gets an id of its own, and a sub shape whose parent was copied with it goes under that copy.
+ * One whose parent wasn't stays under it when `keep_outside` (a copy in the same drawing) and is let go otherwise. */
+void drawing_shapes_copied(VectorDrawing &drawing, size_t from, const std::vector<uint64_t> &source_ids,
+                           bool keep_outside);
 
 /* ---------------------------------------------------------------------------------
  * Editing helpers

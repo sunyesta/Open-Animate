@@ -775,6 +775,19 @@ class _Layer:
         a loop drawn the other way round a hole), brush, material}."""
         return dict(_oanim.layer_shape_style(self._id, index))
 
+    def shape_tree(self, index, upto=-1, setup=False):
+        """What shape `index` and its sub shapes leave (the shape tree), from the drawing as stored (setup: its setup
+        pose), `upto` its sub shapes up to that index (-1: all): {"empty", "loops": [{"hole", "nodes": [{"pos", "in",
+        "out", "point" (the drawing's point it is, or -1 for a new place), "shape" (whose outline it is on, -1 along a
+        rounding), "line_off", "radius"}]}]}."""
+        return _oanim.layer_shape_tree(self._id, index, upto, setup)
+
+    def evaluated_shape(self, index, point=(0.0, 0.0), render=False):
+        """How shape `index` shows after the modifiers and the shape tree: {"contains" (its fill covers `point`),
+        "hidden", "merged" (drawn by something else: a sub shape, or another layer's Boolean), "tree_empty" (its sub
+        shapes left nothing), "loops", "edges"}."""
+        return dict(_oanim.layer_evaluated_shape(self._id, index, float(point[0]), float(point[1]), render))
+
     def set_shape_style(self, index, **values):
         """Change shape `index`'s look (fill, line, line_width, has_fill, has_outline, fill_rule), as the Shape
         panel does. On a reference this becomes its own look for that setting."""

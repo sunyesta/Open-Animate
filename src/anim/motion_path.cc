@@ -100,6 +100,11 @@ template<typename F> static void drawing_channels(Document &doc, Layer &layer, F
       }
     }
   }
+  for (Shape &shape : layer.drawing.shapes) {
+    if (shape.smoothing_keys.animated() && !f(shape.smoothing_keys)) {
+      return;
+    }
+  }
 }
 
 static bool drawing_animated(const Document &doc, const Layer &layer)

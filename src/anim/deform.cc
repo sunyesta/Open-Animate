@@ -4,6 +4,7 @@
 #include "anim/controller.hh"
 
 #include <algorithm>
+#include <map>
 #include <cmath>
 #include <limits>
 #include <mutex>
@@ -14,6 +15,7 @@
 #include "anim/bevel.hh"
 #include "anim/draw_order.hh"
 #include "anim/merge.hh"
+#include "anim/shape_tree.hh"
 #include "anim/subdivide.hh"
 #include "anim/vector_deform.hh"
 #include "anim/reference.hh"
@@ -163,6 +165,17 @@ static VectorDrawing mirror_once(const VectorDrawing &src, int axis, const Modif
     return {e.curve, 2 * cm.m - 3 - e.segment};
   };
 
+  /* A shape tree's mirror image is a tree of its own: each copy in a tree an id of its own, its sub shapes' copies
+   * under it (a parent grown to take in its reflection keeps both halves' sub shapes). */
+  std::map<uint64_t, uint64_t> tree_copy;
+  const size_t first_out = out.shapes.size();
+  out.next_id = std::max(out.next_id, src.next_id);
+  for (const Shape &shape : src.shapes) {
+    out.next_id = std::max(out.next_id, shape.id + 1);
+  }
+  for (const MeshPoint &p : src.points) {
+    out.next_id = std::max(out.next_id, p.id + 1);
+  }
   for (const Shape &shape : src.shapes) {
     bool any_merged = false;
     bool usable = true;
@@ -195,7 +208,23 @@ static VectorDrawing mirror_once(const VectorDrawing &src, int axis, const Modif
       for (ShapeEdge &e : copy.edges) {
         e = mirror_edge(e);
       }
+      if (shape.parent != 0 || std::any_of(src.shapes.begin(), src.shapes.end(),
+                                           [&](const Shape &o) { return o.parent == shape.id; }))
+      {
+        copy.id = out.next_id++;
+        tree_copy[shape.id] = copy.id;
+        copy.parent = shape.parent | (uint64_t(1) << 63);
+      }
       out.shapes.push_back(std::move(copy));
+    }
+  }
+  for (size_t k = first_out; k < out.shapes.size(); k++) {
+    uint64_t &parent = out.shapes[k].parent;
+    if (parent & (uint64_t(1) << 63)) {
+      parent &= ~(uint64_t(1) << 63);
+      if (const auto it = tree_copy.find(parent); it != tree_copy.end()) {
+        parent = it->second;
+      }
     }
   }
   return out;
@@ -626,6 +655,10 @@ bool layer_has_modifier_effect(const Document &doc, const Layer &layer, bool ren
   if (layer.type == LayerType::Vector && merge_takes_from(doc, layer, render)) {
     return true;
   }
+  /* Sub shapes, and shapes with their eye closed (anim/shape_tree.hh). */
+  if (layer.type == LayerType::Vector && drawing_has_shape_tree(layer_drawing(doc, layer))) {
+    return true;
+  }
   for (const Modifier &m : layer.modifiers) {
     if (!modifier_on(m, render)) {
       continue;
@@ -925,6 +958,7 @@ static VectorDrawing stack_evaluated(const Document &doc, const Layer &layer, bo
       return drawing;
     }
     drawing_detail_final_handles(drawing);
+    drawing_shape_tree_apply(drawing);
     /* Its own Merges still come last (an outline copy of a fill joining another layer's line). */
     for (const Modifier &m : layer.modifiers) {
       if (modifier_on(m, render) && m.type == ModifierType::Boolean) {
@@ -1020,6 +1054,8 @@ static VectorDrawing stack_evaluated(const Document &doc, const Layer &layer, bo
   }
   /* Handles scale as the bones and Mirror move them, so the final ones can come last. */
   drawing_detail_final_handles(drawing);
+  /* Sub shapes into their parents, on the drawing as it finally shows. */
+  drawing_shape_tree_apply(drawing);
   /* Shapes another layer's Boolean draws as part of its outline don't draw here too. */
   merge_mark_taken(doc, layer, drawing, render);
   return drawing;

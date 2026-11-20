@@ -29,6 +29,7 @@
 #include "anim/switch.hh"
 #include "anim/bone_family.hh"
 #include "anim/merge.hh"
+#include "anim/shape_tree.hh"
 #include "anim/dynamics.hh"
 #include "anim/reference.hh"
 #include "core/log.hh"
@@ -9120,6 +9121,160 @@ static void media_tab(Context &C)
 }
 
 static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, Shape &shape);
+
+static const char *const SHAPE_OP_NAMES[] = {"Union", "Subtract", "Intersect", "Exclude"};
+static const char *const SHAPE_OP_IDS[] = {"UNION", "SUBTRACT", "INTERSECT", "EXCLUDE"};
+static const char *const SHAPE_OP_TIPS[] = {
+    "Adds its area to the shape it is under", "Cuts its area out of the shape it is under",
+    "Keeps only where it and the shape it is under overlap", "Keeps where only one of them is, not where both are"};
+
+/* A sub shape's Operation as a picture: the shape it is under (the square at the top left) and it (bottom right),
+ * what is left filled. */
+static void shape_op_icon(ImDrawList *dl, ImVec2 at, float size, ShapeOp op, ImU32 col, ImU32 dim)
+{
+  const float a = std::round(size * 0.64f);
+  const ImVec2 a0 = at, a1 = at + ImVec2(a, a);
+  const ImVec2 b0 = at + ImVec2(size - a, size - a), b1 = at + ImVec2(size, size);
+  const auto box = [&](ImVec2 p0, ImVec2 p1) { dl->AddRectFilled(p0, p1, col); };
+  /* Each square without the overlap (b0 to a1), as two strips. */
+  const auto a_only = [&] {
+    box(a0, ImVec2(a1.x, b0.y));
+    box(ImVec2(a0.x, b0.y), ImVec2(b0.x, a1.y));
+  };
+  const auto b_only = [&] {
+    box(ImVec2(a1.x, b0.y), ImVec2(b1.x, a1.y));
+    box(ImVec2(b0.x, a1.y), b1);
+  };
+  switch (op) {
+    case ShapeOp::Union:
+      box(a0, a1);
+      box(b0, b1);
+      return;
+    case ShapeOp::Subtract:
+      a_only();
+      break;
+    case ShapeOp::Intersect:
+      box(b0, a1);
+      break;
+    case ShapeOp::Exclude:
+      a_only();
+      b_only();
+      break;
+  }
+  dl->AddRect(a0, a1, dim);
+  dl->AddRect(b0, b1, dim);
+}
+
+/* What a sub shape is: its name, Operation and Smoothing (keyable); no look of its own, the shape it is under covers
+ * the result. Its header's menu: Apply, Take Out of Parent. */
+static void sub_shape_panel(Context &C, Layer &owner, VectorDrawing &drawing, Shape &shape)
+{
+  Document &doc = *C.document;
+  const int s = drawing_shape_index(drawing, shape.id);
+  const int p = drawing_shape_index(drawing, shape.parent);
+  const std::string under = p >= 0 ? drawing.shapes[size_t(p)].name : std::string();
+  const std::string header = "Sub Shape: " + (shape.name.empty() ? std::string("(unnamed)") : shape.name) + "  under " +
+                             under;
+  const OpArgs who = {{"layer", std::to_string(owner.id)}, {"shape", std::to_string(shape.id)}};
+  std::string call;
+  OpArgs args = who;
+  const float panel_top = ImGui::GetCursorScreenPos().y;
+  const bool open = ui_panel_begin_menu("Shape", header, "##sub_shape_menu", "Apply, or take it out of its parent");
+  if (ImGui::BeginPopup("##sub_shape_menu")) {
+    if (ImGui::MenuItem("Apply", "Ctrl A", false, !owner.is_reference())) {
+      call = "mesh.shape_apply";
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Make it and the sub shapes below it part of the shape they are under");
+    }
+    if (ImGui::MenuItem("Take Out of Parent", nullptr, false, !owner.is_reference())) {
+      call = "mesh.shape_parent_set";
+    }
+    ImGui::EndPopup();
+  }
+  if (open) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Name");
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::BeginDisabled(owner.is_reference());
+    ImGui::InputText("##name", &shape.name);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+      C.undo->push("Rename Shape", doc);
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Operation");
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1);
+    const int op = segmented("##operation", int(shape.op), 4, SHAPE_OP_NAMES, SHAPE_OP_TIPS, {});
+    if (op >= 0 && op != int(shape.op)) {
+      call = "mesh.shape_op_set";
+      args["op"] = SHAPE_OP_IDS[op];
+    }
+
+    /* Smoothing: keyable, with its key button. Shown as it is dragged; one undo step when let go. */
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Smoothing");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+      ImGui::SetTooltip("Rounds the corners where its outline crosses the shape's, growing as they overlap more. It "
+                        "can be keyed");
+    }
+    ImGui::TableSetColumnIndex(1);
+    const std::string path = "shapes[" + std::to_string(s) + "].smoothing";
+    const int key_state = layer_key_state(owner, {path}, doc.frame_current);
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ui_key_button_width() - 4.0f);
+    const int tint = ui_key_tint_push(key_state);
+    static float drag_from = 0.0f;
+    float smoothing = shape.smoothing;
+    ImGui::BeginDisabled(owner.is_reference());
+    if (ui_drag_float("##smoothing", &smoothing, 0.001f, 0.0f, SHAPE_SMOOTHING_MAX, "%.3f",
+                      ImGuiSliderFlags_AlwaysClamp))
+    {
+      shape.smoothing = smoothing;
+    }
+    if (ImGui::IsItemActivated()) {
+      drag_from = shape.smoothing;
+    }
+    ImGui::EndDisabled();
+    ImGui::PopStyleColor(tint);
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+      char value[32];
+      std::snprintf(value, sizeof(value), "%g", double(shape.smoothing));
+      shape.smoothing = drag_from;
+      call = "mesh.shape_smoothing_set";
+      args["value"] = value;
+    }
+    ImGui::SameLine(0, 4);
+    if (ui_key_button("##smoothing_key", key_state)) {
+      call = "anim.keyframe_toggle";
+      args = {{"layer", std::to_string(owner.id)}, {"paths", path}};
+    }
+    ui_flash_row(owner.id, path);
+    ui_panel_end();
+  }
+  /* Over the panel, as over a modifier's box: Ctrl A applies it. */
+  const ImVec2 wmin = ImGui::GetWindowPos();
+  if (call.empty() && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+      ImGui::IsMouseHoveringRect(ImVec2(wmin.x, panel_top),
+                                 ImVec2(wmin.x + ImGui::GetWindowWidth(), ImGui::GetCursorScreenPos().y)) &&
+      !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive() &&
+      ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_A, ImGuiInputFlags_None, ImGuiKeyOwner_Any))
+  {
+    call = "mesh.shape_apply";
+  }
+  if (!call.empty()) {
+    operator_call(C, call, args);
+  }
+}
+
 static void shared_mark(ImDrawList *dl, ImVec2 corner, float s);
 static std::vector<Layer *> layers_points_picked(Context &C, Layer *first);
 static void edge_panel(Context &C, VectorDrawing &drawing);
@@ -9524,7 +9679,6 @@ static void drawing_tab(Context &C, bool shapes_tab)
     int layer = -1;
     int shape = -1;
   };
-  ShapeRef move_from, move_to;
   /* A shape clicked in the list, picked after the list is drawn: the undo step it makes rebuilds a
    * reference's drawing, which would pull the shapes out from under the rows still being drawn. */
   ShapeRef clicked;
@@ -9532,6 +9686,9 @@ static void drawing_tab(Context &C, bool shapes_tab)
   /* A shape deleted from its row's right-click menu (its layer and id), after the list. */
   uint64_t delete_layer = 0, delete_shape = 0;
   uint64_t make_active = 0;
+  /* A tree operator a row asked for (its eye, its Operation, a drop, its menu), after the list. */
+  std::string tree_call;
+  OpArgs tree_args;
   /* The shape the panels below show: the active shape (the last clicked) while it's selected, else the
    * topmost selected one, in the first listed layer that has one (the active layer comes first). Its
    * row is marked as the active one. */
@@ -9582,33 +9739,73 @@ static void drawing_tab(Context &C, bool shapes_tab)
           }
           ImGui::Indent(ImGui::GetTextLineHeight());
         }
+        /* The rows as a tree: each top-level shape, the top one first, with its sub shapes indented under it (the
+         * top one first). */
+        std::vector<std::pair<int, int>> rows_shown;
+        const std::function<void(int, int)> tree_rows = [&](int s, int depth) {
+          rows_shown.emplace_back(s, depth);
+          const std::vector<int> kids = shape_children(shapes_of, shapes_of.shapes[size_t(s)].id);
+          for (auto it = kids.rbegin(); it != kids.rend(); ++it) {
+            if (rows_shown.size() <= shapes_of.shapes.size()) {
+              tree_rows(*it, depth + 1);
+            }
+          }
+        };
         for (int s = int(shapes_of.shapes.size()) - 1; s >= 0; s--) {
+          if (shapes_of.shapes[size_t(s)].parent == 0) {
+            tree_rows(s, 0);
+          }
+        }
+        for (const auto &[s, depth] : rows_shown) {
           Shape &shape = shapes_of.shapes[s];
+          const bool sub = shape.parent != 0;
+          const bool has_kids = !shape_children(shapes_of, shape.id).empty();
           ImGui::PushID(s);
-          const ImVec2 p = ImGui::GetCursorScreenPos();
           const float sw = ImGui::GetTextLineHeight();
+          const ImVec2 p = ImGui::GetCursorScreenPos() + ImVec2(float(depth) * sw, 0.0f);
           ImDrawList *dl = ImGui::GetWindowDrawList();
+          ImGui::SetNextItemAllowOverlap();
           if (ImGui::Selectable("##shape", picked_shapes[s], 0, ImVec2(0, ImGui::GetTextLineHeight()))) {
             clicked = {li, s};
             /* Shift or Ctrl adds to the selection, as in the viewport. */
             clicked_adds = ImGui::GetIO().KeyShift || ImGui::GetIO().KeyCtrl;
           }
+          const ImVec2 row_min = ImGui::GetItemRectMin(), row_max = ImGui::GetItemRectMax();
           const bool is_shown = li == shown_shape.layer && s == shown_shape.shape;
           if (is_shown) {
             /* The one the panels below show: lighter, with a bar on its left (as the active layer's
              * row stands out from the other picked ones). */
-            const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
-            dl->AddRectFilled(r0, r1, IM_COL32(0x47, 0x72, 0xb3, 255), 2.0f);
-            dl->AddRectFilled(r0, ImVec2(r0.x + 3.0f, r1.y), IM_COL32(0xff, 0xff, 0xff, 255));
+            dl->AddRectFilled(row_min, row_max, IM_COL32(0x47, 0x72, 0xb3, 255), 2.0f);
+            dl->AddRectFilled(row_min, ImVec2(row_min.x + 3.0f, row_max.y), IM_COL32(0xff, 0xff, 0xff, 255));
           }
           if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-            ImGui::SetTooltip(is_shown ? "Shown in the Shape and Material panels below (right-click: Delete)"
-                                       : "Click: select it (Shift adds); right-click: Delete");
+            ImGui::SetTooltip(is_shown ? "Shown in the panels below (right-click: its menu)"
+                                       : "Click: select it (Shift adds); drag onto a shape's middle: put it under that "
+                                         "shape; right-click: its menu");
           }
-          /* Right-click: delete just this shape (its curve and points stay for the others on them). */
+          const OpArgs who = {{"layer", std::to_string(owner.id)}, {"shape", std::to_string(shape.id)}};
+          if (sub && ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(row_min, row_max) &&
+              !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive() &&
+              ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_A, ImGuiInputFlags_None, ImGuiKeyOwner_Any))
+          {
+            tree_call = "mesh.shape_apply";
+            tree_args = who;
+          }
+          /* Right-click: delete just this shape (its curve and points stay for the others on them); a sub shape's
+           * Apply and Take Out of Parent. */
           if (ImGui::BeginPopupContextItem("##shape_menu")) {
             ImGui::TextDisabled("%s", shape.name.empty() ? "Shape" : shape.name.c_str());
             ImGui::Separator();
+            if (sub) {
+              if (ImGui::MenuItem("Apply", "Ctrl A", false, !owner.is_reference())) {
+                tree_call = "mesh.shape_apply";
+                tree_args = who;
+              }
+              if (ImGui::MenuItem("Take Out of Parent", nullptr, false, !owner.is_reference())) {
+                tree_call = "mesh.shape_parent_set";
+                tree_args = who;
+              }
+            }
             if (ImGui::MenuItem("Delete Shape", nullptr, false, !owner.is_reference())) {
               delete_layer = owner.id;
               delete_shape = shape.id;
@@ -9625,42 +9822,102 @@ static void drawing_tab(Context &C, bool shapes_tab)
             ImGui::EndDragDropSource();
           }
           if (ImGui::BeginDragDropTarget()) {
-            /* The list is top first: the upper half drops above this shape (stacked over it). Only
-             * within its own layer. */
+            /* The list is top first: the upper part drops above this shape (stacked over it), the lower part below
+             * it, the middle under it as a sub shape (both closed). A row showing sub shapes under it takes all but
+             * its upper part as a drop into it. Only within its own layer. */
             const ImGuiPayload *peek = ImGui::GetDragDropPayload();
             const bool same_layer = peek && peek->IsDataType("OANIM_SHAPE") && static_cast<const int *>(peek->Data)[0] == li;
-            const ImVec2 row_min = ImGui::GetItemRectMin(), row_max = ImGui::GetItemRectMax();
-            const bool upper = ImGui::GetIO().MousePos.y < (row_min.y + row_max.y) * 0.5f;
-            if (same_layer) {
-              const float line_y = upper ? row_min.y : row_max.y;
-              ImGui::GetWindowDrawList()->AddLine(ImVec2(row_min.x, line_y), ImVec2(row_max.x, line_y),
-                                                  UI_DROP_LINE_COLOR, 2.0f);
-              if (const ImGuiPayload *payload =
-                      ImGui::AcceptDragDropPayload("OANIM_SHAPE", ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
+            if (same_layer && !owner.is_reference()) {
+              const int from = static_cast<const int *>(peek->Data)[1];
+              const bool can_into = from != s && from >= 0 && from < int(shapes_of.shapes.size()) &&
+                                    shape_closed_all(shapes_of, shape) &&
+                                    shape_closed_all(shapes_of, shapes_of.shapes[size_t(from)]);
+              const float y = (ImGui::GetIO().MousePos.y - row_min.y) / std::max(1.0f, row_max.y - row_min.y);
+              const char *place = can_into ? (y < 0.3f ? "ABOVE" : (y > 0.7f && !has_kids) ? "BELOW" : "INTO")
+                                           : (y < 0.5f ? "ABOVE" : "BELOW");
+              if (std::string(place) == "INTO") {
+                dl->AddRect(row_min, row_max, UI_DROP_LINE_COLOR, 2.0f, 0, 2.0f);
+              }
+              else {
+                const float line_y = std::string(place) == "ABOVE" ? row_min.y : row_max.y;
+                dl->AddLine(ImVec2(p.x, line_y), ImVec2(row_max.x, line_y), UI_DROP_LINE_COLOR, 2.0f);
+              }
+              if (ImGui::AcceptDragDropPayload("OANIM_SHAPE", ImGuiDragDropFlags_AcceptNoDrawDefaultRect) &&
+                  from >= 0 && from < int(shapes_of.shapes.size()))
               {
-                move_from = {li, static_cast<const int *>(payload->Data)[1]};
-                /* Where it goes in the stacking order (bottom first), counted before it is taken out. */
-                move_to = {li, upper ? s + 1 : s};
+                tree_call = "mesh.shape_move";
+                tree_args = {{"layer", std::to_string(owner.id)},
+                             {"shape", std::to_string(shapes_of.shapes[size_t(from)].id)},
+                             {"target", std::to_string(shape.id)},
+                             {"place", place}};
               }
             }
             ImGui::EndDragDropTarget();
           }
-          /* Fill and line swatches, then the name. */
-          const auto swatch = [&](float x, const Color &c, bool on) {
-            const ImVec2 sa = p + ImVec2(x, 1), sb = sa + ImVec2(sw - 2, sw - 2);
-            if (on) {
-              dl->AddRectFilled(sa, sb, ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, 1.0f)), 2.0f);
-            }
-            dl->AddRect(sa, sb, IM_COL32(0x80, 0x80, 0x80, 255), 2.0f);
-          };
-          swatch(2.0f, shape.style.fill, shape.has_fill);
-          if (!owner.is_reference() && material_find(doc, shape.material)) {
-            /* Linked to a shared material: its mark. */
-            shared_mark(dl, p + ImVec2(sw, sw), sw * 0.5f);
+          /* Its eye, at the right end. */
+          const ImVec2 eye_at(row_max.x - sw - 2.0f, row_min.y);
+          ImGui::SetCursorScreenPos(eye_at);
+          if (ImGui::InvisibleButton("##eye", ImVec2(sw, sw)) && !owner.is_reference()) {
+            tree_call = "mesh.shape_show_set";
+            tree_args = who;
           }
-          swatch(sw + 4.0f, shape.style.line, shape.has_outline);
-          dl->AddText(p + ImVec2(sw * 2.0f + 10.0f, 0), is_shown ? IM_COL32(0xff, 0xff, 0xff, 255) : IM_COL32(0xe6, 0xe6, 0xe6, 255),
-                      shape.name.c_str());
+          const bool eye_hovered = ImGui::IsItemHovered();
+          if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            ImGui::SetTooltip(sub ? "Show or hide it: hidden, it doesn't act on the shape it is under"
+                                  : "Show or hide it: hidden, it isn't drawn or picked");
+          }
+          eye_icon(dl, eye_at + ImVec2(sw * 0.5f, sw * 0.5f), sw * 0.32f, shape.shown,
+                   eye_hovered || !shape.shown ? IM_COL32(0xe6, 0xe6, 0xe6, 255) : IM_COL32(0x90, 0x90, 0x90, 255));
+          const ImU32 text_col = !shape.shown || shape.tree_empty ? IM_COL32(0x80, 0x80, 0x80, 255)
+                                 : is_shown                     ? IM_COL32(0xff, 0xff, 0xff, 255)
+                                                                : IM_COL32(0xe6, 0xe6, 0xe6, 255);
+          if (sub) {
+            /* Its Operation, a menu of the four. */
+            const ImVec2 op_at = p + ImVec2(2.0f, 0.0f);
+            ImGui::SetCursorScreenPos(op_at);
+            if (ImGui::InvisibleButton("##op", ImVec2(sw, sw)) && !owner.is_reference()) {
+              ImGui::OpenPopup("##op_menu");
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+              ImGui::SetTooltip("%s: %s", SHAPE_OP_NAMES[int(shape.op)], SHAPE_OP_TIPS[int(shape.op)]);
+            }
+            shape_op_icon(dl, op_at + ImVec2(1.0f, 1.0f), sw - 3.0f, shape.op, IM_COL32(0xd0, 0xd0, 0xd0, 255),
+                          IM_COL32(0x80, 0x80, 0x80, 255));
+            if (ImGui::BeginPopup("##op_menu")) {
+              for (int k = 0; k < 4; k++) {
+                if (ImGui::MenuItem(SHAPE_OP_NAMES[k], nullptr, int(shape.op) == k) && int(shape.op) != k) {
+                  tree_call = "mesh.shape_op_set";
+                  tree_args = who;
+                  tree_args["op"] = SHAPE_OP_IDS[k];
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                  ImGui::SetTooltip("%s", SHAPE_OP_TIPS[k]);
+                }
+              }
+              ImGui::EndPopup();
+            }
+            dl->AddText(p + ImVec2(sw + 8.0f, 0), text_col, shape.name.c_str());
+          }
+          else {
+            /* Fill and line swatches, then the name. */
+            const auto swatch = [&](float x, const Color &c, bool on) {
+              const ImVec2 sa = p + ImVec2(x, 1), sb = sa + ImVec2(sw - 2, sw - 2);
+              if (on) {
+                dl->AddRectFilled(sa, sb, ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, 1.0f)), 2.0f);
+              }
+              dl->AddRect(sa, sb, IM_COL32(0x80, 0x80, 0x80, 255), 2.0f);
+            };
+            swatch(2.0f, shape.style.fill, shape.has_fill);
+            if (!owner.is_reference() && material_find(doc, shape.material)) {
+              /* Linked to a shared material: its mark. */
+              shared_mark(dl, p + ImVec2(sw, sw), sw * 0.5f);
+            }
+            swatch(sw + 4.0f, shape.style.line, shape.has_outline);
+            dl->AddText(p + ImVec2(sw * 2.0f + 10.0f, 0), text_col, shape.name.c_str());
+          }
+          /* Back under the row, for the next one. */
+          ImGui::SetCursorScreenPos(ImVec2(row_min.x, row_max.y));
+          ImGui::Dummy(ImVec2(0, 0));
           ImGui::PopID();
         }
         if (shapes_of.shapes.empty()) {
@@ -9676,6 +9933,10 @@ static void drawing_tab(Context &C, bool shapes_tab)
       }
     }
     ImGui::EndChild();
+  }
+  if (!tree_call.empty()) {
+    operator_call(C, tree_call, tree_args);
+    return;
   }
   if (delete_shape != 0) {
     operator_call(C, "mesh.delete_shapes",
@@ -9710,22 +9971,6 @@ static void drawing_tab(Context &C, bool shapes_tab)
       doc.active_shape_layer = listed[size_t(clicked.layer)]->id;
       doc.active_shape = d.shapes[clicked.shape].id;
       C.undo->push("Select Shape", doc);
-    }
-  }
-  /* After the list, so its rows weren't shifting while it drew. A reference keeps its original's
-   * stacking order. */
-  if (move_from.layer >= 0 && move_from.layer == move_to.layer && move_from.layer < int(listed.size()) &&
-      !listed[size_t(move_from.layer)]->is_reference())
-  {
-    VectorDrawing &d = listed[size_t(move_from.layer)]->drawing;
-    const int from = move_from.shape;
-    const int to = move_to.shape > from ? move_to.shape - 1 : move_to.shape;
-    if (to != from && from >= 0 && from < int(d.shapes.size())) {
-      Shape moved = std::move(d.shapes[from]);
-      d.shapes.erase(d.shapes.begin() + from);
-      d.shapes.insert(d.shapes.begin() + std::clamp(to, 0, int(d.shapes.size())), std::move(moved));
-      C.undo->push("Move Shape", doc);
-      return;
     }
   }
   if (shown_shape.layer >= 0) {
@@ -10188,6 +10433,10 @@ static void material_row(Context &C, Shape &shape, bool reference)
 
 static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, Shape &shape)
 {
+  if (shape.parent != 0) {
+    sub_shape_panel(C, owner_layer, drawing, shape);
+    return;
+  }
   Document &doc = *C.document;
   Layer *owner = &owner_layer;
   const bool reference = owner->is_reference();

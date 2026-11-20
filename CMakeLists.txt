@@ -28,6 +28,7 @@ set(OANIM_SOURCES
   src/anim/follow_point.cc
   src/anim/keep_poses.cc
   src/anim/merge.cc
+  src/anim/shape_tree.cc
   src/anim/draw_order.cc
   src/anim/switch.cc
   src/anim/bone_family.cc
@@ -73,6 +74,7 @@ set(OANIM_SOURCES
   src/data/gradient.cc
   src/anim/gradient_shown.cc
   src/ops/gradient_ops.cc
+  src/ops/shape_tree_ops.cc
   src/editors/gradient_panel.cc
   src/data/ink_stroke.cc
   src/data/quick_shape.cc
@@ -154,7 +156,7 @@ set(OANIM_SOURCES
 add_executable(OpenAnimate ${OANIM_SOURCES})
 # Clipper2's inline code, optimized in here, has unreachable code of its own (C4702 comes from the
 # optimizer, past any pragma).
-set_source_files_properties(src/anim/merge.cc src/data/fill_area.cc PROPERTIES COMPILE_OPTIONS "/wd4702")
+set_source_files_properties(src/anim/merge.cc src/anim/shape_tree.cc src/data/fill_area.cc PROPERTIES COMPILE_OPTIONS "/wd4702")
 
 target_include_directories(OpenAnimate PRIVATE src)
 # Header-only libraries as system headers, so /W4 doesn't report their warnings.
@@ -1006,3 +1008,5 @@ add_test(NAME align_twice
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_align_twice.py)
 add_test(NAME apply_rest_copy
   COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_apply_rest_copy.py)
+add_test(NAME shape_tree
+  COMMAND OpenAnimate --background --python ${CMAKE_SOURCE_DIR}/tests/test_shape_tree.py)

@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #include "anim/animation.hh"
+#include "anim/shape_tree.hh"
 #include "data/bones.hh"
 #include "text/text_layer.hh"
 
@@ -313,6 +314,10 @@ OpStatus operator_call(Context &C, std::string_view idname, const OpArgs &args)
     status = ot.exec(C);
     if (guard && !gradients.items.empty()) {
       gradients_restore(*C.document, gradients);
+    }
+    /* A sub shape whose parent an operator took away (or opened) goes back into the list. */
+    if (guard && status == OpStatus::Finished) {
+      document_shape_trees_mend(*C.document);
     }
     if (syncs && status == OpStatus::Finished) {
       stretch_sync.finish(C);

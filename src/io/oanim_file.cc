@@ -456,6 +456,19 @@ static json drawing_to_json(const VectorDrawing &drawing)
     if (shape.fill_rule != FillRule::Loops) {
       shapes.back()["fill_rule"] = shape.fill_rule == FillRule::EvenOdd ? "EVEN_ODD" : "NONZERO";
     }
+    /* The shape tree: left out for a shape of the drawing's own, shown. */
+    if (shape.parent != 0) {
+      static const char *const OPS[] = {"UNION", "SUBTRACT", "INTERSECT", "EXCLUDE"};
+      shapes.back()["parent"] = shape.parent;
+      shapes.back()["op"] = OPS[int(shape.op)];
+    }
+    if (shape.smoothing != 0.0f) {
+      shapes.back()["smoothing"] = num(shape.smoothing);
+    }
+    put_keys(shapes.back(), "smoothing_keys", shape.smoothing_keys);
+    if (!shape.shown) {
+      shapes.back()["shown"] = false;
+    }
   }
   json out = {{"points", std::move(points)},
               {"curves", std::move(curves)},
@@ -2417,6 +2430,20 @@ static VectorDrawing drawing_from_json(const json &j)
     else if (rule == "NONZERO") {
       shape.fill_rule = FillRule::NonZero;
     }
+    /* Checked against the other shapes once all are read (drawing_shape_tree_mend). */
+    shape.parent = get_id(s, "parent");
+    if (const std::string op = get_string(s, "op"); op == "SUBTRACT") {
+      shape.op = ShapeOp::Subtract;
+    }
+    else if (op == "INTERSECT") {
+      shape.op = ShapeOp::Intersect;
+    }
+    else if (op == "EXCLUDE") {
+      shape.op = ShapeOp::Exclude;
+    }
+    shape.smoothing = std::clamp(get_float(s, "smoothing", 0.0f), 0.0f, SHAPE_SMOOTHING_MAX);
+    get_keys(s, "smoothing_keys", shape.smoothing_keys);
+    shape.shown = get_bool(s, "shown", true);
     for (const json &e : get_array(s, "edges")) {
       if (!e.is_array() || e.size() != 2 || !e[0].is_number_integer() || !e[1].is_number_integer()) {
         continue;
@@ -2480,6 +2507,7 @@ static VectorDrawing drawing_from_json(const json &j)
   }
   /* Older files' Automatic and Vector handles become stored ones now, from the setup pose. */
   drawing_init_handles(drawing);
+  drawing_shape_tree_mend(drawing);
   return drawing;
 }
 

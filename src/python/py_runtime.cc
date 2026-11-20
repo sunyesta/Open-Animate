@@ -1,5 +1,6 @@
 #include "anim/gradient_shown.hh"
 #include "anim/bone_curve.hh"
+#include "anim/shape_tree.hh"
 #include "python/py_runtime.hh"
 
 #include <cmath>
@@ -2888,6 +2889,12 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
     d["has_outline"] = s.has_outline;
     d["hidden"] = s.hidden;
     d["fill_rule"] = s.fill_rule == FillRule::EvenOdd ? "EVEN_ODD" : s.fill_rule == FillRule::NonZero ? "NONZERO" : "LOOPS";
+    /* The shape tree: the shape it is under (its index, -1 for none), its Operation, Smoothing and eye. */
+    static const char *const OPS[] = {"UNION", "SUBTRACT", "INTERSECT", "EXCLUDE"};
+    d["parent"] = s.parent != 0 ? drawing_shape_index(drawing, s.parent) : -1;
+    d["op"] = OPS[int(s.op)];
+    d["smoothing"] = s.smoothing;
+    d["shown"] = s.shown;
     d["brush"] = s.style.brush.name;
     const Material *material = material_find(*current_context().document, s.material);
     d["material"] = material ? material->name : std::string();
@@ -3173,6 +3180,8 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
           shape.edges.push_back({int(drawing.curves.size()) - 1, s});
         }
         drawing.shapes.push_back(std::move(shape));
+        /* Its points and shape numbered now, so a script can name them straight away. */
+        drawing_ensure_ids(drawing);
         return int(drawing.curves.size()) - 1;
       },
       py::arg("id"), py::arg("points"), py::arg("closed") = false, py::arg("fill") = false);
@@ -5703,6 +5712,70 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
         return py::make_tuple(points, int(d.curves.size()), shapes);
       },
       py::arg("id"), py::arg("render") = false);
+  /* What a shape and its sub shapes leave (anim/shape_tree.hh), from the drawing as stored (setup: its setup pose),
+   * `upto` its sub shapes up to that index (-1 all): {"empty", "loops": [{"hole", "nodes": [{"pos", "in", "out",
+   * "point", "shape", "line_off"}]}]}. */
+  m.def(
+      "layer_shape_tree",
+      [layer_or_raise](uint64_t id, int shape, int upto, bool setup) {
+        Document &doc = *current_context().document;
+        animation_sync(doc);
+        const VectorDrawing &stored = layer_or_raise(id).drawing;
+        const VectorDrawing d = setup ? drawing_setup_pose(stored) : stored;
+        if (shape < 0 || shape >= int(d.shapes.size())) {
+          throw py::index_error("Shape index out of range");
+        }
+        bool empty = false;
+        py::list loops;
+        for (const ShapeTreeLoop &loop : shape_tree_solve(d, shape, upto, &empty)) {
+          py::list nodes;
+          for (const ShapeTreeNode &n : loop.nodes) {
+            py::dict node;
+            node["pos"] = py::make_tuple(n.pos.x, n.pos.y);
+            node["in"] = py::make_tuple(n.handle_in.x, n.handle_in.y);
+            node["out"] = py::make_tuple(n.handle_out.x, n.handle_out.y);
+            node["point"] = n.point;
+            node["shape"] = n.shape;
+            node["line_off"] = n.line_off;
+            node["radius"] = n.radius;
+            nodes.append(node);
+          }
+          py::dict l;
+          l["hole"] = loop.hole;
+          l["nodes"] = nodes;
+          loops.append(l);
+        }
+        py::dict out;
+        out["empty"] = empty;
+        out["loops"] = loops;
+        return out;
+      },
+      py::arg("id"), py::arg("shape"), py::arg("upto") = -1, py::arg("setup") = false);
+  /* Whether the evaluated drawing's shape `shape` fills (x, y), and how it shows: {"contains", "hidden", "merged",
+   * "tree_empty", "loops"}. */
+  m.def("layer_evaluated_shape", [layer_or_raise](uint64_t id, int shape, float x, float y, bool render) {
+    Document &doc = *current_context().document;
+    animation_sync(doc);
+    const VectorDrawing d = layer_evaluated_drawing(doc, layer_or_raise(id), render);
+    if (shape < 0 || shape >= int(d.shapes.size())) {
+      throw py::index_error("Shape index out of range");
+    }
+    const Shape &s = d.shapes[size_t(shape)];
+    py::dict out;
+    out["contains"] = shape_fill_contains(d, s, {x, y});
+    out["hidden"] = s.hidden;
+    out["merged"] = s.merged_fill && s.merged_line;
+    out["tree_empty"] = s.tree_empty;
+    std::vector<int> curves;
+    for (const ShapeEdge &e : s.edges) {
+      if (std::find(curves.begin(), curves.end(), e.curve) == curves.end()) {
+        curves.push_back(e.curve);
+      }
+    }
+    out["loops"] = int(curves.size());
+    out["edges"] = int(s.edges.size());
+    return out;
+  }, py::arg("id"), py::arg("shape"), py::arg("x"), py::arg("y"), py::arg("render") = false);
   /* A shape's outline as the evaluated drawing draws it: `steps` samples per curve segment (at least). */
   m.def(
       "layer_evaluated_outline",
@@ -5867,6 +5940,7 @@ PYBIND11_EMBEDDED_MODULE(_oanim, m)
           return false;
         }
         drawing_append_selected(layer.drawing, shape);
+        drawing_ensure_ids(layer.drawing);
         C.undo->mark_changed();
         return true;
       },

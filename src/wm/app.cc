@@ -46,6 +46,7 @@
 #include "ops/media_ops.hh"
 #include "ops/pose_library.hh"
 #include "ops/gradient_ops.hh"
+#include "ops/shape_tree_ops.hh"
 #include "ops/text_ops.hh"
 #include "ops/operator.hh"
 #include "ops/undo.hh"
@@ -156,6 +157,7 @@ int App::run(const LaunchOptions &options)
   media_operators_register();
   text_operators_register();
   gradient_operators_register();
+  shape_tree_operators_register();
 
   /* Python starts before any file opens: the Flash importers are Python.
    * Background mode needs no video, but SDL_GetBasePath works either way. */

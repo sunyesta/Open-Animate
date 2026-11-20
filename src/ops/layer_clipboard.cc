@@ -523,6 +523,9 @@ template<typename F> static void drawing_channels(VectorDrawing &drawing, F &&f)
       f(cp.handle_out_keys);
     }
   }
+  for (Shape &shape : drawing.shapes) {
+    f(shape.smoothing_keys);
+  }
 }
 
 /* Leaves in `drawing` only what drawing_duplicate_selected just copied, nothing selected. */

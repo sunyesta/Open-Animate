@@ -92,6 +92,10 @@ bool ui_panel_begin(const char *title, bool default_open = true);
 /* The same with what the header says instead of `title` (which stays the panel's name, so it keeps its
  * fold), in `color` (0: the usual). */
 bool ui_panel_begin(const char *title, const std::string &header, unsigned int color);
+/* The same with Blender's header menu: a down arrow at the header's right end opening popup `popup` (the caller
+ * draws it with ImGui::BeginPopup(popup) whether the panel is open or not). */
+bool ui_panel_begin_menu(const char *title, const std::string &header, const char *popup,
+                         const char *tooltip = nullptr);
 /* The same with a checkbox in its header, before the title (as Blender's Deform panel): `r_toggled` says it was
  * clicked this frame (`check` already flipped). The checkbox shows whether the panel is open or folded. */
 bool ui_panel_begin_check(const char *title, bool *check, bool *r_toggled, const char *tooltip = nullptr,
