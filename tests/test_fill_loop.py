@@ -48,6 +48,9 @@ assert ops.mesh.merge() == {'FINISHED'}
 assert layer.point_count == 4 and layer.curve_count == 1
 assert closed(layer), "a loop"
 assert len(layer.curve_points(0)) == 4, ("its last point its first, once", layer.curve_points(0))
+# Nothing was on it: it shows as a shape now, filled and outlined.
+assert layer.shape_count == 1 and layer.shape_style(0)["has_fill"] and layer.shape_style(0)["has_outline"], layer.shapes
+assert layer.shape_contains(0, (0.5, 0.5))
 # A line along it goes round with it, the segment into the merged end too: F fills that line.
 layer = scene()
 layer.add_curve(SQUARE + [(0.05, 0.05)])
@@ -66,6 +69,27 @@ bare_curve(layer, [(0.0, 0.0), (1.0, 0.0), (0.02, 0.0)])
 layer.select_points([0, 2])
 ops.mesh.merge()
 assert all(not c[1] for c in layer.shown()[1]), layer.shown()[1]
+
+# --- F on a line's two ends closes it: with nothing on it, a shape fills it ------------------------------------------
+layer = scene()
+oanim.wm.set_draw(fill_color=(0.3, 0.5, 0.7, 1.0))
+bare_curve(layer, SQUARE)
+ops.mesh.select_none()
+layer.select_points([0, 3])
+assert ops.mesh.make_segment() == {'FINISHED'}
+assert closed(layer) and layer.shape_count == 1, layer.shapes
+look = layer.shape_style(0)
+assert look["has_fill"] and look["has_outline"] and close(look["fill"], (0.3, 0.5, 0.7, 1.0)), look
+assert layer.shape_contains(0, (0.5, 0.5))
+ops.ed.undo()
+assert not closed(layer) and layer.shape_count == 0, "one undo step"
+# A line along it runs on round it and fills (as it always has), with no second shape.
+layer = scene()
+layer.add_curve(SQUARE)
+ops.mesh.select_none()
+layer.select_points([0, 3])
+assert ops.mesh.make_segment() == {'FINISHED'}
+assert closed(layer) and layer.shape_count == 1 and layer.shape_style(0)["has_fill"], layer.shapes
 
 # --- F on the loop: a new shape, filled and outlined in the draw style ------------------------------------------------
 layer = scene()

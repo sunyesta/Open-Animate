@@ -55,6 +55,8 @@ PENDING = [
     ('src/ops/vector_ops.cc', '                        filled += drawing_fill_loops(layer->drawing, style);', '                        (void)style;', 'F on a whole loop with no fill makes a shape of it', 'tests/test_fill_loop.py'),
     ('src/data/vector.cc', '    if (!curve.closed && curve.points.size() >= 4 && curve.points.back().point == curve.points.front().point) {', '    if (false && !curve.closed && curve.points.size() >= 4 && curve.points.back().point == curve.points.front().point) {', 'F closes a loop whose ends were merged before merging closed it', 'tests/test_fill_loop.py'),
     ('src/data/vector.cc', '      drawing.shapes[size_t(round)].has_fill = true;', '      round = -1;', 'F fills the line round a loop instead of adding a shape', 'tests/test_fill_loop.py'),
+    ('src/ops/vector_ops.cc', '                        drawing_fill_bare_loops(layer->drawing, style);', '                        (void)style;', 'F closing a curve with nothing on it fills it', 'tests/test_fill_loop.py'),
+    ('src/ops/vector_ops.cc', '                        drawing_fill_bare_loops(layer->drawing, C.wm ? C.wm->tool_settings.style : Style());', '                        (void)0;', "Merging a curve's ends into a loop with nothing on it fills it", 'tests/test_fill_loop.py'),
 ]
 
 def build(root):

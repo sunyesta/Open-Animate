@@ -1212,16 +1212,18 @@ void vector_operators_register()
                   "and joins their fills (mesh.join_fills)",
                   UNDO, editable_with_selection_poll, [](Context &C) {
                     int made = 0;
+                    const Style style = C.wm ? C.wm->tool_settings.style : Style();
                     for (Layer *layer : editable_layers(C)) {
                       const std::vector<int> picked = drawing_selected_points(layer->drawing);
                       if (picked.size() == 2 && drawing_make_segment(layer->drawing, picked[0], picked[1])) {
+                        /* A curve closed with nothing on it shows as a shape. */
+                        drawing_fill_bare_loops(layer->drawing, style);
                         made++;
                       }
                     }
                     if (!made) {
                       /* Whole loops picked: a fill of each that has none, then one fill of them all, as Blender's F
                        * makes a face of a loop. */
-                      const Style style = C.wm ? C.wm->tool_settings.style : Style();
                       int filled = 0;
                       for (Layer *layer : editable_layers(C)) {
                         filled += drawing_fill_loops(layer->drawing, style);
@@ -1436,7 +1438,12 @@ void vector_operators_register()
                                            std::find(added->second.begin(), added->second.end(), id) != added->second.end();
                         (image ? images : picked).push_back(p);
                       }
-                      merged += drawing_merge_points(layer->drawing, {picked, images});
+                      const int now = drawing_merge_points(layer->drawing, {picked, images});
+                      if (now > 0) {
+                        /* Ends merged into a loop with nothing on it: it shows as a shape. */
+                        drawing_fill_bare_loops(layer->drawing, C.wm ? C.wm->tool_settings.style : Style());
+                      }
+                      merged += now;
                     }
                     mirror_selection_end(C, mirrored);
                     if (merged == 0) {

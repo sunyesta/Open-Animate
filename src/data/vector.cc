@@ -2796,6 +2796,48 @@ int drawing_join_fills(VectorDrawing &drawing)
   return int(picked.size());
 }
 
+/* A new shape in `style` filling and outlining curve `c`, all the way round. */
+static void loop_shape_add(VectorDrawing &drawing, int c, const Style &style)
+{
+  Shape shape;
+  shape.name = "Shape";
+  shape.style = style;
+  shape.has_fill = true;
+  shape.has_outline = true;
+  for (int seg = 0; seg < drawing.curves[size_t(c)].segment_count(); seg++) {
+    shape.edges.push_back({c, seg});
+  }
+  drawing.shapes.push_back(std::move(shape));
+}
+
+int drawing_fill_bare_loops(VectorDrawing &drawing, const Style &style)
+{
+  std::vector<bool> on_shape(drawing.curves.size(), false);
+  for (const Shape &shape : drawing.shapes) {
+    for (const ShapeEdge &e : shape.edges) {
+      if (e.curve >= 0 && e.curve < int(on_shape.size())) {
+        on_shape[size_t(e.curve)] = true;
+      }
+    }
+  }
+  int filled = 0;
+  for (int c = 0; c < int(drawing.curves.size()); c++) {
+    const Curve &curve = drawing.curves[size_t(c)];
+    if (on_shape[size_t(c)] || !curve.closed || curve.points.size() < 3 ||
+        std::none_of(curve.points.begin(), curve.points.end(),
+                     [&](const CurvePoint &cp) { return drawing.points[size_t(cp.point)].selected; }))
+    {
+      continue;
+    }
+    loop_shape_add(drawing, c, style);
+    filled++;
+  }
+  if (filled > 0) {
+    drawing_ensure_ids(drawing);
+  }
+  return filled;
+}
+
 int drawing_fill_loops(VectorDrawing &drawing, const Style &style)
 {
   int filled = 0;
@@ -2846,15 +2888,7 @@ int drawing_fill_loops(VectorDrawing &drawing, const Style &style)
       filled++;
       continue;
     }
-    Shape shape;
-    shape.name = "Shape";
-    shape.style = style;
-    shape.has_fill = true;
-    shape.has_outline = true;
-    for (int seg = 0; seg < segments; seg++) {
-      shape.edges.push_back({c, seg});
-    }
-    drawing.shapes.push_back(std::move(shape));
+    loop_shape_add(drawing, c, style);
     filled++;
   }
   if (filled > 0) {

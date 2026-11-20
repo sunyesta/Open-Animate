@@ -683,6 +683,10 @@ int drawing_join_fills(VectorDrawing &drawing);
  * fills and outlines it. A curve whose last point is its first again (its ends merged) is closed first. Returns how
  * many loops it filled. */
 int drawing_fill_loops(VectorDrawing &drawing, const Style &style);
+/* After a curve is closed (F on its two ends, Merge): a loop through a selected point with no shape on it at all, which
+ * would show nothing, gets a new shape in `style` filling and outlining it, as Moho's auto-fill does. A line along it
+ * already runs on round it and is left as it is. Returns how many loops it filled. */
+int drawing_fill_bare_loops(VectorDrawing &drawing, const Style &style);
 /* Separate Fills: each shape all of whose points are selected and that has several runs of edges becomes
  * a shape per run, each with its look, the first keeping its place and number. Returns how many shapes
  * were made. */
