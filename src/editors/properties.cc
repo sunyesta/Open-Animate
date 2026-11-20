@@ -7166,39 +7166,13 @@ static const Layer *mask_step_outline_layer(const Document &doc, const MaskStep 
   return nullptr;
 }
 
-static constexpr ImU32 COL_MOD_SUBPANEL = IM_COL32(0x33, 0x33, 0x33, 255);
-
-/* A subpanel in a mask row's box, as Blender's modifier panels have: a bar with its fold arrow and its
- * name (the whole bar opens it). It starts folded, the bar showing `note` (what's set inside) after
- * the name. Returns whether it's open (kept per row while Open Animate runs). */
-static bool mask_subpanel(const char *id, const char *label, const std::string &note, float width)
-{
-  ImGui::PushID(id);
-  ImGuiStorage *storage = ImGui::GetStateStorage();
-  const ImGuiID key = ImGui::GetID("##open");
-  bool open = storage->GetBool(key, false);
-  const float h = ImGui::GetFrameHeight();
-  const ImVec2 at = ImGui::GetCursorScreenPos();
-  ImDrawList *dl = ImGui::GetWindowDrawList();
-  if (ImGui::InvisibleButton("##fold", ImVec2(width, h))) {
-    open = !open;
-    storage->SetBool(key, open);
-  }
-  dl->AddRectFilled(at, ImVec2(at.x + width, at.y + h),
-                    ImGui::IsItemHovered() ? IM_COL32(0x3a, 0x3a, 0x3a, 255) : COL_MOD_SUBPANEL, 3.0f);
-  ImGui::RenderArrow(dl, ImVec2(at.x + h * 0.25f, at.y + h * 0.22f), COL_MOD_ICON,
-                     open ? ImGuiDir_Down : ImGuiDir_Right, 0.7f);
-  const float pad = ImGui::GetStyle().FramePadding.y;
-  dl->AddText(ImVec2(at.x + h, at.y + pad), ImGui::GetColorU32(ImGuiCol_Text), label);
-  if (!open && !note.empty()) {
-    const float x = at.x + h + ImGui::CalcTextSize(label).x + 8.0f;
-    ImGui::PushClipRect(ImVec2(x, at.y), ImVec2(at.x + width - 4.0f, at.y + h), true);
-    dl->AddText(ImVec2(x, at.y + pad), ImGui::GetColorU32(ImGuiCol_TextDisabled), note.c_str());
-    ImGui::PopClipRect();
-  }
-  ImGui::PopID();
-  return open;
-}
+/* A list's rows as the Layers editor's (Blender's Outliner): on a dark ground, every other one a little lighter,
+ * the picked ones in its selection blues, square. */
+static constexpr ImU32 COL_LIST_BG = IM_COL32(0x28, 0x28, 0x28, 255);
+static constexpr ImU32 COL_LIST_ALT = IM_COL32(0x2b, 0x2b, 0x2b, 255);
+static constexpr ImU32 COL_LIST_ACTIVE = IM_COL32(0x33, 0x4d, 0x80, 255);
+static constexpr ImU32 COL_LIST_PICKED = IM_COL32(0x1d, 0x31, 0x4d, 255);
+static constexpr ImU32 COL_LIST_HOVER = IM_COL32(0xff, 0xff, 0xff, 14);
 
 /* The paint a mode lays on the mask, as a swatch: white (Add, and Start With Everything) or black
  * (Subtract, Nothing), outlined in `col`. */
@@ -7304,26 +7278,35 @@ static void mask_area_panel(Context &C, Layer &layer, const WindowManager::MaskA
   Document &doc = *C.document;
   const ImGuiStyle &style = ImGui::GetStyle();
   const float h = ImGui::GetFrameHeight();
-  const float column = ImGui::GetContentRegionAvail().x * 0.3f;
   const LayerMask &card = layer.masks[size_t(pick.card)];
-  ImGui::Separator();
-  ImGui::Spacing();
-  if (pick.step < 0) {
-    ImGui::Text("Current Masking Area:");
-    ImGui::SameLine();
-    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.24f, 1.0f), "%s", card.start_shown ? "Show All" : "Hide All");
+  /* A box as the other panels', named for the area picked. */
+  const MaskStep *picked = nullptr;
+  if (pick.step >= 0) {
+    const MaskStep &above = card.steps[size_t(pick.step)];
+    picked = pick.child >= 0 ? &above.children[size_t(pick.child)] : &above;
+  }
+  std::string name;
+  if (!picked || picked->whole) {
+    name = (picked ? picked->mode == MaskMode::Add : card.start_shown) ? "Show All" : "Hide All";
+  }
+  else {
+    name = picked->name;
+    if (!picked->group && name.empty()) {
+      for (const uint64_t l : picked->layers) {
+        const Layer *source = layer_find(doc, l);
+        name += (name.empty() ? "" : ", ") + (source ? source->name : std::string("(missing)"));
+      }
+    }
+  }
+  if (!ui_collapsing_header(("Masking Area: " + name + "###Masking Area").c_str(), true)) {
+    return;
+  }
+  if (!picked || picked->whole) {
     ImGui::TextDisabled("The whole canvas, so there's nothing to set here.");
     return;
   }
-  const MaskStep &top = card.steps[size_t(pick.step)];
-  const MaskStep st = pick.child >= 0 ? top.children[size_t(pick.child)] : top;
-  if (st.whole) {
-    ImGui::Text("Current Masking Area:");
-    ImGui::SameLine();
-    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.24f, 1.0f), "%s", st.mode == MaskMode::Add ? "Show All" : "Hide All");
-    ImGui::TextDisabled("The whole canvas, so there's nothing to set here.");
-    return;
-  }
+  const float column = ImGui::GetContentRegionAvail().x * 0.3f;
+  const MaskStep st = *picked;
   const std::string id = std::to_string(layer.id);
   OpArgs at{{"layer", id}, {"index", std::to_string(pick.card)}, {"step", std::to_string(pick.step)}};
   if (pick.child >= 0) {
@@ -7344,20 +7327,10 @@ static void mask_area_panel(Context &C, Layer &layer, const WindowManager::MaskA
       ui_driver_field_end(C, layer.id, path, -1, driven);
     }
   };
-  std::string name = st.name;
-  if (!st.group && name.empty()) {
-    for (const uint64_t l : st.layers) {
-      const Layer *source = layer_find(doc, l);
-      name += (name.empty() ? "" : ", ") + (source ? source->name : std::string("(missing)"));
-    }
-  }
-  ImGui::Text("Current Masking Area:");
-  ImGui::SameLine();
-  ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.24f, 1.0f), "%s", name.c_str());
   /* Held: the mask as far as this area. */
   if (!st.group || !st.children.empty()) {
     const float view_w = ImGui::CalcTextSize("View").x + style.FramePadding.x * 2.0f + h * 0.8f;
-    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - view_w));
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - view_w));
     const ImVec2 view_at = ImGui::GetCursorScreenPos();
     ImGui::Button("##area_view", ImVec2(view_w, 0));
     if (ImGui::IsItemActive()) {
@@ -7375,7 +7348,7 @@ static void mask_area_panel(Context &C, Layer &layer, const WindowManager::MaskA
     vdl->AddRect(ImVec2(c.x - s, c.y - s), ImVec2(c.x + s, c.y + s), IM_COL32(0x90, 0x90, 0x90, 255));
     vdl->AddText(ImVec2(c.x + s + 4.0f, view_at.y + style.FramePadding.y), ImGui::GetColorU32(ImGuiCol_Text), "View");
   }
-  ImGui::PushItemWidth(-4.0f);
+  ImGui::PushItemWidth(-FLT_MIN);
 
   /* Global: as a material's row, the browse button, then its name and user count, or Make Global. */
   if (pick.child < 0) {
@@ -7854,23 +7827,24 @@ static void mask_cards(Context &C, Layer &layer)
       return args;
     };
     ImGui::PushID(i);
-    ImDrawList *dl = ImGui::GetWindowDrawList();
-    dl->ChannelsSplit(2);
-    dl->ChannelsSetCurrent(1);
-    const ImVec2 box_min = ImGui::GetCursorScreenPos();
-    const float box_w = ImGui::GetContentRegionAvail().x;
-    ImGui::SetCursorScreenPos(ImVec2(box_min.x + 4.0f, box_min.y + 4.0f));
-    ImGui::BeginGroup();
-    const float inner_w = box_w - 8.0f;
-
-    /* Header: open arrow, its name (folded: the card in words), switches, menu, x, grip. */
-    if (ImGui::ArrowButtonEx("##expand", m.show_expanded ? ImGuiDir_Down : ImGuiDir_Right, ImVec2(h * 0.8f, h),
-                             ImGuiButtonFlags_None)) {
-      layer.masks[size_t(i)].show_expanded = !m.show_expanded;
+    /* A box as the other panels': its header the arrow, its name, switches, menu and x, and the grip, which drags
+     * the mask to another place in the stack. */
+    bool expanded = m.show_expanded;
+    ImRect room, last_rect;
+    const std::string card_name = mask_card_name(m, i);
+    if (!ui_card_begin("mask_card_" + std::to_string(i), card_name.c_str(), &expanded, &room, &last_rect,
+                       MASK_PAYLOAD, &i, sizeof(int), "Drag to reorder"))
+    {
+      ImGui::PopID();
+      continue;
     }
-    ImGui::SameLine(0, 2);
-    const float right_w = h * 4.0f + h * 0.8f + style.ItemSpacing.x * 3.0f + 8.0f;
-    const float title_w = std::max(40.0f, inner_w - (ImGui::GetCursorScreenPos().x - box_min.x) - right_w);
+    if (expanded != m.show_expanded) {
+      layer.masks[size_t(i)].show_expanded = expanded;
+    }
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImGui::SetCursorScreenPos(ImVec2(room.Min.x, room.Min.y + std::round((room.GetHeight() - h) * 0.5f)));
+    const float right_w = h * 4.0f + 15.0f;
+    const float title_w = std::max(40.0f, room.GetWidth() - right_w);
     /* Its name, edited in place as a modifier's is; empty, it reads "Mask 2" by its place. */
     const std::string phrase = size_t(i) < phrases.size() ? phrases[size_t(i)] : std::string();
     const std::string hint = "Mask " + std::to_string(i + 1);
@@ -7937,27 +7911,8 @@ static void mask_cards(Context &C, Layer &layer)
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
       ImGui::SetTooltip("Delete the mask");
     }
-    ImGui::SameLine(0, 2);
-    const ImVec2 grip = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton("##grip", ImVec2(h * 0.8f, h));
-    const bool grip_hovered = ImGui::IsItemHovered() || ImGui::IsItemActive();
-    for (int r = 0; r < 3; r++) {
-      for (int c = 0; c < 2; c++) {
-        dl->AddCircleFilled(ImVec2(grip.x + h * 0.25f + c * h * 0.3f, grip.y + h * 0.3f + r * h * 0.2f), 1.4f,
-                            grip_hovered ? COL_MOD_ICON : IM_COL32(0x90, 0x90, 0x90, 255));
-      }
-    }
-    if (grip_hovered) {
-      ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-      ImGui::SetTooltip("Drag to reorder");
-    }
-    if (ImGui::BeginDragDropSource()) {
-      ImGui::SetDragDropPayload(MASK_PAYLOAD, &i, sizeof(int));
-      ImGui::Text("%s", mask_card_name(m, i).c_str());
-      ImGui::EndDragDropSource();
-    }
+    ui_card_body();
+    const float inner_w = ImGui::GetContentRegionAvail().x;
 
     /* Body: Start With, the steps (each + or - Shape, its layers, Invert and Shape), + Shape and
      * - Shape, Affects with View, then Line Ends, as Blender's modifier panels group theirs. */
@@ -7965,12 +7920,11 @@ static void mask_cards(Context &C, Layer &layer)
       ImGui::SetScrollHereY(0.0f);
       scroll_to = 0;
     }
-    if (m.show_expanded) {
-      ImGui::Spacing();
+    if (expanded) {
       /* A row that's off in the viewport is kept, faded, until it's switched back on. */
       ImGui::PushStyleVar(ImGuiStyleVar_Alpha, style.Alpha * (m.enabled ? 1.0f : 0.5f));
       const float column = inner_w * 0.38f;
-      ImGui::PushItemWidth(-4.0f);
+      ImGui::PushItemWidth(-FLT_MIN);
       /* Affects: what of this layer the card masks. */
       static const char *const CUTS_NAMES[] = {"All", "Fills", "Lines"};
       static const char *const CUTS_TIPS[] = {
@@ -8018,17 +7972,8 @@ static void mask_cards(Context &C, Layer &layer)
       }
       /* Line Ends: whether this layer's lines end where they cross the edge rather than being sliced
        * by it, and how. A mask that affects only fills leaves the lines alone. */
-      ImGui::Spacing();
       const bool lines_cut = m.cuts != MaskCuts::Fills;
-      char ends_note[64] = "off";
-      if (!lines_cut) {
-        std::snprintf(ends_note, sizeof(ends_note), "not used (Affects: Fills)");
-      }
-      else if (m.end_lines) {
-        std::snprintf(ends_note, sizeof(ends_note), m.end_lines_flat ? "Flat" : "Brush, reach %.2f",
-                      double(m.line_reach));
-      }
-      if (mask_subpanel("line_ends", "Line Ends", ends_note, inner_w)) {
+      if (ui_subpanel_begin("mask_" + std::to_string(i) + "_line_ends", "Line Ends", false)) {
         ImGui::BeginDisabled(!lines_cut);
         modifier_row_label("", column);
         const std::string driven_end_path = "masks[" + std::to_string(i) + "].end_lines";
@@ -8105,8 +8050,8 @@ static void mask_cards(Context &C, Layer &layer)
           ui_pinned_row();
         }
         ImGui::EndDisabled();
+        ui_subpanel_end();
       }
-      ImGui::Spacing();
       /* Masking Areas: a stack, as the Layers editor's, painted from the bottom up on Show All or Hide All. */
       ImGui::Spacing();
       ImGui::AlignTextToFramePadding();
@@ -8199,7 +8144,9 @@ static void mask_cards(Context &C, Layer &layer)
           }
         }
       }
-      const float list_w = ImGui::GetContentRegionAvail().x - 4.0f;
+      const float list_w = ImGui::GetContentRegionAvail().x;
+      /* Each row's shade, every other one lighter, counted down the list. */
+      int stripe = 0;
       /* The rows as they're listed, for Shift's range. */
       std::vector<int> row_order;
       for (int si = int(m.steps.size()) - 1; si >= 0; si--) {
@@ -8230,8 +8177,21 @@ static void mask_cards(Context &C, Layer &layer)
         const int this_row = (si << 8) | (ci + 1);
         const bool active_here = area.card == i && area.step == si && area.child == ci;
         const bool picked_here = area.card == i && std::find(picked_rows.begin(), picked_rows.end(), this_row) != picked_rows.end();
+        /* Its shade, under its note too (a row that changes nothing says why under it). */
+        const char *note = ci < 0 ? notes[size_t(si)] : nullptr;
+        const float note_x = row_at.x + h * 2.1f;
+        const float note_w = std::max(h, row_at.x + list_w - note_x - 4.0f);
+        const float note_h = note ? ImGui::CalcTextSize(note, nullptr, false, note_w).y + style.FramePadding.y * 2.0f : 0.0f;
+        dl->AddRectFilled(row_at, row_at + ImVec2(list_w, h + note_h), stripe++ % 2 == 0 ? COL_LIST_BG : COL_LIST_ALT);
         ImGui::SetNextItemAllowOverlap();
-        const bool released = ImGui::Selectable("##row", picked_here, ImGuiSelectableFlags_AllowOverlap, ImVec2(list_w, h));
+        ImGui::PushStyleColor(ImGuiCol_Header, 0u);
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0u);
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, 0u);
+        const bool released = ImGui::Selectable("##row", picked_here,
+                                                int(ImGuiSelectableFlags_AllowOverlap) | int(ImGuiSelectableFlags_NoPadWithHalfSpacing),
+                                                ImVec2(list_w, h));
+        ImGui::PopStyleColor(3);
+        const bool row_hovered = ImGui::IsItemHovered();
         /* As the Layers editor's rows: Shift picks from the active one to here and it stays active, Ctrl adds or takes
          * out this one, and a plain press picks just this one. */
         if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
@@ -8322,8 +8282,10 @@ static void mask_cards(Context &C, Layer &layer)
           ImGui::EndDragDropTarget();
         }
         if (picked_here) {
-          dl->AddRectFilled(row_at, row_at + ImVec2(list_w, h),
-                            active_here ? IM_COL32(0x3a, 0x5a, 0x8c, 255) : IM_COL32(0x2e, 0x42, 0x60, 255), 3.0f);
+          dl->AddRectFilled(row_at, row_at + ImVec2(list_w, h), active_here ? COL_LIST_ACTIVE : COL_LIST_PICKED);
+        }
+        else if (row_hovered) {
+          dl->AddRectFilled(row_at, row_at + ImVec2(list_w, h), COL_LIST_HOVER);
         }
         const bool dimmed = ci < 0 && dims[size_t(si)];
         const ImU32 text_col = ImGui::GetColorU32(dimmed ? ImGuiCol_TextDisabled : ImGuiCol_Text);
@@ -8451,14 +8413,12 @@ static void mask_cards(Context &C, Layer &layer)
           }
           ImGui::EndPopup();
         }
-        ImGui::SetCursorScreenPos(ImVec2(row_at.x, row_at.y + h + 1.0f));
-        ImGui::Dummy(ImVec2(0.0f, 0.0f));
-        if (ci < 0 && notes[size_t(si)]) {
-          ImGui::SetCursorPosX(ImGui::GetCursorPosX() + h * 2.1f);
-          ImGui::PushTextWrapPos(0.0f);
-          ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.45f, 1.0f), "%s", notes[size_t(si)]);
-          ImGui::PopTextWrapPos();
+        if (note) {
+          dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(note_x, row_at.y + h + style.FramePadding.y),
+                      IM_COL32(0xff, 0xbf, 0x73, 255), note, nullptr, note_w);
         }
+        /* The next row right under it, as the Layers editor's. */
+        ImGui::SetCursorScreenPos(ImVec2(row_at.x, row_at.y + h + note_h));
         ImGui::PopID();
       };
       for (int si = int(m.steps.size()) - 1; si >= 0; si--) {
@@ -8473,12 +8433,22 @@ static void mask_cards(Context &C, Layer &layer)
       /* The base: Show All or Hide All, always at the bottom. */
       {
         const ImVec2 base_at = ImGui::GetCursorScreenPos();
-        if (ImGui::Selectable("##base", area.card == i && area.step == -1, 0, ImVec2(list_w, h))) {
+        dl->AddRectFilled(base_at, base_at + ImVec2(list_w, h), stripe++ % 2 == 0 ? COL_LIST_BG : COL_LIST_ALT);
+        ImGui::PushStyleColor(ImGuiCol_Header, 0u);
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0u);
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, 0u);
+        if (ImGui::Selectable("##base", area.card == i && area.step == -1, ImGuiSelectableFlags_NoPadWithHalfSpacing,
+                              ImVec2(list_w, h)))
+        {
           area = {layer.id, i, -1, -1};
           picked_rows.clear();
         }
+        ImGui::PopStyleColor(3);
         if (area.card == i && area.step == -1) {
-          dl->AddRectFilled(base_at, base_at + ImVec2(list_w, h), IM_COL32(0x3a, 0x5a, 0x8c, 255), 3.0f);
+          dl->AddRectFilled(base_at, base_at + ImVec2(list_w, h), COL_LIST_ACTIVE);
+        }
+        else if (ImGui::IsItemHovered()) {
+          dl->AddRectFilled(base_at, base_at + ImVec2(list_w, h), COL_LIST_HOVER);
         }
         if (ImGui::BeginDragDropTarget()) {
           ImGui::GetWindowDrawList()->AddLine(ImVec2(base_at.x, base_at.y), ImVec2(base_at.x + list_w, base_at.y),
@@ -8524,36 +8494,30 @@ static void mask_cards(Context &C, Layer &layer)
       ImGui::PopItemWidth();
       ImGui::PopStyleVar();
     }
-    ImGui::EndGroup();
-    const ImVec2 box_max(box_min.x + box_w, ImGui::GetItemRectMax().y + 6.0f);
-    dl->ChannelsSetCurrent(0);
-    /* Hovering the card outlines its layers in the viewport. */
-    const bool box_hovered = ImGui::IsMouseHoveringRect(box_min, box_max) && ImGui::IsWindowHovered(
-                                                                              ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    /* Hovering the card outlines its layers in the viewport, and rings the card. */
+    const bool box_hovered = ImGui::IsMouseHoveringRect(last_rect.Min, last_rect.Max) &&
+                             ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
     if (box_hovered && C.wm->mask_hover.empty()) {
       C.wm->mask_hover = mask_card_layers(m);
     }
-    dl->AddRectFilled(box_min, box_max, COL_MOD_BOX, 5.0f);
-    const bool pointed_at = box_hovered || summary_hover == i;
-    dl->AddRect(box_min, box_max, pointed_at ? IM_COL32(0xff, 0x9a, 0x3c, 160) : IM_COL32(0x2a, 0x2a, 0x2a, 255),
-                5.0f, 0, summary_hover == i ? 2.0f : 1.0f);
-    dl->ChannelsMerge();
-    ImGui::SetCursorScreenPos(box_min);
-    ImGui::Dummy(ImVec2(box_w, box_max.y - box_min.y));
-    /* A whole mask dragged, not one of its areas. */
+    if (box_hovered || summary_hover == i) {
+      ui_card_outline(IM_COL32(0xff, 0x9a, 0x3c, 160));
+    }
+    /* A whole mask dragged, not one of its areas: above the card's middle puts it before, below after. */
     const ImGuiPayload *dragged = ImGui::GetDragDropPayload();
-    if (dragged && dragged->IsDataType(MASK_PAYLOAD) && ImGui::BeginDragDropTarget()) {
-      const bool upper = ImGui::GetIO().MousePos.y < (box_min.y + box_max.y) * 0.5f;
-      const float line_y = upper ? box_min.y - 3.0f : box_max.y + 3.0f;
-      ImGui::GetWindowDrawList()->AddLine(ImVec2(box_min.x, line_y), ImVec2(box_max.x, line_y), UI_DROP_LINE_COLOR,
-                                          2.0f);
+    if (dragged && dragged->IsDataType(MASK_PAYLOAD) &&
+        ImGui::BeginDragDropTargetCustom(last_rect, ImGui::GetID("##card_drop")))
+    {
+      const bool upper = ImGui::GetIO().MousePos.y < last_rect.GetCenter().y;
+      const float line_y = upper ? last_rect.Min.y - 3.0f : last_rect.Max.y + 3.0f;
+      ImGui::GetWindowDrawList()->AddLine(ImVec2(last_rect.Min.x, line_y), ImVec2(last_rect.Max.x, line_y),
+                                          UI_DROP_LINE_COLOR, 2.0f);
       if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload(MASK_PAYLOAD, ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
         drag_from = *static_cast<const int *>(payload->Data);
         drag_to = upper ? i : i + 1;
       }
       ImGui::EndDragDropTarget();
     }
-    ImGui::Spacing();
     ImGui::PopID();
   }
   if (!area_drop.empty()) {

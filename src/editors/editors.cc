@@ -184,6 +184,9 @@ struct BoxScope {
   float region_before = 0.0f, work_before = 0.0f;
   ImDrawListSplitter splitter;
   ImDrawList *dl = nullptr;
+  /* A ring round the open box (ui_card_outline), 0 for none; and where a card's body starts. */
+  unsigned int outline = 0;
+  ImVec2 card_body;
 };
 
 BoxScope g_box;
@@ -254,6 +257,9 @@ static void box_close()
   /* The outline over the bands at the edges, a pixel wide. */
   b.dl->AddRect(rect.Min + ImVec2(0.5f, 0.5f), rect.Max - ImVec2(0.5f, 0.5f), BOX_OUTLINE,
                 ImGui::GetStyle().FrameRounding, 0, 1.0f);
+  if (b.outline != 0) {
+    b.dl->AddRect(rect.Min, rect.Max, b.outline, ImGui::GetStyle().FrameRounding, 0, 1.5f);
+  }
   b.dl = nullptr;
   const float height = rect.GetHeight() + pad;
   b.heights[b.id] = height;
@@ -338,6 +344,7 @@ static bool box_open(const std::string &id)
   b.open = true;
   b.id = id;
   b.top = y;
+  b.outline = 0;
   /* Measure this box's content alone (box_close puts the window's lowest back). */
   ImGuiWindow *window = ImGui::GetCurrentWindow();
   b.max_before = window->DC.CursorMaxPos.y;
@@ -386,6 +393,37 @@ static float box_grip_width()
   return box_header_margin() + s * 11.0f;
 }
 
+static bool panel_filtered_out(const char *title, const std::string &header);
+
+/* A box header's grip at its right: 4 x 2 dots, as Blender's, its last dot the margin from the right edge; dragged,
+ * `payload` with `data` (shown as `label`). */
+static void box_grip(const ImRect &h, const std::string &id, const char *payload, const void *data, size_t size,
+                     const char *label, const char *tooltip)
+{
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const float s = box_grip_dot(), step = s * 3.0f;
+  const ImVec2 grip_min(h.Max.x - box_grip_width(), h.Min.y);
+  ImGui::SetCursorScreenPos(grip_min);
+  ImGui::InvisibleButton((id + "##grip").c_str(), ImVec2(h.Max.x - grip_min.x, h.GetHeight()));
+  const bool hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+  const float cy = h.GetCenter().y;
+  const float first = h.Max.x - box_header_margin() - s - step * 3.0f;
+  for (int col = 0; col < 4; col++) {
+    for (int row = 0; row < 2; row++) {
+      dl->AddCircleFilled(ImVec2(first + step * float(col), cy + (row == 0 ? -step : step) * 0.5f), s,
+                          hot ? ImGui::GetColorU32(ImGuiCol_Text) : BOX_GRIP);
+    }
+  }
+  if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) && !ImGui::IsItemActive()) {
+    ImGui::SetTooltip("%s", tooltip);
+  }
+  if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+    ImGui::SetDragDropPayload(payload, data, size);
+    ImGui::TextUnformatted(label);
+    ImGui::EndDragDropSource();
+  }
+}
+
 /* The header of a box, drawn here rather than by ImGui's collapsing header (which runs past the box on
  * both sides and shades on hover; Blender's doesn't): the arrow and title on the box's shade, the grip at
  * its right, the same margin each side. Clicking anywhere but the grip folds it. */
@@ -419,35 +457,60 @@ static bool box_header(const char *label, const std::string &id)
   const ImVec2 text_at(box_title_x(h), h.Min.y + (height - text_size.y) * 0.5f);
   ImGui::RenderTextClipped(text_at, ImVec2(h.Max.x - box_grip_width(), h.Max.y), label, end, &text_size);
   const ImVec2 after = ImGui::GetCursorScreenPos();
-  /* The grip: 4 x 2 dots, as Blender's, its last dot the margin from the right edge. */
-  const float s = box_grip_dot(), step = s * 3.0f;
-  const ImVec2 grip_min(h.Max.x - box_grip_width(), h.Min.y);
-  ImGui::SetCursorScreenPos(grip_min);
-  ImGui::InvisibleButton((id + "##grip").c_str(), ImVec2(h.Max.x - grip_min.x, h.GetHeight()));
-  const bool hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
-  const float cy = h.GetCenter().y;
-  const float first = h.Max.x - margin - s - step * 3.0f;
-  for (int col = 0; col < 4; col++) {
-    for (int row = 0; row < 2; row++) {
-      dl->AddCircleFilled(ImVec2(first + step * float(col), cy + (row == 0 ? -step : step) * 0.5f), s,
-                          hot ? ImGui::GetColorU32(ImGuiCol_Text) : BOX_GRIP);
-    }
+  std::string shown = label;
+  if (const size_t hash = shown.find("###"); hash != std::string::npos) {
+    shown = shown.substr(0, hash);
   }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) && !ImGui::IsItemActive()) {
-    ImGui::SetTooltip("Drag to move the panel");
-  }
-  if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-    ImGui::SetDragDropPayload(BOX_PAYLOAD, id.data(), id.size());
-    std::string shown = label;
-    if (const size_t hash = shown.find("###"); hash != std::string::npos) {
-      shown = shown.substr(0, hash);
-    }
-    ImGui::TextUnformatted(shown.c_str());
-    ImGui::EndDragDropSource();
-  }
+  box_grip(h, id, BOX_PAYLOAD, id.data(), id.size(), shown.c_str(), "Drag to move the panel");
   /* The rows start the margin under the header (the line's spacing and a table row's padding make the rest). */
   ImGui::SetCursorScreenPos(after + ImVec2(0.0f, box_body_extra()));
   return open;
+}
+
+bool ui_card_begin(const std::string &id, const char *title, bool *open, ImRect *r_room, ImRect *r_last,
+                   const char *payload, const void *data, size_t size, const char *grip_tooltip)
+{
+  if (!g_box.active || panel_filtered_out(title, std::string())) {
+    return false;
+  }
+  box_open(id);
+  const float height = box_header_height(), margin = box_header_margin();
+  const ImVec2 top(g_box.x0, ImGui::GetCursorScreenPos().y);
+  g_box.header = ImRect(top, ImVec2(g_box.x1, top.y + height));
+  const ImRect h = g_box.header;
+  /* The whole box as tall as it was last frame (its header alone the first time). */
+  float last_h = height;
+  if (const auto now = g_box_last_heights[g_box.scope].find(id); now != g_box_last_heights[g_box.scope].end()) {
+    last_h = std::max(height, now->second - ImGui::GetStyle().ItemSpacing.y);
+  }
+  *r_last = ImRect(h.Min, ImVec2(h.Max.x, h.Min.y + last_h));
+  ImGui::SetCursorScreenPos(top);
+  ImGui::SetNextItemAllowOverlap();
+  if (ImGui::InvisibleButton((id + "##fold").c_str(), ImVec2(h.GetWidth() - box_grip_width(), height))) {
+    *open = !*open;
+  }
+  g_box.card_body = ImGui::GetCursorScreenPos() + ImVec2(0.0f, box_body_extra());
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const float arrow = std::round(ui_space(12.0f));
+  ui_icon(dl, *open ? "arrow_down" : "arrow_right",
+          ImVec2(h.Min.x + margin - std::round(arrow * 0.12f), h.Min.y + std::round((height - arrow) * 0.5f)), arrow,
+          ImGui::GetColorU32(ImGuiCol_Text));
+  box_grip(h, id, payload, data, size, title, grip_tooltip);
+  *r_room = ImRect(ImVec2(box_title_x(h), h.Min.y), ImVec2(h.Max.x - box_grip_width(), h.Max.y));
+  ImGui::SetCursorScreenPos(r_room->Min);
+  return true;
+}
+
+void ui_card_body()
+{
+  ImGui::SetCursorScreenPos(g_box.card_body);
+}
+
+void ui_card_outline(unsigned int color)
+{
+  if (g_box.open) {
+    g_box.outline = color;
+  }
 }
 
 static std::string g_panel_filter;

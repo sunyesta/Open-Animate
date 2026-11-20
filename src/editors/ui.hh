@@ -12,6 +12,8 @@
 
 #include "rna/rna.hh"
 
+struct ImRect;
+
 namespace oanim {
 
 struct Context;
@@ -118,6 +120,16 @@ bool ui_collapsing_header(const char *label, bool default_open);
  * Shape": Document::ui_panel_order, once one was dragged). A box runs to the next one. */
 void ui_boxes_begin(const std::string &scope);
 void ui_boxes_end();
+/* A box as a panel's for one item of a list its caller orders (a mask card), between ui_boxes_begin and _end: its
+ * header has the arrow, folding `*open`, and the grip, which drags `payload` (`data`, `size` bytes; `title` while
+ * dragged); the room between them, `r_room`, is for the caller's own widgets (the cursor is left at its start).
+ * `r_last` is the box as tall as it was last frame. Then ui_card_body() and, while open, the body; the box runs to
+ * the next one. False (nothing drawn) outside the boxes or left out by the search. */
+bool ui_card_begin(const std::string &id, const char *title, bool *open, ImRect *r_room, ImRect *r_last,
+                   const char *payload, const void *data, size_t size, const char *grip_tooltip);
+void ui_card_body();
+/* A ring round the open card in `color` (a hovered card's). */
+void ui_card_outline(unsigned int color);
 /* Panels shown from here on: only those whose title has `text` in it (any case), as Blender's Properties search
  * keeps; empty shows every one. Properties sets it from its search box around its boxes. */
 void ui_panel_filter(const std::string &text);
