@@ -35,28 +35,6 @@ EXE = os.path.join("build", "bin", "RelWithDebInfo", "OpenAnimate.exe")
 
 # (file, old, new, name, test)
 PENDING = [
-    ('src/anim/dynamics.cc', '  const int upto = std::min(frame, std::max(start, doc.frame_end));', '  const int upto = frame;', 'Dynamics stop at the end frame', 'tests/test_dynamics_end_frame.py'),
-    ('src/data/grid.cc', '      cp.handles_set = true;', '      cp.handles_set = false;', "The Shape tool's grid lines have handles of no length", 'tests/test_grid.py'),
-    ('src/data/vector.cc', '    if (w > 0.0f) {', '    if (false && w > 0.0f) {', "A grid node's short handle reads as reaching a third along", 'tests/test_mesh_points.py'),
-    ('src/anim/animation.cc', '      keyable[i] = inside.contains(flat[i]);', '      keyable[i] = true;', "In an action, layers outside its bone layer aren't auto-keyed", 'tests/test_action_outside_keys.py'),
-    ('src/ops/anim_ops.cc', '      return l == &doc.camera || l == &doc.simulation || !layer_keys_editable(doc, l->id);', '      return l == nullptr;', "In an action, the timeline leaves out layers outside its bone layer", 'tests/test_action_outside_keys.py'),
-    ('src/ops/anim_ops.cc', '!layer->locked && layer_keys_editable(doc, layer->id)) {', '!layer->locked) {', "In an action, I and Alt I key nothing outside its bone layer", 'tests/test_action_outside_keys.py'),
-    ('src/anim/reference.cc', '          delta = p.pos - again.points[i].pos;', '          delta = p.pos - rs.built_pos[i];', "A reference's points moved with its original's move once", 'tests/test_reference_move_once.py'),
-    ('src/anim/reference.cc', '          if (const VectorDrawing &again = rebuilt(); same_curves(again.curves, d.curves)) {', '          if (const VectorDrawing &again = rebuilt(); false && same_curves(again.curves, d.curves)) {', "A reference's handles turned with its original's turn once", 'tests/test_reference_move_once.py'),
-    ('src/editors/viewport.cc', "    return kind != 'E' && std::any_of(layers.begin(), layers.end(),", "    return false && kind != 'E' && std::any_of(layers.begin(), layers.end(),", "A locked reference moved with its original isn't reported locked", 'tests/test_reference_move_once.py'),
-    ('src/ops/operator.cc', '    if (guard && !gradients.items.empty()) {', '    if (false && guard && !gradients.items.empty()) {', "An operator can't add or take away a gradient's points", 'tests/test_gradient_layer.py'),
-    ('src/ops/undo.cc', '    gradients_check(doc, was);', '    (void)was;', "A script's change to a gradient's points is put back at the next undo step", 'tests/test_gradient_layer.py'),
-    ('src/ops/gradient_ops.cc', '      layer.gradient.stops = stops_merged(had->gradient.stops, layer.gradient.stops);', '      layer.gradient.stops = had->gradient.stops;', "Putting a gradient's points back keeps the rest of the step's edit", 'tests/test_gradient_layer.py'),
-    ('src/data/gradient.cc', '  piece(f.path.back(), end_dir, inf, f.total, 1.0f);', '  (void)end_dir;', "A gradient's path carries on past its end", 'tests/test_gradient_layer.py'),
-    ('src/data/gradient.cc', '  const float q = (2.0f * m - 1.0f) / (1.0f - m);', '  const float q = 0.0f * m;', "A span's tick is where its colours meet half way", 'tests/test_gradient_layer.py'),
-    ('src/data/gradient.cc', 'slopes[k][i] = a * b <= 0.0f ? 0.0f :', 'slopes[k][i] = true ? 0.0f :', 'A Smooth gradient has no kink at a stop', 'tests/test_gradient_layer.py'),
-    ('src/data/vector.cc', '      if (last > 0 && curve.points[size_t(last)].point == curve.points[0].point && (curve.closed || kept_n >= 4)) {', '      if (last > 0 && curve.points[size_t(last)].point == curve.points[0].point && (curve.closed || false && kept_n >= 4)) {', "Merging an open curve's two ends closes it", 'tests/test_fill_loop.py'),
-    ('src/data/vector.cc', '  if (!closed_before && !closed_after) {', '  if (!closed_before) {', 'A line along a curve whose ends merged goes round with it', 'tests/test_fill_loop.py'),
-    ('src/ops/vector_ops.cc', '                        filled += drawing_fill_loops(layer->drawing, style);', '                        (void)style;', 'F on a whole loop with no fill makes a shape of it', 'tests/test_fill_loop.py'),
-    ('src/data/vector.cc', '    if (!curve.closed && curve.points.size() >= 4 && curve.points.back().point == curve.points.front().point) {', '    if (false && !curve.closed && curve.points.size() >= 4 && curve.points.back().point == curve.points.front().point) {', 'F closes a loop whose ends were merged before merging closed it', 'tests/test_fill_loop.py'),
-    ('src/data/vector.cc', '      drawing.shapes[size_t(round)].has_fill = true;', '      round = -1;', 'F fills the line round a loop instead of adding a shape', 'tests/test_fill_loop.py'),
-    ('src/ops/vector_ops.cc', '                        drawing_fill_bare_loops(layer->drawing, style);', '                        (void)style;', 'F closing a curve with nothing on it fills it', 'tests/test_fill_loop.py'),
-    ('src/ops/vector_ops.cc', '                        drawing_fill_bare_loops(layer->drawing, C.wm ? C.wm->tool_settings.style : Style());', '                        (void)0;', "Merging a curve's ends into a loop with nothing on it fills it", 'tests/test_fill_loop.py'),
 ]
 
 def build(root):
