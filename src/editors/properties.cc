@@ -121,21 +121,22 @@ static void document_tab(Context &C)
     }
     ui_panel_end();
   }
-  if (ui_panel_begin("Quality")) {
+  /* Quality, Frame Range and Simulation start folded: set once, rarely looked at again. */
+  if (ui_panel_begin("Quality", false)) {
     ui_prop(C, ptr, "viewport_quality", path);
     ui_prop(C, ptr, "render_quality", path);
     ui_prop(C, ptr, "viewport_samples", path);
     ui_prop(C, ptr, "render_samples", path);
     ui_panel_end();
   }
-  if (ui_panel_begin("Frame Range")) {
+  if (ui_panel_begin("Frame Range", false)) {
     ui_prop(C, ptr, "frame_start", path);
     ui_prop(C, ptr, "frame_end", path);
     ui_prop(C, ptr, "frame_current", path);
     ui_panel_end();
   }
   /* Bone dynamics for the whole document, as Moho's. */
-  if (ui_panel_begin("Simulation")) {
+  if (ui_panel_begin("Simulation", false)) {
     /* Each animatable, with its key button. */
     for (const char *setting : {"gravity", "wind", "wind_direction", "wind_gusts", "wind_gust_speed", "wind_turbulence"}) {
       key_next(C, document_simulation(*C.document), {setting});
@@ -8758,7 +8759,6 @@ static void layer_tab(Context &C)
   /* On a reference, a channel it took over from its original shows teal. */
   const auto own = [&](const char *name) { return layer->is_reference() && layer->reference.own_channels.count(name) > 0; };
   const auto channel_args = [](const char *name) { return std::vector<OpArgs>{{{"kind", "CHANNEL"}, {"path", name}}}; };
-  layer_collections_chips_panel(C, *layer);
   if (ui_panel_begin("Transform")) {
     bool on = changed_begin(own("position"));
     key_next(C, *layer, {"position"});
@@ -8788,6 +8788,7 @@ static void layer_tab(Context &C)
   if (const Layer *armature = layer->is_bone_layer() ? nullptr : layer_armature(doc, layer->id)) {
     binding_panel(C, *layer, *layer_find(doc, armature->id));
   }
+  layer_collections_chips_panel(C, *layer);
 }
 
 /* The Media tab's picture of the current frame: a small texture per Media layer, refilled when the
