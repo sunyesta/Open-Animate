@@ -72,6 +72,9 @@ remove them when the checks are done.
   `/* */` comments that explain why. Compile clean at `/W4`.
 - Moho decides data-model behaviour (layers, channels, actions, action bones, interpolation, frame 0
   as the setup pose); Blender decides interaction (tools, keymaps, editors, UI).
+- Panel spacing comes from rules, not numbers picked at each widget (Blender's: `ui_row_label` right-aligns labels,
+  `ui_group_gap` between groups of rows, `ui_checks_row` and `ui_checkbox` for Blender-sized checkboxes, `UI_JOIN_GAP`
+  between fields that belong together; `src/editors/ui.hh`). The Shape and Material panels use them so far.
 - Use ImGui wherever it can do the job; write custom widgets on top of it only where Blender's look
   or behaviour differs.
 - ImGui gotcha: in a docked window `SetCursorPos()` is measured from above the tab bar and gets

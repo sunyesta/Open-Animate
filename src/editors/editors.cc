@@ -803,6 +803,47 @@ static void ui_label(const char *label)
   ImGui::SetNextItemWidth(g_key_next.pending ? -ui_key_button_width() : -FLT_MIN);
 }
 
+float ui_space(float pixels)
+{
+  return pixels * ImGui::GetStyle().FontScaleDpi;
+}
+
+void ui_row_label(const char *label)
+{
+  ui_label(label);
+}
+
+void ui_group_gap()
+{
+  /* An empty row: its height counts its cell padding, which the rows around it add again. */
+  ImGui::TableNextRow(ImGuiTableRowFlags_None,
+                      std::max(0.0f, ui_space(UI_GROUP_GAP) - ImGui::GetStyle().CellPadding.y * 2.0f));
+}
+
+void ui_checks_row()
+{
+  ImGui::TableNextRow(ImGuiTableRowFlags_None, ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2.0f);
+  ImGui::TableSetColumnIndex(1);
+}
+
+bool ui_checkbox(const char *label, bool *value)
+{
+  /* Blender's box is 14 of a 20 pixel row (widget_optionbut), its text about 3 after it. */
+  const float font = ImGui::GetFontSize();
+  const float box = std::round(ImGui::GetFrameHeight() * 14.0f / 20.0f);
+  const float drop = std::floor((ImGui::GetFrameHeight() - box) * 0.5f);
+  const ImVec2 at = ImGui::GetCursorScreenPos();
+  ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + drop));
+  /* A frame smaller than the font: ImGui sizes the box by the frame and keeps the text on its line. */
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, (box - font) * 0.5f));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(ui_space(3.0f), ImGui::GetStyle().ItemInnerSpacing.y));
+  const bool changed = ImGui::Checkbox(label, value);
+  ImGui::PopStyleVar(2);
+  /* SameLine goes back to the row's top, not the box's, so the next box drops the same. */
+  ImGui::GetCurrentWindow()->DC.CursorPosPrevLine.y = at.y;
+  return changed;
+}
+
 void ui_row(const char *label, const std::function<void(float width)> &body)
 {
   ui_label(label);

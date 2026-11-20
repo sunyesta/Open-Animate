@@ -10291,11 +10291,7 @@ static void material_row(Context &C, Shape &shape, bool reference)
   Document &doc = *C.document;
   const float h = ImGui::GetFrameHeight();
   Material *material = material_find(doc, shape.material);
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted("Material");
-  ImGui::TableSetColumnIndex(1);
+  ui_row_label("Material");
   /* A copy's looks are its own changes on its original's: materials are set on the original. */
   ImGui::BeginDisabled(reference);
 
@@ -10480,12 +10476,7 @@ static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, 
   };
 
   if (ui_panel_begin("Shape", shape_header, 0u)) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Name");
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-1);
+    ui_row_label("Name");
     /* A reference's shapes are named by its original. */
     ImGui::BeginDisabled(reference);
     ImGui::InputText("##name", &shape.name);
@@ -10507,18 +10498,18 @@ static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, 
       ImGui::SetTooltip("%s", LOCKED_TIP);
     }
 
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(1);
+    ui_group_gap();
+    ui_checks_row();
     bool on = changed_begin(look && (look->has_fill_set || look->has_outline_set));
     const std::string shape_path = "shapes[" + std::to_string(shape.id) + "].";
     int driven = ui_driver_field_begin(C, owner_layer.id, shape_path + "has_fill", -1);
-    if (ImGui::Checkbox("Fill", &shape.has_fill)) {
+    if (ui_checkbox("Fill", &shape.has_fill)) {
       C.undo->push("Shape Fill", doc);
     }
     ui_driver_field_end(C, owner_layer.id, shape_path + "has_fill", -1, driven);
-    ImGui::SameLine();
+    ImGui::SameLine(0.0f, ui_space(UI_CHECK_GAP));
     driven = ui_driver_field_begin(C, owner_layer.id, shape_path + "has_outline", -1);
-    if (ImGui::Checkbox("Outline", &shape.has_outline)) {
+    if (ui_checkbox("Outline", &shape.has_outline)) {
       C.undo->push("Shape Outline", doc);
     }
     ui_driver_field_end(C, owner_layer.id, shape_path + "has_outline", -1, driven);
@@ -10534,10 +10525,7 @@ static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, 
     }
     /* A shape of several loops: how they fill together (Join Fills sets Even-Odd). */
     if (shape_runs(drawing, shape).size() > 1 || shape.fill_rule != FillRule::Loops) {
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      ImGui::TextUnformatted("Fill Rule");
-      ImGui::TableSetColumnIndex(1);
+      ui_row_label("Fill Rule");
       static const char *const RULES[] = {"Each Loop", "Even-Odd", "Nonzero"};
       static const char *const TIPS[] = {"Each loop filled on its own, holes filled over",
                                          "A loop inside another is a hole, whichever way it was drawn",
@@ -10581,6 +10569,7 @@ static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, 
   }
   if (ui_panel_begin("Material", header, 0u)) {
     material_row(C, shape, reference);
+    ui_group_gap();
 
     /* A colour changed on a copy has a revert button beside it. */
     bool revert = false;
@@ -10628,12 +10617,9 @@ static void shape_panel(Context &C, Layer &owner_layer, VectorDrawing &drawing, 
         operator_call(C, "layer.reference_revert", args);
       }
     }
+    ui_group_gap();
     on = changed_begin(look && look->width_set);
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Line Width");
-    ImGui::TableSetColumnIndex(1);
+    ui_row_label("Line Width");
     /* Changed on a copy: a revert button beside it, as beside a changed colour; the eyedropper last. */
     ImGui::SetNextItemWidth(-(ui_revert_button_space() * (on ? 2.0f : 1.0f)));
     const float units_to_pixels = float(doc.height) * 0.5f;

@@ -1467,11 +1467,7 @@ void brush_window_draw(Context &C)
 
 bool brush_row(Context &C, const BrushSettings &brush, const Style &style, const char *revert_tip)
 {
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted("Brush");
-  ImGui::TableSetColumnIndex(1);
+  ui_row_label("Brush");
   const float revert_w = revert_tip ? ui_revert_button_space() : 0.0f;
   const float preview_h = 48.0f, button_w = ImGui::GetFrameHeight(), gap = ImGui::GetStyle().ItemInnerSpacing.x;
   /* Blender's preset button (three sliders), as tall as the preview: it opens Brush Settings. */

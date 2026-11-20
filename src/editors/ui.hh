@@ -171,6 +171,24 @@ float ui_key_button_width();
 /* A row drawn by hand: its label, then `body` (given the width it has, the key button's room left
  * out), then the key button if ui_key_next asked for one. */
 void ui_row(const char *label, const std::function<void(float width)> &body);
+/* Panel layout. Spacing is set by these rules rather than picked at each widget, so panels keep one rhythm
+ * (pixels at 100%, times the interface scale): rows of a group sit the table's cell padding apart (4),
+ * groups of rows UI_GROUP_GAP apart, fields that belong together (X and Y) UI_JOIN_GAP apart, checkboxes on
+ * one row UI_CHECK_GAP apart. Labels are right-aligned against their fields, as Blender's. */
+inline constexpr float UI_GROUP_GAP = 10.0f;
+inline constexpr float UI_JOIN_GAP = 2.0f;
+inline constexpr float UI_CHECK_GAP = 16.0f;
+/* A spacing rule at the interface scale. */
+float ui_space(float pixels);
+/* A new row with its label: right-aligned in the label column, level with the first line of the field. */
+void ui_row_label(const char *label);
+/* The space between two groups of rows. */
+void ui_group_gap();
+/* A new row of checkboxes (ui_checkbox), as tall as a row of fields, in the value column. */
+void ui_checks_row();
+/* A checkbox the size of Blender's (14 of a 20 pixel row), centred on the row; several go on one row
+ * UI_CHECK_GAP apart (SameLine). */
+bool ui_checkbox(const char *label, bool *value);
 /* A Bool property as Blender's checkbox, its name to the right of the box, in the value column;
  * `heading` in the label column names the group (empty for the rest of it): "Audio  [x] Scrubbing". */
 void ui_prop_check(Context &C, const rna::PointerRNA &ptr, const char *identifier, const char *python_path,
